@@ -14,10 +14,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/alphauslabs/luna/slog"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/flowerinthenight/surge/slog"
 )
 
 //go:generate bpf2go -tags linux bpf bpf.c -- -I./headers
