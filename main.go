@@ -17,7 +17,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
-	"github.com/flowerinthenight/surge/slog"
+	"github.com/flowerinthenight/vortex-agent/slog"
 )
 
 //go:generate bpf2go -tags linux bpf bpf.c -- -I./headers

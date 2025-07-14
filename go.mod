@@ -1,4 +1,4 @@
-module github.com/flowerinthenight/surge
+module github.com/flowerinthenight/vortex-agent
 
 go 1.24.5
 

@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty --match=v* 2> /dev/null || cat $(CURDIR)/.version 2> /dev/null || echo v0)
 BLDVER = module:$(MODULE),version:$(VERSION),build:$(CIRCLE_BUILD_NUM)
 BASE = $(CURDIR)
-MODULE = surge
+MODULE = vortex-agent
 
 .PHONY: all $(MODULE) install
 all: $(MODULE)
