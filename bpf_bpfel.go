@@ -8,19 +8,9 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
-	"structs"
 
 	"github.com/cilium/ebpf"
 )
-
-type bpfEvent struct {
-	_     structs.HostLayout
-	Comm  [16]uint8
-	Sport uint16
-	Dport uint16
-	Saddr uint32
-	Daddr uint32
-}
 
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {
@@ -64,14 +54,14 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
-	TcpConnect *ebpf.ProgramSpec `ebpf:"tcp_connect"`
+	Flat *ebpf.ProgramSpec `ebpf:"flat"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	Events *ebpf.MapSpec `ebpf:"events"`
+	Pipe *ebpf.MapSpec `ebpf:"pipe"`
 }
 
 // bpfVariableSpecs contains global variables before they are loaded into the kernel.
@@ -100,12 +90,12 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	Events *ebpf.Map `ebpf:"events"`
+	Pipe *ebpf.Map `ebpf:"pipe"`
 }
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
-		m.Events,
+		m.Pipe,
 	)
 }
 
@@ -119,12 +109,12 @@ type bpfVariables struct {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
-	TcpConnect *ebpf.Program `ebpf:"tcp_connect"`
+	Flat *ebpf.Program `ebpf:"flat"`
 }
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
-		p.TcpConnect,
+		p.Flat,
 	)
 }
 

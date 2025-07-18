@@ -1,6 +1,7 @@
 CompileFlags:
   Add:
-  - -I./headers
+  - -I./vmlinux.h/include
+  - -I./libbpf/src
   CompilationDatabase: "cmake"
 Diagnostics:
   UnusedIncludes: None
