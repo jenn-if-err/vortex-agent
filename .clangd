@@ -1,6 +1,6 @@
 CompileFlags:
   Add:
-  - -I./vmlinux.h/include
+  - -I./vmlinux.h/include/x86_64
   - -I./libbpf/src
   CompilationDatabase: "cmake"
 Diagnostics:

@@ -1,22 +1,19 @@
 //go:build ignore
 
-#include "vmlinux.h/include/x86_64/vmlinux.h"
-#include "libbpf/src/bpf_endian.h"
-#include "libbpf/src/bpf_helpers.h"
+#include "vmlinux.h"
+#include "bpf_endian.h"
+#include "bpf_helpers.h"
 
-#define PACKET_BROADCAST	1
-#define PACKET_MULTICAST	2
-#define ETH_P_IP	        0x0800
-#define ETH_P_IPV6	        0x86DD
-#define TC_ACT_OK		    0
-
+#define PACKET_BROADCAST 1
+#define PACKET_MULTICAST 2
+#define ETH_P_IP         0x0800
+#define ETH_P_IPV6       0x86DD
+#define TC_ACT_OK        0
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
     __uint(max_entries, 512 * 1024 /* 512 KB */);
 } pipe SEC(".maps");
-
-
 
 struct packet_t {
     struct in6_addr src_ip;
@@ -29,7 +26,6 @@ struct packet_t {
     bool ack;
     uint64_t ts;
 };
-
 
 static inline int handle_ip_packet(void* head, void* tail, uint32_t* offset, struct packet_t* pkt) {
     struct ethhdr* eth = head;
@@ -122,7 +118,6 @@ static inline int handle_ip_segment(void* head, void* tail, uint32_t* offset, st
 
 SEC("tc")
 int flat(struct __sk_buff* skb) {
-
     if (bpf_skb_pull_data(skb, 0) < 0) {
         return TC_ACT_OK;
     }

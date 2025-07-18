@@ -7,7 +7,7 @@ import (
 	"net"
 )
 
-//go:generate bpf2go -tags linux bpf bpf.c
+//go:generate bpf2go -tags linux bpf bpf.c -- -I./libbpf/src -I./vmlinux.h/include/x86_64
 
 func main() {
 	// stopper := make(chan os.Signal, 1)
