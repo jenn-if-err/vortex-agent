@@ -1,5 +1,5 @@
 ```sh
-# vmlinux.h:
+# Note only; here, we use the vmlinux.h submodule:
 $ bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
 
 # Only needed when C files are updated:
