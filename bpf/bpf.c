@@ -59,7 +59,6 @@ SEC("kretprobe/sys_sendmsg")
 int BPF_KRETPROBE(sys_sendmsg_ret) {
     __u64 bytes_sent = PT_REGS_RC(ctx); // return value is bytes sent
     return submit_event(bytes_sent, DIRECTION_SEND);
-    /* return submit_event(1, DIRECTION_SEND); */
 }
 
 // Kretprobe for sys_recvmsg (incoming traffic).
@@ -67,7 +66,6 @@ SEC("kretprobe/sys_recvmsg")
 int BPF_KRETPROBE(sys_recvmsg_ret) {
     __u64 bytes_received = PT_REGS_RC(ctx); // return value is bytes received
     return submit_event(bytes_received, DIRECTION_RECV);
-    /* return submit_event(2, DIRECTION_RECV); */
 }
 
 char _license[] SEC("license") = "Dual MIT/GPL";
