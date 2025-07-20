@@ -15,16 +15,17 @@ enum event_direction {
 struct event {
     __u32 pid;
     __u32 tgid;
+    __u32 direction;
     __u64 bytes;
     __u64 timestamp_ns;
-    int direction;
-    char comm[TASK_COMM_LEN]; // Process name, useful for debugging
+    u8 comm[TASK_COMM_LEN]; // process name, useful for debugging
 };
 
 // Define a ring buffer map for sending events to userspace.
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 256 * 1024); // 256 KB buffer
+    __type(value, struct event);
 } events SEC(".maps");
 
 // Helper function to populate and submit an event.
@@ -56,17 +57,17 @@ static __always_inline int submit_event(__u64 bytes, enum event_direction direct
 // Kretprobe for sys_sendmsg (outgoing traffic).
 SEC("kretprobe/sys_sendmsg")
 int BPF_KRETPROBE(sys_sendmsg_ret) {
-    /* __u64 bytes_sent = PT_REGS_RC(ctx); // return value is bytes sent */
-    /* return submit_event(bytes_sent, DIRECTION_SEND); */
-    return submit_event(1, DIRECTION_SEND);
+    __u64 bytes_sent = PT_REGS_RC(ctx); // return value is bytes sent
+    return submit_event(bytes_sent, DIRECTION_SEND);
+    /* return submit_event(1, DIRECTION_SEND); */
 }
 
 // Kretprobe for sys_recvmsg (incoming traffic).
 SEC("kretprobe/sys_recvmsg")
 int BPF_KRETPROBE(sys_recvmsg_ret) {
-    /* __u64 bytes_received = PT_REGS_RC(ctx); // return value is bytes received */
-    /* return submit_event(bytes_received, DIRECTION_RECV); */
-    return submit_event(2, DIRECTION_RECV);
+    __u64 bytes_received = PT_REGS_RC(ctx); // return value is bytes received
+    return submit_event(bytes_received, DIRECTION_RECV);
+    /* return submit_event(2, DIRECTION_RECV); */
 }
 
 char _license[] SEC("license") = "Dual MIT/GPL";

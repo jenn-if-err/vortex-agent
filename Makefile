@@ -7,7 +7,7 @@ MODULE = vortex-agent
 all: $(MODULE)
 
 $(MODULE):| $(BASE)
-	@GO111MODULE=on GOFLAGS=-mod=vendor CGO_ENABLED=0 go build -v -trimpath -o $(BASE)/bin/$@
+	@GO111MODULE=on GOFLAGS=-mod=vendor GOOS=linux CGO_ENABLED=0 go build -v -trimpath -o $(BASE)/bin/$@
 
 $(BASE):
 	@mkdir -p $(dir $@)
