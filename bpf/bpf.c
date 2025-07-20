@@ -18,24 +18,21 @@ struct event {
     __u32 direction;
     __u64 bytes;
     __u64 timestamp_ns;
-    u8 comm[TASK_COMM_LEN]; // process name, useful for debugging
+    u8 comm[TASK_COMM_LEN];
 };
 
-// Define a ring buffer map for sending events to userspace.
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 256 * 1024); // 256 KB buffer
     __type(value, struct event);
 } events SEC(".maps");
 
-// Helper function to populate and submit an event.
 static __always_inline int submit_event(__u64 bytes, enum event_direction direction) {
     // Check if bytes transferred is valid (not an error code).
     if (bytes == 0 || bytes & (1ULL << 63)) {
         return 0;
     }
 
-    // Allocate space in the ring buffer.
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e) {
         return 0;
@@ -47,9 +44,8 @@ static __always_inline int submit_event(__u64 bytes, enum event_direction direct
     e->bytes = bytes;
     e->timestamp_ns = bpf_ktime_get_ns();
     e->direction = direction;
-    bpf_get_current_comm(&e->comm, sizeof(e->comm)); // get process name
+    bpf_get_current_comm(&e->comm, sizeof(e->comm));
 
-    // Submit the event to userspace.
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
@@ -68,4 +64,4 @@ int BPF_KRETPROBE(sys_recvmsg_ret) {
     return submit_event(bytes_received, DIRECTION_RECV);
 }
 
-char _license[] SEC("license") = "Dual MIT/GPL";
+char __license[] SEC("license") = "Dual MIT/GPL";
