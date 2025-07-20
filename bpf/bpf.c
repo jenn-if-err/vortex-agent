@@ -17,7 +17,6 @@ struct event {
     __u32 tgid;
     __u32 direction;
     __u64 bytes;
-    __u64 timestamp_ns;
     u8 comm[TASK_COMM_LEN];
 };
 
@@ -42,7 +41,6 @@ static __always_inline int submit_event(__u64 bytes, enum event_direction direct
     e->pid = pid_tgid & 0xFFFFFFFF; // PID (thread ID)
     e->tgid = pid_tgid >> 32;       // TGID (process ID)
     e->bytes = bytes;
-    e->timestamp_ns = bpf_ktime_get_ns();
     e->direction = direction;
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
 

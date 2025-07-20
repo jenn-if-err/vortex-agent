@@ -107,10 +107,12 @@ func main() {
 		// slog.Info("record:", "comm", event.Comm, "direction", event.Direction, "bytes", event.Bytes)
 
 		line.Reset()
-		fmt.Fprintf(&line, "comm=%s, direction=%d, bytes=%d",
+		fmt.Fprintf(&line, "comm=%s, direction=%d, bytes=%d, pid=%d, tid=%d",
 			event.Comm,
 			event.Direction,
 			event.Bytes,
+			event.Pid,
+			event.Tgid,
 		)
 
 		slog.Info(line.String())
