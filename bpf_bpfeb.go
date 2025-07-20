@@ -54,14 +54,15 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
-	Flat *ebpf.ProgramSpec `ebpf:"flat"`
+	SysRecvmsgRet *ebpf.ProgramSpec `ebpf:"sys_recvmsg_ret"`
+	SysSendmsgRet *ebpf.ProgramSpec `ebpf:"sys_sendmsg_ret"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	Pipe *ebpf.MapSpec `ebpf:"pipe"`
+	Events *ebpf.MapSpec `ebpf:"events"`
 }
 
 // bpfVariableSpecs contains global variables before they are loaded into the kernel.
@@ -90,12 +91,12 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	Pipe *ebpf.Map `ebpf:"pipe"`
+	Events *ebpf.Map `ebpf:"events"`
 }
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
-		m.Pipe,
+		m.Events,
 	)
 }
 
@@ -109,12 +110,14 @@ type bpfVariables struct {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
-	Flat *ebpf.Program `ebpf:"flat"`
+	SysRecvmsgRet *ebpf.Program `ebpf:"sys_recvmsg_ret"`
+	SysSendmsgRet *ebpf.Program `ebpf:"sys_sendmsg_ret"`
 }
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
-		p.Flat,
+		p.SysRecvmsgRet,
+		p.SysSendmsgRet,
 	)
 }
 
