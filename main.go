@@ -1,5 +1,7 @@
 //go:build linux
 
+//go:generate bpf2go -tags linux -cflags "-O2 -g -Wall -Werror" -type event -output-dir bpf/ -go-package bpf Bpf ./bpf/bpf.c -- -I./libbpf/src -I./vmlinux.h/include/x86_64
+
 package main
 
 import (
@@ -20,8 +22,6 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/flowerinthenight/vortex-agent/bpf"
 )
-
-//go:generate bpf2go -tags linux -cflags "-O2 -g -Wall -Werror" -type event -output-dir bpf/ -go-package bpf Bpf ./bpf/bpf.c -- -I./libbpf/src -I./vmlinux.h/include/x86_64
 
 func main() {
 	stopper := make(chan os.Signal, 1)
