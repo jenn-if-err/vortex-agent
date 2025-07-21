@@ -41,18 +41,18 @@ func main() {
 	defer objs.Close()
 	slog.Info("BPF objects loaded successfully")
 
-	ssm, err := link.AttachTracing(link.TracingOptions{
-		Program:    objs.SockSendmsgFexit,
-		AttachType: ebpf.AttachTraceFExit,
-	})
+	// ssm, err := link.AttachTracing(link.TracingOptions{
+	// 	Program:    objs.SockSendmsgFexit,
+	// 	AttachType: ebpf.AttachTraceFExit,
+	// })
 
-	if err != nil {
-		slog.Error("link.Kprobe/sock_sendmsg failed:", "err", err)
-		return
-	}
+	// if err != nil {
+	// 	slog.Error("fexit/sock_sendmsg failed:", "err", err)
+	// 	return
+	// }
 
-	defer ssm.Close()
-	slog.Info("fexit/sock_sendmsg attached successfully")
+	// defer ssm.Close()
+	// slog.Info("fexit/sock_sendmsg attached successfully")
 
 	srm, err := link.AttachTracing(link.TracingOptions{
 		Program:    objs.SockRecvmsgFexit,
@@ -60,12 +60,21 @@ func main() {
 	})
 
 	if err != nil {
-		slog.Error("link.Kprobe/sock_recvmsg failed:", "err", err)
+		slog.Error("fexit/sock_recvmsg failed:", "err", err)
 		return
 	}
 
 	defer srm.Close()
 	slog.Info("fexit/sock_recvmsg attached successfully")
+
+	krssm, err := link.Kretprobe("sys_sendmsg", objs.SysSendmsgRet, nil)
+	if err != nil {
+		slog.Error("kretprobe/sys_sendmsg failed:", "err", err)
+		return
+	}
+
+	defer krssm.Close()
+	slog.Info("kretprobe/sys_sendmsg attached successfully")
 
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
@@ -139,7 +148,7 @@ func main() {
 		}
 
 		line.Reset()
-		fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, family=%v, type=%v, proto=%v, ret=%v, fexit=%v",
+		fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, family=%v, type=%v, proto=%v, ret=%v, fn=%v",
 			event.Comm,
 			event.Pid,
 			event.Tgid,

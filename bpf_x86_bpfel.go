@@ -70,7 +70,7 @@ type bpfSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
 	SockRecvmsgFexit *ebpf.ProgramSpec `ebpf:"sock_recvmsg_fexit"`
-	SockSendmsgFexit *ebpf.ProgramSpec `ebpf:"sock_sendmsg_fexit"`
+	SysSendmsgRet    *ebpf.ProgramSpec `ebpf:"sys_sendmsg_ret"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
@@ -126,13 +126,13 @@ type bpfVariables struct {
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
 	SockRecvmsgFexit *ebpf.Program `ebpf:"sock_recvmsg_fexit"`
-	SockSendmsgFexit *ebpf.Program `ebpf:"sock_sendmsg_fexit"`
+	SysSendmsgRet    *ebpf.Program `ebpf:"sys_sendmsg_ret"`
 }
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
 		p.SockRecvmsgFexit,
-		p.SockSendmsgFexit,
+		p.SysSendmsgRet,
 	)
 }
 

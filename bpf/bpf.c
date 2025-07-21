@@ -5,9 +5,6 @@
 #include "bpf_tracing.h"
 #include "bpf_core_read.h"
 
-#define AF_INET 2
-
-// Event structure to send to user space for both send and receive
 struct event {
     __u32 pid;
     __u32 tgid;
@@ -28,8 +25,8 @@ struct {
 static __always_inline void
 fill_common_event_fields(struct event *event, struct socket *sock, long ret) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    event->pid = pid_tgid & 0xFFFFFFFF; // PID (thread ID)
-    event->tgid = pid_tgid >> 32;       // TGID (process ID)
+    event->pid = pid_tgid & 0xFFFFFFFF;
+    event->tgid = pid_tgid >> 32;
     event->bytes = ret;
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
 
@@ -46,19 +43,19 @@ fill_common_event_fields(struct event *event, struct socket *sock, long ret) {
     }
 }
 
-SEC("fexit/sock_sendmsg")
-int BPF_PROG2(sock_sendmsg_fexit, struct socket*, sock, struct msghdr*, msg, int, ret) {
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
-        return 0;
-    }
+/* SEC("fexit/sock_sendmsg") */
+/* int BPF_PROG2(sock_sendmsg_fexit, struct socket*, sock, struct msghdr*, msg, int, ret) { */
+/*     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0); */
+/*     if (!e) { */
+/*         return 0; */
+/*     } */
 
-    fill_common_event_fields(e, sock, ret);
-    e->is_send = 1; // mark as a send event
+/*     fill_common_event_fields(e, sock, ret); */
+/*     e->is_send = 1; // mark as a send event */
 
-    bpf_ringbuf_submit(e, 0);
-    return 0;
-}
+/*     bpf_ringbuf_submit(e, 0); */
+/*     return 0; */
+/* } */
 
 SEC("fexit/sock_recvmsg")
 int BPF_PROG2(sock_recvmsg_fexit, struct socket*, sock, struct msghdr*, msg, int, flags, int, ret) {
@@ -69,6 +66,29 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket*, sock, struct msghdr*, msg, int
 
     fill_common_event_fields(e, sock, ret);
     e->is_send = 0; // mark as a receive event
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("kretprobe/sys_sendmsg")
+int BPF_KRETPROBE(sys_sendmsg_ret) {
+    __u64 bytes_sent = PT_REGS_RC(ctx); // return value is bytes sent
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e) {
+        return 0;
+    }
+
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    e->pid = pid_tgid & 0xFFFFFFFF;
+    e->tgid = pid_tgid >> 32;
+    e->bytes = bytes_sent;
+    bpf_get_current_comm(&e->comm, sizeof(e->comm));
+
+    e->family = 0;
+    e->type = 0;
+    e->protocol = 0;
+    e->is_send = 1; // mark as a send event
 
     bpf_ringbuf_submit(e, 0);
     return 0;
