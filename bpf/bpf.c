@@ -109,8 +109,8 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, i
 }
 
 /*
-/sys/kernel/tracing/events/syscalls/sys_enter_sendto/format:
-int fd, void *buff, size_t len, unsigned int flags, struct sockaddr *addr, int addr_len
+Ref: /sys/kernel/tracing/events/syscalls/sys_enter_sendto/format
+(int fd, void *buff, size_t len, unsigned int flags, struct sockaddr *addr, int addr_len)
 */
 SEC("tp/syscalls/sys_enter_sendto")
 int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
