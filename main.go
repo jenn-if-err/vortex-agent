@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -19,7 +20,7 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 )
 
-//go:generate bpf2go -target amd64 -tags linux -cflags "-O2 -g -Wall -Werror" -type event bpf ./bpf/bpf.c -- -I./libbpf/src -I./vmlinux.h/include/x86_64
+//go:generate bpf2go -tags linux -cflags "-O2 -g -Wall -Werror" -type event bpf ./bpf/bpf.c -- -I./libbpf/src -I./vmlinux.h/include/x86_64
 
 func main() {
 	stopper := make(chan os.Signal, 1)
@@ -41,18 +42,18 @@ func main() {
 	defer objs.Close()
 	slog.Info("BPF objects loaded successfully")
 
-	// ssm, err := link.AttachTracing(link.TracingOptions{
-	// 	Program:    objs.SockSendmsgFexit,
-	// 	AttachType: ebpf.AttachTraceFExit,
-	// })
+	ssm, err := link.AttachTracing(link.TracingOptions{
+		Program:    objs.SockSendmsgFentry,
+		AttachType: ebpf.AttachTraceFEntry,
+	})
 
-	// if err != nil {
-	// 	slog.Error("fexit/sock_sendmsg failed:", "err", err)
-	// 	return
-	// }
+	if err != nil {
+		slog.Error("fentry/sock_sendmsg failed:", "err", err)
+		return
+	}
 
-	// defer ssm.Close()
-	// slog.Info("fexit/sock_sendmsg attached successfully")
+	defer ssm.Close()
+	slog.Info("fentry/sock_sendmsg attached successfully")
 
 	srm, err := link.AttachTracing(link.TracingOptions{
 		Program:    objs.SockRecvmsgFexit,
@@ -67,14 +68,14 @@ func main() {
 	defer srm.Close()
 	slog.Info("fexit/sock_recvmsg attached successfully")
 
-	krssm, err := link.Kretprobe("sys_sendmsg", objs.SysSendmsgRet, nil)
-	if err != nil {
-		slog.Error("kretprobe/sys_sendmsg failed:", "err", err)
-		return
-	}
+	// kssm, err := link.Kprobe("sock_sendmsg", objs.SockSendmsgEntry, nil)
+	// if err != nil {
+	// 	slog.Error("kprobe/sock_sendmsg failed:", "err", err)
+	// 	return
+	// }
 
-	defer krssm.Close()
-	slog.Info("kretprobe/sys_sendmsg attached successfully")
+	// defer kssm.Close()
+	// slog.Info("kprobe/sock_sendmsg attached successfully")
 
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
@@ -122,7 +123,14 @@ func main() {
 			continue
 		}
 
-		typeStr, protocolStr := "UNKNOWN", "UNKNOWN"
+		familyStr, typeStr, protocolStr := "?", "?", "?"
+		switch event.Family {
+		case syscall.AF_INET:
+			familyStr = "AF_INET"
+		case syscall.AF_INET6:
+			familyStr = "AF_INET6"
+		}
+
 		switch event.Type {
 		case syscall.SOCK_STREAM:
 			typeStr = "SOCK_STREAM"
@@ -143,7 +151,7 @@ func main() {
 		line.Reset()
 		var fn string
 		if event.IsSend == 1 {
-			fn = "sys_sendmsg"
+			fn = "fentry/sock_sendmsg"
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, ret=%v, fn=%v",
 				event.Comm,
 				event.Pid,
@@ -151,28 +159,31 @@ func main() {
 				event.Bytes,
 				fn,
 			)
-
-			slog.Info(line.String())
 		} else {
-			fn = "sock_recvmsg"
-			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, family=%v, type=%v, proto=%v, ret=%v, fn=%v",
+			fn = "fexit/sock_recvmsg"
+			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, family=%v, type=%v, proto=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=%v",
 				event.Comm,
 				event.Pid,
 				event.Tgid,
-				event.Family,
+				familyStr,
 				typeStr,
 				protocolStr,
+				intToIP(event.Saddr),
+				event.Sport,
+				intToIP(event.Daddr),
+				event.Dport,
 				event.Bytes,
 				fn,
 			)
 		}
 
+		slog.Info(line.String())
 	}
 }
 
 // intToIP converts IPv4 number to net.IP
-// func intToIP(ipNum uint32) net.IP {
-// 	ip := make(net.IP, 4)
-// 	binary.BigEndian.PutUint32(ip, ipNum)
-// 	return ip
-// }
+func intToIP(ipNum uint32) net.IP {
+	ip := make(net.IP, 4)
+	binary.LittleEndian.PutUint32(ip, ipNum)
+	return ip
+}
