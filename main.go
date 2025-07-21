@@ -140,26 +140,33 @@ func main() {
 			protocolStr = "IPPROTO_ICMP"
 		}
 
-		action := "transferred"
+		line.Reset()
+		var fn string
 		if event.IsSend == 1 {
-			action = "sock_sendmsg"
+			fn = "sys_sendmsg"
+			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, ret=%v, fn=%v",
+				event.Comm,
+				event.Pid,
+				event.Tgid,
+				event.Bytes,
+				fn,
+			)
+
+			slog.Info(line.String())
 		} else {
-			action = "sock_recvmsg"
+			fn = "sock_recvmsg"
+			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, family=%v, type=%v, proto=%v, ret=%v, fn=%v",
+				event.Comm,
+				event.Pid,
+				event.Tgid,
+				event.Family,
+				typeStr,
+				protocolStr,
+				event.Bytes,
+				fn,
+			)
 		}
 
-		line.Reset()
-		fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, family=%v, type=%v, proto=%v, ret=%v, fn=%v",
-			event.Comm,
-			event.Pid,
-			event.Tgid,
-			event.Family,
-			typeStr,
-			protocolStr,
-			event.Bytes,
-			action,
-		)
-
-		slog.Info(line.String())
 	}
 }
 

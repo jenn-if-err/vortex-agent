@@ -59,6 +59,10 @@ fill_common_event_fields(struct event *event, struct socket *sock, long ret) {
 
 SEC("fexit/sock_recvmsg")
 int BPF_PROG2(sock_recvmsg_fexit, struct socket*, sock, struct msghdr*, msg, int, flags, int, ret) {
+    if (ret <= 0) {
+        return 0;
+    }
+
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e) {
         return 0;
@@ -73,16 +77,21 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket*, sock, struct msghdr*, msg, int
 
 SEC("kretprobe/sys_sendmsg")
 int BPF_KRETPROBE(sys_sendmsg_ret) {
-    __u64 bytes_sent = PT_REGS_RC(ctx); // return value is bytes sent
+    __s64 bytes_sent = PT_REGS_RC(ctx); // return value is bytes sent
+    if (bytes_sent <= 0) {
+        return 0;
+    }
+
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e) {
         return 0;
     }
 
+    e->bytes = bytes_sent;
+
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     e->pid = pid_tgid & 0xFFFFFFFF;
     e->tgid = pid_tgid >> 32;
-    e->bytes = bytes_sent;
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
 
     e->family = 0;
