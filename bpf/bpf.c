@@ -43,19 +43,21 @@ fill_common_event_fields(struct event *event, struct socket *sock, long ret) {
     }
 }
 
-/* SEC("fexit/sock_sendmsg") */
-/* int BPF_PROG2(sock_sendmsg_fexit, struct socket*, sock, struct msghdr*, msg, int, ret) { */
-/*     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0); */
-/*     if (!e) { */
-/*         return 0; */
-/*     } */
+/*
+SEC("fexit/sock_sendmsg")
+int BPF_PROG2(sock_sendmsg_fexit, struct socket*, sock, struct msghdr*, msg, int, ret) {
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e) {
+        return 0;
+    }
 
-/*     fill_common_event_fields(e, sock, ret); */
-/*     e->is_send = 1; // mark as a send event */
+    fill_common_event_fields(e, sock, ret);
+    e->is_send = 1; // mark as a send event
 
-/*     bpf_ringbuf_submit(e, 0); */
-/*     return 0; */
-/* } */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+*/
 
 SEC("fexit/sock_recvmsg")
 int BPF_PROG2(sock_recvmsg_fexit, struct socket*, sock, struct msghdr*, msg, int, flags, int, ret) {
