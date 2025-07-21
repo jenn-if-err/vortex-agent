@@ -123,51 +123,27 @@ func main() {
 			continue
 		}
 
-		familyStr, typeStr, protocolStr := "?", "?", "?"
-		switch event.Family {
-		case syscall.AF_INET:
-			familyStr = "AF_INET"
-		case syscall.AF_INET6:
-			familyStr = "AF_INET6"
-		}
-
-		switch event.Type {
-		case syscall.SOCK_STREAM:
-			typeStr = "SOCK_STREAM"
-		case syscall.SOCK_DGRAM:
-			typeStr = "SOCK_DGRAM"
-		case syscall.SOCK_RAW:
-			typeStr = "SOCK_RAW"
-		}
-		switch event.Protocol {
-		case syscall.IPPROTO_TCP:
-			protocolStr = "IPPROTO_TCP"
-		case syscall.IPPROTO_UDP:
-			protocolStr = "IPPROTO_UDP"
-		case syscall.IPPROTO_ICMP:
-			protocolStr = "IPPROTO_ICMP"
-		}
-
 		line.Reset()
 		var fn string
 		if event.IsSend == 1 {
 			fn = "fentry/sock_sendmsg"
-			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, ret=%v, fn=%v",
+			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=%v",
 				event.Comm,
 				event.Pid,
 				event.Tgid,
+				intToIP(event.Saddr),
+				event.Sport,
+				intToIP(event.Daddr),
+				event.Dport,
 				event.Bytes,
 				fn,
 			)
 		} else {
 			fn = "fexit/sock_recvmsg"
-			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, family=%v, type=%v, proto=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=%v",
+			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=%v",
 				event.Comm,
 				event.Pid,
 				event.Tgid,
-				familyStr,
-				typeStr,
-				protocolStr,
 				intToIP(event.Saddr),
 				event.Sport,
 				intToIP(event.Daddr),

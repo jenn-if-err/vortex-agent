@@ -71,7 +71,7 @@ static __always_inline int set_event_fields(__u32 is_send, struct event *event, 
 }
 
 SEC("fentry/sock_sendmsg")
-int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) {
+int BPF_PROG2(sock_sendmsg_fentry, struct socket*, sock, struct msghdr*, msg) {
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e) {
         return 0;
@@ -88,7 +88,7 @@ int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) 
 }
 
 SEC("fexit/sock_recvmsg")
-int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, int, flags, int, ret) {
+int BPF_PROG2(sock_recvmsg_fexit, struct socket*, sock, struct msghdr*, msg, int, flags, int, ret) {
     if (ret <= 0) {
         return 0;
     }
