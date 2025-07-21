@@ -1,5 +1,10 @@
 ---
 # We'll use defaults from the LLVM style, but with 4 columns indentation.
-# BasedOnStyle: LLVM
+BasedOnStyle: LLVM
+Language: Cpp
 IndentWidth: 4
+UseTab: Never
 ColumnLimit: 0
+AlignConsecutiveAssignments: true
+AlignTrailingComments: true
+IncludeBlocks: Preserve

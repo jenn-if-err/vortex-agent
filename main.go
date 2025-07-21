@@ -140,7 +140,7 @@ func main() {
 				fn,
 			)
 
-			slog.Info(line.String())
+			// slog.Info(line.String())
 		} else {
 			fn = "fexit/sock_recvmsg"
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=%v",
@@ -156,7 +156,7 @@ func main() {
 			)
 		}
 
-		// slog.Info(line.String())
+		slog.Info(line.String())
 	}
 }
 

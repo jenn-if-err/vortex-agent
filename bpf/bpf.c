@@ -30,17 +30,16 @@ struct {
     __type(value, struct event);
 } events SEC(".maps");
 
-static __always_inline
-int set_event_fields(__u32 is_send, struct event *event, struct socket *sock, long ret) {
+static __always_inline int set_event_fields(__u32 is_send, struct event *event, struct socket *sock, long ret) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    event->pid = pid_tgid & 0xFFFFFFFF;
-    event->tgid = pid_tgid >> 32;
-    event->bytes = ret;
+    event->pid     = pid_tgid & 0xFFFFFFFF;
+    event->tgid    = pid_tgid >> 32;
+    event->bytes   = ret;
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
 
-    event->is_send = is_send;
-    event->family = 0;
-    event->type = 0;
+    event->is_send  = is_send;
+    event->family   = 0;
+    event->type     = 0;
     event->protocol = 0;
 
     int ret_val = 0;
@@ -72,7 +71,7 @@ int set_event_fields(__u32 is_send, struct event *event, struct socket *sock, lo
 }
 
 SEC("fentry/sock_sendmsg")
-int BPF_PROG2(sock_sendmsg_fentry, struct socket*, sock, struct msghdr*, msg) {
+int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) {
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e) {
         return 0;
@@ -89,7 +88,7 @@ int BPF_PROG2(sock_sendmsg_fentry, struct socket*, sock, struct msghdr*, msg) {
 }
 
 SEC("fexit/sock_recvmsg")
-int BPF_PROG2(sock_recvmsg_fexit, struct socket*, sock, struct msghdr*, msg, int, flags, int, ret) {
+int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, int, flags, int, ret) {
     if (ret <= 0) {
         return 0;
     }
