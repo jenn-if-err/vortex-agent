@@ -30,7 +30,8 @@ struct {
     __type(value, struct event);
 } events SEC(".maps");
 
-static __always_inline int set_event_fields(__u32 is_send, struct event *event, struct socket *sock, long ret) {
+static __always_inline
+int set_event_fields(__u32 is_send, struct event *event, struct socket *sock, long ret) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     event->pid = pid_tgid & 0xFFFFFFFF;
     event->tgid = pid_tgid >> 32;
@@ -107,36 +108,5 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket*, sock, struct msghdr*, msg, int
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
-
-/*
-SEC("kprobe/sock_sendmsg")
-int BPF_KPROBE(sock_sendmsg_entry, struct socket *sock, struct msghdr *msg) {
-    size_t len = 0;
-    BPF_CORE_READ_INTO(&len, msg, msg_iter.count); // Get total length from iov_iter
-    if (len == 0) { // If msg_iter.count is 0 or couldn't be read
-        return 0;
-    }
-
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
-        return 0;
-    }
-
-    e->bytes = len;
-
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    e->pid = pid_tgid & 0xFFFFFFFF;
-    e->tgid = pid_tgid >> 32;
-    bpf_get_current_comm(&e->comm, sizeof(e->comm));
-
-    e->family = 0;
-    e->type = 0;
-    e->protocol = 0;
-    e->is_send = 1; // mark as a send event
-
-    bpf_ringbuf_submit(e, 0);
-    return 0;
-}
-*/
 
 char __license[] SEC("license") = "Dual MIT/GPL";
