@@ -14,13 +14,17 @@ import (
 )
 
 type bpfEvent struct {
-	_         structs.HostLayout
-	Pid       uint32
-	Tgid      uint32
-	Direction uint32
-	_         [4]byte
-	Bytes     uint64
-	Comm      [16]uint8
+	_        structs.HostLayout
+	Pid      uint32
+	Tgid     uint32
+	Bytes    int64
+	Family   uint16
+	Type     int16
+	Protocol uint16
+	_        [2]byte
+	IsSend   uint32
+	Comm     [16]uint8
+	_        [4]byte
 }
 
 // loadBpf returns the embedded CollectionSpec for bpf.
@@ -65,8 +69,8 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
-	SysRecvmsgRet *ebpf.ProgramSpec `ebpf:"sys_recvmsg_ret"`
-	SysSendmsgRet *ebpf.ProgramSpec `ebpf:"sys_sendmsg_ret"`
+	SockRecvmsgFexit *ebpf.ProgramSpec `ebpf:"sock_recvmsg_fexit"`
+	SockSendmsgFexit *ebpf.ProgramSpec `ebpf:"sock_sendmsg_fexit"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
@@ -121,14 +125,14 @@ type bpfVariables struct {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
-	SysRecvmsgRet *ebpf.Program `ebpf:"sys_recvmsg_ret"`
-	SysSendmsgRet *ebpf.Program `ebpf:"sys_sendmsg_ret"`
+	SockRecvmsgFexit *ebpf.Program `ebpf:"sock_recvmsg_fexit"`
+	SockSendmsgFexit *ebpf.Program `ebpf:"sock_sendmsg_fexit"`
 }
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
-		p.SysRecvmsgRet,
-		p.SysSendmsgRet,
+		p.SockRecvmsgFexit,
+		p.SockSendmsgFexit,
 	)
 }
 

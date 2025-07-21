@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
@@ -40,23 +41,31 @@ func main() {
 	defer objs.Close()
 	slog.Info("BPF objects loaded successfully")
 
-	sm, err := link.Kretprobe("sys_sendmsg", objs.SysSendmsgRet, nil)
+	ssm, err := link.AttachTracing(link.TracingOptions{
+		Program:    objs.SockSendmsgFexit,
+		AttachType: ebpf.AttachTraceFExit,
+	})
+
 	if err != nil {
-		slog.Error("link.Kretprobe/sys_sendmsg failed:", "err", err)
+		slog.Error("link.Kprobe/sock_sendmsg failed:", "err", err)
 		return
 	}
 
-	defer sm.Close()
-	slog.Info("Kretprobe for sys_sendmsg attached successfully")
+	defer ssm.Close()
+	slog.Info("fexit/sock_sendmsg attached successfully")
 
-	rm, err := link.Kretprobe("sys_recvmsg", objs.SysRecvmsgRet, nil)
+	srm, err := link.AttachTracing(link.TracingOptions{
+		Program:    objs.SockRecvmsgFexit,
+		AttachType: ebpf.AttachTraceFExit,
+	})
+
 	if err != nil {
-		slog.Error("link.Kretprobe/sys_recvmsg failed:", "err", err)
+		slog.Error("link.Kprobe/sock_recvmsg failed:", "err", err)
 		return
 	}
 
-	defer rm.Close()
-	slog.Info("Kretprobe for sys_recvmsg attached successfully")
+	defer srm.Close()
+	slog.Info("fexit/sock_recvmsg attached successfully")
 
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
@@ -104,15 +113,41 @@ func main() {
 			continue
 		}
 
-		// slog.Info("record:", "comm", event.Comm, "direction", event.Direction, "bytes", event.Bytes)
+		typeStr, protocolStr := "UNKNOWN", "UNKNOWN"
+		switch event.Type {
+		case syscall.SOCK_STREAM:
+			typeStr = "SOCK_STREAM"
+		case syscall.SOCK_DGRAM:
+			typeStr = "SOCK_DGRAM"
+		case syscall.SOCK_RAW:
+			typeStr = "SOCK_RAW"
+		}
+		switch event.Protocol {
+		case syscall.IPPROTO_TCP:
+			protocolStr = "IPPROTO_TCP"
+		case syscall.IPPROTO_UDP:
+			protocolStr = "IPPROTO_UDP"
+		case syscall.IPPROTO_ICMP:
+			protocolStr = "IPPROTO_ICMP"
+		}
+
+		action := "transferred"
+		if event.IsSend == 1 {
+			action = "sock_sendmsg"
+		} else {
+			action = "sock_recvmsg"
+		}
 
 		line.Reset()
-		fmt.Fprintf(&line, "comm=%s, direction=%d, bytes=%d, pid=%d, tid=%d",
+		fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, family=%v, type=%v, proto=%v, ret=%v, fexit=%v",
 			event.Comm,
-			event.Direction,
-			event.Bytes,
 			event.Pid,
 			event.Tgid,
+			event.Family,
+			typeStr,
+			protocolStr,
+			event.Bytes,
+			action,
 		)
 
 		slog.Info(line.String())
