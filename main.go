@@ -78,6 +78,15 @@ func main() {
 	// defer kssm.Close()
 	// slog.Info("kprobe/sock_sendmsg attached successfully")
 
+	tpsnst, err := link.Tracepoint("syscalls", "sys_enter_sendto", objs.HandleEnterSendto, nil)
+	if err != nil {
+		slog.Error("tracepoint/syscalls/sys_enter_sendto failed:", "err", err)
+		return
+	}
+
+	defer tpsnst.Close()
+	slog.Info("tracepoint/syscalls/sys_enter_sendto attached successfully")
+
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
 		slog.Error("ringbuf reader failed:", "err", err)
@@ -126,7 +135,17 @@ func main() {
 
 		line.Reset()
 		var fn string
-		if event.IsSend == 1 {
+		switch event.IsSend {
+		case 2:
+			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, ret=%v, fn=sys_enter_sendto",
+				event.Comm,
+				event.Pid,
+				event.Tgid,
+				event.Bytes,
+			)
+
+			slog.Info(line.String())
+		case 1:
 			fn = "fentry/sock_sendmsg"
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=%v",
 				event.Comm,
@@ -140,8 +159,8 @@ func main() {
 				fn,
 			)
 
-			// slog.Info(line.String())
-		} else {
+			slog.Info(line.String())
+		default:
 			fn = "fexit/sock_recvmsg"
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=%v",
 				event.Comm,
@@ -154,9 +173,9 @@ func main() {
 				event.Bytes,
 				fn,
 			)
-		}
 
-		slog.Info(line.String())
+			// slog.Info(line.String())
+		}
 	}
 }
 

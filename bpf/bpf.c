@@ -108,4 +108,35 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, i
     return 0;
 }
 
+/*
+/sys/kernel/tracing/events/syscalls/sys_enter_sendto/format:
+int fd, void *buff, size_t len, unsigned int flags, struct sockaddr *addr, int addr_len
+*/
+SEC("tp/syscalls/sys_enter_sendto")
+int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
+    size_t len = BPF_CORE_READ(ctx, args[2]);
+    if (len == 0) {
+        return 0;
+    }
+
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e) {
+        return 0;
+    }
+
+    e->bytes    = len;
+    e->is_send  = 2;
+    e->family   = 0;
+    e->type     = 0;
+    e->protocol = 0;
+
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    e->pid         = pid_tgid & 0xFFFFFFFF;
+    e->tgid        = pid_tgid >> 32;
+    bpf_get_current_comm(&e->comm, sizeof(e->comm));
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
 char __license[] SEC("license") = "Dual MIT/GPL";

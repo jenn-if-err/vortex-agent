@@ -74,6 +74,7 @@ type BpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type BpfProgramSpecs struct {
+	HandleEnterSendto *ebpf.ProgramSpec `ebpf:"handle_enter_sendto"`
 	SockRecvmsgFexit  *ebpf.ProgramSpec `ebpf:"sock_recvmsg_fexit"`
 	SockSendmsgFentry *ebpf.ProgramSpec `ebpf:"sock_sendmsg_fentry"`
 }
@@ -130,12 +131,14 @@ type BpfVariables struct {
 //
 // It can be passed to LoadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type BpfPrograms struct {
+	HandleEnterSendto *ebpf.Program `ebpf:"handle_enter_sendto"`
 	SockRecvmsgFexit  *ebpf.Program `ebpf:"sock_recvmsg_fexit"`
 	SockSendmsgFentry *ebpf.Program `ebpf:"sock_sendmsg_fentry"`
 }
 
 func (p *BpfPrograms) Close() error {
 	return _BpfClose(
+		p.HandleEnterSendto,
 		p.SockRecvmsgFexit,
 		p.SockSendmsgFentry,
 	)
