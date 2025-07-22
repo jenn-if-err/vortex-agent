@@ -69,6 +69,32 @@ func main() {
 	defer srm.Close()
 	slog.Info("fexit/sock_recvmsg attached successfully")
 
+	tsm, err := link.AttachTracing(link.TracingOptions{
+		Program:    objs.TcpSendmsgFexit,
+		AttachType: ebpf.AttachTraceFExit,
+	})
+
+	if err != nil {
+		slog.Error("fexit/tcp_sendmsg failed:", "err", err)
+		return
+	}
+
+	defer tsm.Close()
+	slog.Info("fexit/tcp_sendmsg attached successfully")
+
+	usm, err := link.AttachTracing(link.TracingOptions{
+		Program:    objs.UdpSendmsgFexit,
+		AttachType: ebpf.AttachTraceFExit,
+	})
+
+	if err != nil {
+		slog.Error("fexit/udp_sendmsg failed:", "err", err)
+		return
+	}
+
+	defer usm.Close()
+	slog.Info("fexit/udp_sendmsg attached successfully")
+
 	// kssm, err := link.Kprobe("sock_sendmsg", objs.SockSendmsgEntry, nil)
 	// if err != nil {
 	// 	slog.Error("kprobe/sock_sendmsg failed:", "err", err)
@@ -78,14 +104,14 @@ func main() {
 	// defer kssm.Close()
 	// slog.Info("kprobe/sock_sendmsg attached successfully")
 
-	tpsnst, err := link.Tracepoint("syscalls", "sys_enter_sendto", objs.HandleEnterSendto, nil)
-	if err != nil {
-		slog.Error("tracepoint/syscalls/sys_enter_sendto failed:", "err", err)
-		return
-	}
+	// tpsnst, err := link.Tracepoint("syscalls", "sys_enter_sendto", objs.HandleEnterSendto, nil)
+	// if err != nil {
+	// 	slog.Error("tracepoint/syscalls/sys_enter_sendto failed:", "err", err)
+	// 	return
+	// }
 
-	defer tpsnst.Close()
-	slog.Info("tracepoint/syscalls/sys_enter_sendto attached successfully")
+	// defer tpsnst.Close()
+	// slog.Info("tracepoint/syscalls/sys_enter_sendto attached successfully")
 
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
@@ -134,9 +160,10 @@ func main() {
 		}
 
 		line.Reset()
-		var fn string
-		switch event.IsSend {
-		case 2:
+
+		switch event.Type {
+		case 5:
+			// NOTE: Not used now.
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, ret=%v, fn=sys_enter_sendto",
 				event.Comm,
 				event.Pid,
@@ -145,9 +172,8 @@ func main() {
 			)
 
 			slog.Info(line.String())
-		case 1:
-			fn = "fentry/sock_sendmsg"
-			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=%v",
+		case 4:
+			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
 				event.Comm,
 				event.Pid,
 				event.Tgid,
@@ -156,25 +182,53 @@ func main() {
 				intToIP(event.Daddr),
 				event.Dport,
 				event.Bytes,
-				fn,
+			)
+
+			slog.Info(line.String())
+		case 3:
+			if strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "sshd") {
+				continue
+			}
+
+			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_sendmsg",
+				event.Comm,
+				event.Pid,
+				event.Tgid,
+				intToIP(event.Saddr),
+				event.Sport,
+				intToIP(event.Daddr),
+				event.Dport,
+				event.Bytes,
+			)
+
+			slog.Info(line.String())
+		case 2:
+			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/sock_recvmsg",
+				event.Comm,
+				event.Pid,
+				event.Tgid,
+				intToIP(event.Daddr),
+				event.Dport,
+				intToIP(event.Saddr),
+				event.Sport,
+				event.Bytes,
+			)
+
+			slog.Info(line.String())
+		case 1:
+			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fentry/sock_sendmsg",
+				event.Comm,
+				event.Pid,
+				event.Tgid,
+				intToIP(event.Saddr),
+				event.Sport,
+				intToIP(event.Daddr),
+				event.Dport,
+				event.Bytes,
 			)
 
 			slog.Info(line.String())
 		default:
-			fn = "fexit/sock_recvmsg"
-			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=%v",
-				event.Comm,
-				event.Pid,
-				event.Tgid,
-				intToIP(event.Saddr),
-				event.Sport,
-				intToIP(event.Daddr),
-				event.Dport,
-				event.Bytes,
-				fn,
-			)
-
-			// slog.Info(line.String())
 		}
 	}
 }

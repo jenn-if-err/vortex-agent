@@ -14,22 +14,19 @@ import (
 )
 
 type BpfEvent struct {
-	_        structs.HostLayout
-	Pid      uint32
-	Tgid     uint32
-	Bytes    int64
-	Family   uint16
-	Type     int16
-	Protocol uint16
-	_        [2]byte
-	IsSend   uint32
-	Saddr    uint32
-	Sport    uint16
-	_        [2]byte
-	Daddr    uint32
-	Dport    uint16
-	Comm     [16]uint8
-	_        [6]byte
+	_     structs.HostLayout
+	Comm  [16]uint8
+	Type  uint32
+	Pid   uint32
+	Tgid  uint32
+	_     [4]byte
+	Bytes int64
+	Saddr uint32
+	Sport uint16
+	_     [2]byte
+	Daddr uint32
+	Dport uint16
+	_     [2]byte
 }
 
 // LoadBpf returns the embedded CollectionSpec for Bpf.
@@ -77,6 +74,8 @@ type BpfProgramSpecs struct {
 	HandleEnterSendto *ebpf.ProgramSpec `ebpf:"handle_enter_sendto"`
 	SockRecvmsgFexit  *ebpf.ProgramSpec `ebpf:"sock_recvmsg_fexit"`
 	SockSendmsgFentry *ebpf.ProgramSpec `ebpf:"sock_sendmsg_fentry"`
+	TcpSendmsgFexit   *ebpf.ProgramSpec `ebpf:"tcp_sendmsg_fexit"`
+	UdpSendmsgFexit   *ebpf.ProgramSpec `ebpf:"udp_sendmsg_fexit"`
 }
 
 // BpfMapSpecs contains maps before they are loaded into the kernel.
@@ -134,6 +133,8 @@ type BpfPrograms struct {
 	HandleEnterSendto *ebpf.Program `ebpf:"handle_enter_sendto"`
 	SockRecvmsgFexit  *ebpf.Program `ebpf:"sock_recvmsg_fexit"`
 	SockSendmsgFentry *ebpf.Program `ebpf:"sock_sendmsg_fentry"`
+	TcpSendmsgFexit   *ebpf.Program `ebpf:"tcp_sendmsg_fexit"`
+	UdpSendmsgFexit   *ebpf.Program `ebpf:"udp_sendmsg_fexit"`
 }
 
 func (p *BpfPrograms) Close() error {
@@ -141,6 +142,8 @@ func (p *BpfPrograms) Close() error {
 		p.HandleEnterSendto,
 		p.SockRecvmsgFexit,
 		p.SockSendmsgFentry,
+		p.TcpSendmsgFexit,
+		p.UdpSendmsgFexit,
 	)
 }
 

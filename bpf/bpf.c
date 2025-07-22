@@ -9,19 +9,22 @@
 #define AF_INET  2
 #define AF_INET6 10
 
+#define TYPE_FENTRY_SOCK_SENDMSG 1
+#define TYPE_FEXIT_SOCK_SENDMSG  2
+#define TYPE_FEXIT_TCP_SENDMSG   3
+#define TYPE_FEXIT_UDP_SENDMSG   4
+#define TYPE_TP_SYS_ENTER_SENDTO 5
+
 struct event {
+    u8 comm[TASK_COMM_LEN]; // for debugging
+    __u32 type;
     __u32 pid;
     __u32 tgid;
-    __s64 bytes;    // bytes sent/received or error code
-    __u16 family;   // AF_INET, AF_INET6, etc.
-    __s16 type;     // SOCK_STREAM, SOCK_DGRAM, etc.
-    __u16 protocol; // IPPROTO_TCP, IPPROTO_UDP, etc.
-    __u32 is_send;  // 1 if send event, 0 if receive event
+    __s64 bytes;
     __be32 saddr;
     __u16 sport;
     __be32 daddr;
     __be16 dport;
-    u8 comm[16];
 };
 
 struct {
@@ -30,46 +33,46 @@ struct {
     __type(value, struct event);
 } events SEC(".maps");
 
-static __always_inline int set_event_fields(__u32 is_send, struct event *event, struct socket *sock, long ret) {
+static __always_inline void set_proc_info(struct event *event) {
+    bpf_get_current_comm(&event->comm, sizeof(event->comm));
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     event->pid     = pid_tgid & 0xFFFFFFFF;
     event->tgid    = pid_tgid >> 32;
-    event->bytes   = ret;
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+}
 
-    event->is_send  = is_send;
-    event->family   = 0;
-    event->type     = 0;
-    event->protocol = 0;
-
+static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct socket *sock, long ret) {
+    event->bytes = ret;
     int ret_val = 0;
 
-    if (sock) {
-        BPF_CORE_READ_INTO(&event->type, sock, type);
-        if (!(event->type == SOCK_STREAM || event->type == SOCK_DGRAM)) {
-            ret_val = -1;
-        }
-
-        if (sock->sk) {
-            BPF_CORE_READ_INTO(&event->family, sock->sk, __sk_common.skc_family);
-            BPF_CORE_READ_INTO(&event->protocol, sock->sk, sk_protocol);
-
-            if (!(event->family == AF_INET || event->family == AF_INET6)) {
-                ret_val = -1;
-            }
-
-            BPF_CORE_READ_INTO(&event->saddr, sock->sk, __sk_common.skc_rcv_saddr);
-            BPF_CORE_READ_INTO(&event->sport, sock->sk, __sk_common.skc_num);
-            BPF_CORE_READ_INTO(&event->daddr, sock->sk, __sk_common.skc_daddr);
-            __be16 dport = 0;
-            BPF_CORE_READ_INTO(&dport, sock->sk, __sk_common.skc_dport);
-            event->dport = bpf_htons(dport);
-        }
+    __s16 sk_type = 0;
+    BPF_CORE_READ_INTO(&sk_type, sock, type);
+    if (!(sk_type == SOCK_STREAM || sk_type == SOCK_DGRAM)) {
+        ret_val = -1;
     }
+
+    __u16 family = 0;
+    BPF_CORE_READ_INTO(&family, sock->sk, __sk_common.skc_family);
+
+    if (!(family == AF_INET || family == AF_INET6)) {
+        ret_val = -1;
+    }
+
+    BPF_CORE_READ_INTO(&event->saddr, sock->sk, __sk_common.skc_rcv_saddr);
+    BPF_CORE_READ_INTO(&event->sport, sock->sk, __sk_common.skc_num);
+    BPF_CORE_READ_INTO(&event->daddr, sock->sk, __sk_common.skc_daddr);
+    __be16 dport = 0;
+    BPF_CORE_READ_INTO(&dport, sock->sk, __sk_common.skc_dport);
+    event->dport = bpf_htons(dport);
 
     return ret_val;
 }
 
+/*
+ * fentry/fexit hooks can be found in:
+ * /sys/kernel/debug/tracing/available_filter_functions
+ *
+ * https://elixir.bootlin.com/linux/v6.1.146/source/include/linux/net.h#L261
+ */
 SEC("fentry/sock_sendmsg")
 int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) {
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
@@ -77,7 +80,10 @@ int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) 
         return 0;
     }
 
-    int discard = set_event_fields(1, e, sock, 1);
+    e->type = TYPE_FENTRY_SOCK_SENDMSG;
+    set_proc_info(e);
+
+    int discard = set_sock_sendrecv_sk_info(e, sock, 1);
     if (discard < 0) {
         bpf_ringbuf_discard(e, 0);
         return 0;
@@ -87,6 +93,9 @@ int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) 
     return 0;
 }
 
+/*
+ * https://elixir.bootlin.com/linux/v6.1.146/source/include/linux/net.h#L262
+ */
 SEC("fexit/sock_recvmsg")
 int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, int, flags, int, ret) {
     if (ret <= 0) {
@@ -98,7 +107,10 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, i
         return 0;
     }
 
-    int discard = set_event_fields(0, e, sock, ret);
+    e->type = TYPE_FEXIT_SOCK_SENDMSG;
+    set_proc_info(e);
+
+    int discard = set_sock_sendrecv_sk_info(e, sock, ret);
     if (discard < 0) {
         bpf_ringbuf_discard(e, 0);
         return 0;
@@ -108,10 +120,65 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, i
     return 0;
 }
 
+static __always_inline void set_sendmsg_sk_info(struct event *event, struct sock *sk) {
+    BPF_CORE_READ_INTO(&event->saddr, sk, __sk_common.skc_rcv_saddr);
+    BPF_CORE_READ_INTO(&event->sport, sk, __sk_common.skc_num);
+    BPF_CORE_READ_INTO(&event->daddr, sk, __sk_common.skc_daddr);
+    __be16 dport = 0;
+    BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
+    event->dport = bpf_htons(dport);
+}
+
 /*
-Ref: /sys/kernel/tracing/events/syscalls/sys_enter_sendto/format
-(int fd, void *buff, size_t len, unsigned int flags, struct sockaddr *addr, int addr_len)
-*/
+ * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332
+ */
+SEC("fexit/tcp_sendmsg")
+int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e) {
+        return 0;
+    }
+
+    e->type  = TYPE_FEXIT_TCP_SENDMSG;
+    e->bytes = size;
+    set_proc_info(e);
+    set_sendmsg_sk_info(e, sk);
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/*
+ * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/udp.h#L271
+ */
+SEC("fexit/udp_sendmsg")
+int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, ret) {
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e) {
+        return 0;
+    }
+
+    e->type  = TYPE_FEXIT_UDP_SENDMSG;
+    e->bytes = len;
+    set_proc_info(e);
+    set_sendmsg_sk_info(e, sk);
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/*
+ * NOTE: Not registered/used in user-agent code, ref only.
+ *
+ * From '/sys/kernel/tracing/events/syscalls/sys_enter_sendto/format':
+ *
+ *  int fd
+ *  void *buff
+ *  size_t len
+ *  unsigned int flags
+ *  struct sockaddr *addr
+ *  int addr_len
+ */
 SEC("tp/syscalls/sys_enter_sendto")
 int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
     size_t len = BPF_CORE_READ(ctx, args[2]);
@@ -124,16 +191,9 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
         return 0;
     }
 
-    e->bytes    = len;
-    e->is_send  = 2;
-    e->family   = 0;
-    e->type     = 0;
-    e->protocol = 0;
-
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    e->pid         = pid_tgid & 0xFFFFFFFF;
-    e->tgid        = pid_tgid >> 32;
-    bpf_get_current_comm(&e->comm, sizeof(e->comm));
+    e->type  = TYPE_TP_SYS_ENTER_SENDTO;
+    e->bytes = len;
+    set_proc_info(e);
 
     bpf_ringbuf_submit(e, 0);
     return 0;
