@@ -33,4 +33,4 @@ go.work.sum
 # .vscode/
 
 # Others
-build.sh
+localbuild.sh
