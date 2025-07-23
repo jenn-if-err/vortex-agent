@@ -10,4 +10,7 @@ $ go generate
 
 # Normal builds:
 $ make
+
+# Run:
+$ [sudo] ./bin/vortex-agent -logtostderr
 ```
