@@ -69,7 +69,7 @@ static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct
 
 /*
  * fentry/fexit hooks can be found in:
- * /sys/kernel/debug/tracing/available_filter_functions
+ * /sys/kernel/tracing/available_filter_functions
  *
  * https://elixir.bootlin.com/linux/v6.1.146/source/include/linux/net.h#L261
  */
