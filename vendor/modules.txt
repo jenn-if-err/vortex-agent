@@ -18,6 +18,11 @@ github.com/cilium/ebpf/internal/unix
 github.com/cilium/ebpf/link
 github.com/cilium/ebpf/ringbuf
 github.com/cilium/ebpf/rlimit
+# github.com/golang/glog v1.2.5
+## explicit; go 1.19
+github.com/golang/glog
+github.com/golang/glog/internal/logsink
+github.com/golang/glog/internal/stackdump
 # github.com/lmittmann/tint v1.1.2
 ## explicit; go 1.21
 github.com/lmittmann/tint
