@@ -214,7 +214,6 @@ int BPF_UPROBE(uprobe_SSL_write, void *s, const void *buf, int num) {
     }
 
     e->type  = 0;
-    e->bytes = num > TASK_COMM_LEN ? TASK_COMM_LEN : num;
     set_proc_info(e);
 
     __u32 len = num > TASK_COMM_LEN ? TASK_COMM_LEN : num;
