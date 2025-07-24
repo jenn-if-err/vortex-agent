@@ -219,13 +219,12 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
 
     void *buf = (void *)PT_REGS_PARM2(ctx);
     __u32 num = PT_REGS_PARM3(ctx);
+    e->bytes  = num;
     __u32 len = num > TASK_COMM_LEN ? TASK_COMM_LEN : num;
     if (bpf_probe_read_user(&e->comm, len, buf) != 0) {
         bpf_ringbuf_discard(e, 0);
         return 0;
     }
-
-    e->bytes = num;
 
     bpf_ringbuf_submit(e, 0);
     return 0;
@@ -241,7 +240,13 @@ int uretprobe_SSL_write(struct pt_regs *ctx) {
     e->type = TYPE_URETPROBE_SSL_WRITE;
     set_proc_info(e);
 
-    e->bytes = PT_REGS_RC(ctx);
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret < 0) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
+    }
+
+    e->bytes = (__s64)ret;
 
     bpf_ringbuf_submit(e, 0);
     return 0;
@@ -263,13 +268,12 @@ int uprobe_SSL_read(struct pt_regs *ctx) {
 
     void *buf = (void *)PT_REGS_PARM2(ctx);
     __u32 num = PT_REGS_PARM3(ctx);
+    e->bytes  = num;
     __u32 len = num > TASK_COMM_LEN ? TASK_COMM_LEN : num;
     if (bpf_probe_read_user(&e->comm, len, buf) != 0) {
         bpf_ringbuf_discard(e, 0);
         return 0;
     }
-
-    e->bytes = num;
 
     bpf_ringbuf_submit(e, 0);
     return 0;
@@ -285,7 +289,13 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
     e->type = TYPE_URETPROBE_SSL_READ;
     set_proc_info(e);
 
-    e->bytes = PT_REGS_RC(ctx);
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret < 0) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
+    }
+
+    e->bytes = (__s64)ret;
 
     bpf_ringbuf_submit(e, 0);
     return 0;
