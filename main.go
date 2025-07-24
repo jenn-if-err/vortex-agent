@@ -116,30 +116,55 @@ func main() {
 	// defer tpsnst.Close()
 	// slog.Info("tracepoint/syscalls/sys_enter_sendto attached successfully")
 
-	// For test only; hardcoded path to libssl.so.3.
-	ex, err := link.OpenExecutable("/usr/lib/x86_64-linux-gnu/libssl.so.3")
+	libsslPath, err := findLibSSL()
 	if err != nil {
-		glog.Errorf("Failed to open executable: %v", err)
+		glog.Errorf("Error finding libssl.so: %v", err)
 		return
 	}
 
-	upSSLWrite, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
-	if err != nil {
-		glog.Errorf("Failed to attach uprobe to SSL_write: %v", err)
-		return
+	if libsslPath != "" {
+		ex, err := link.OpenExecutable(libsslPath)
+		if err != nil {
+			glog.Errorf("OpenExecutable failed: %v", err)
+			return
+		}
+
+		upSSLWrite, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
+		if err != nil {
+			glog.Errorf("Uprobe (uprobe/SSL_write) failed: %v", err)
+			return
+		}
+
+		defer upSSLWrite.Close()
+		glog.Info("uprobe/SSL_write attached successfully")
+
+		urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+		if err != nil {
+			glog.Errorf("Uretprobe (uretprobe/SSL_write) failed: %v", err)
+			return
+		}
+
+		defer urpSSLWrite.Close()
+		glog.Info("uretprobe/SSL_write attached successfully")
+
+		upSSLRead, err := ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+		if err != nil {
+			glog.Errorf("Uprobe (uprobe/SSL_read) failed: %v", err)
+			return
+		}
+
+		defer upSSLRead.Close()
+		glog.Info("uprobe/SSL_read attached successfully")
+
+		urpSSLRead, err := ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
+		if err != nil {
+			glog.Errorf("Uretprobe (uretprobe/SSL_read) failed: %v", err)
+			return
+		}
+
+		defer urpSSLRead.Close()
+		glog.Info("uretprobe/SSL_read attached successfully")
 	}
-
-	defer upSSLWrite.Close()
-	glog.Info("uprobe to SSL_write attached successfully")
-
-	upSSLRead, err := ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
-	if err != nil {
-		glog.Errorf("Failed to attach uprobe to SSL_read: %v", err)
-		return
-	}
-
-	defer upSSLRead.Close()
-	glog.Info("uprobe to SSL_read attached successfully")
 
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
@@ -188,8 +213,26 @@ func main() {
 		line.Reset()
 
 		switch event.Type {
+		case 9:
+			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uretprobe/SSL_read",
+				event.Comm,
+				event.Pid,
+				event.Tgid,
+				event.Bytes,
+			)
+
+			glog.Info(line.String())
+		case 8:
+			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uprobe/SSL_read",
+				event.Comm,
+				event.Pid,
+				event.Tgid,
+				event.Bytes,
+			)
+
+			glog.Info(line.String())
 		case 7:
-			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=SSL_read",
+			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uretprobe/SSL_write",
 				event.Comm,
 				event.Pid,
 				event.Tgid,
@@ -198,10 +241,11 @@ func main() {
 
 			glog.Info(line.String())
 		case 6:
-			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, fn=SSL_write",
+			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uprobe/SSL_write",
 				event.Comm,
 				event.Pid,
 				event.Tgid,
+				event.Bytes,
 			)
 
 			glog.Info(line.String())
@@ -281,4 +325,25 @@ func intToIP(ipNum uint32) net.IP {
 	ip := make(net.IP, 4)
 	binary.LittleEndian.PutUint32(ip, ipNum)
 	return ip
+}
+
+// findLibSSL attempts to locate libssl.so
+func findLibSSL() (string, error) {
+	possiblePaths := []string{
+		"/lib/x86_64-linux-gnu/libssl.so.1.1",
+		"/usr/lib/x86_64-linux-gnu/libssl.so.1.1",
+		"/lib/x86_64-linux-gnu/libssl.so.3", // for OpenSSL 3.x
+		"/usr/lib/x86_64-linux-gnu/libssl.so.3",
+		"/usr/local/lib/libssl.so", // custom installations
+		"/lib64/libssl.so",         // RHEL/CentOS
+	}
+
+	for _, p := range possiblePaths {
+		if _, err := os.Stat(p); err == nil {
+			glog.Infof("found libssl at: %s", p)
+			return p, nil
+		}
+	}
+
+	return "", fmt.Errorf("libssl.so not found")
 }

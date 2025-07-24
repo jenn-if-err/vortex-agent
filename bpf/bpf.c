@@ -15,7 +15,9 @@
 #define TYPE_FEXIT_UDP_SENDMSG   4
 #define TYPE_TP_SYS_ENTER_SENDTO 5
 #define TYPE_UPROBE_SSL_WRITE    6
-#define TYPE_UPROBE_SSL_READ     7
+#define TYPE_URETPROBE_SSL_WRITE 7
+#define TYPE_UPROBE_SSL_READ     8
+#define TYPE_URETPROBE_SSL_READ  9
 
 struct event {
     u8 comm[TASK_COMM_LEN]; // for debugging
@@ -202,7 +204,7 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
 }
 
 /*
- * uprobe for SSL_write (called before encryption)
+ * uprobe|uretprobe for SSL_write (called before encryption).
  * int SSL_write(SSL *s, const void *buf, int num);
  */
 SEC("uprobe/SSL_write")
@@ -223,12 +225,30 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
         return 0;
     }
 
+    e->bytes = num;
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("uretprobe/SSL_write")
+int uretprobe_SSL_write(struct pt_regs *ctx) {
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e) {
+        return 0;
+    }
+
+    e->type = TYPE_URETPROBE_SSL_WRITE;
+    set_proc_info(e);
+
+    e->bytes = PT_REGS_RC(ctx);
+
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
 
 /*
- * uprobe for SSL_read (called after decryption)
+ * uprobe|uretprobe for SSL_read (called after decryption).
  * int SSL_read(SSL *s, void *buf, int num);
  */
 SEC("uprobe/SSL_read")
@@ -250,41 +270,25 @@ int uprobe_SSL_read(struct pt_regs *ctx) {
     }
 
     e->bytes = num;
+
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
 
-/*
- * uretprobe for SSL_read (called *after* decryption)
- * int SSL_read(SSL *s, void *buf, int num);
- */
-
-/*
 SEC("uretprobe/SSL_read")
-int uprobe_SSL_read_ret(struct pt_regs *ctx) {
+int uretprobe_SSL_read(struct pt_regs *ctx) {
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e) {
         return 0;
     }
 
-    e->type  = TYPE_URETPROBE_SSL_READ;
+    e->type = TYPE_URETPROBE_SSL_READ;
     set_proc_info(e);
 
-    void *buf = (void *)PT_REGS_PARM2(ctx);
-    __u32 ret = PT_REGS_RC(ctx);
-    __u32 len = ret > TASK_COMM_LEN ? TASK_COMM_LEN : ret;
-    if (bpf_probe_read_user(&e->comm, len, buf) != 0) {
-        // bpf_ringbuf_discard(e, 0);
+    e->bytes = PT_REGS_RC(ctx);
 
-        e->bytes = -1;
-        bpf_ringbuf_submit(e, 0);
-        return 0;
-    }
-
-    e->bytes = ret;
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
-*/
 
 char __license[] SEC("license") = "Dual MIT/GPL";
