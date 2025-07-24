@@ -125,12 +125,21 @@ func main() {
 
 	upSSLWrite, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
 	if err != nil {
-		glog.Errorf("Failed to attach Uprobe to SSL_write: %v", err)
+		glog.Errorf("Failed to attach uprobe to SSL_write: %v", err)
 		return
 	}
 
 	defer upSSLWrite.Close()
 	glog.Info("uprobe to SSL_write attached successfully")
+
+	upSSLRead, err := ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+	if err != nil {
+		glog.Errorf("Failed to attach uprobe to SSL_read: %v", err)
+		return
+	}
+
+	defer upSSLRead.Close()
+	glog.Info("uprobe to SSL_read attached successfully")
 
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
@@ -179,6 +188,23 @@ func main() {
 		line.Reset()
 
 		switch event.Type {
+		case 7:
+			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=SSL_read",
+				event.Comm,
+				event.Pid,
+				event.Tgid,
+				event.Bytes,
+			)
+
+			glog.Info(line.String())
+		case 6:
+			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, fn=SSL_write",
+				event.Comm,
+				event.Pid,
+				event.Tgid,
+			)
+
+			glog.Info(line.String())
 		case 5:
 			// NOTE: Not used now.
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, ret=%v, fn=sys_enter_sendto",
@@ -246,13 +272,6 @@ func main() {
 
 			glog.Info(line.String())
 		default:
-			fmt.Fprintf(&line, "buf=%q, pid=%v, tgid=%v, fn=SSL_write",
-				event.Comm,
-				event.Pid,
-				event.Tgid,
-			)
-
-			glog.Info(line.String())
 		}
 	}
 }

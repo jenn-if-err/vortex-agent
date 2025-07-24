@@ -76,6 +76,7 @@ type BpfProgramSpecs struct {
 	SockSendmsgFentry *ebpf.ProgramSpec `ebpf:"sock_sendmsg_fentry"`
 	TcpSendmsgFexit   *ebpf.ProgramSpec `ebpf:"tcp_sendmsg_fexit"`
 	UdpSendmsgFexit   *ebpf.ProgramSpec `ebpf:"udp_sendmsg_fexit"`
+	UprobeSSL_read    *ebpf.ProgramSpec `ebpf:"uprobe_SSL_read"`
 	UprobeSSL_write   *ebpf.ProgramSpec `ebpf:"uprobe_SSL_write"`
 }
 
@@ -136,6 +137,7 @@ type BpfPrograms struct {
 	SockSendmsgFentry *ebpf.Program `ebpf:"sock_sendmsg_fentry"`
 	TcpSendmsgFexit   *ebpf.Program `ebpf:"tcp_sendmsg_fexit"`
 	UdpSendmsgFexit   *ebpf.Program `ebpf:"udp_sendmsg_fexit"`
+	UprobeSSL_read    *ebpf.Program `ebpf:"uprobe_SSL_read"`
 	UprobeSSL_write   *ebpf.Program `ebpf:"uprobe_SSL_write"`
 }
 
@@ -146,6 +148,7 @@ func (p *BpfPrograms) Close() error {
 		p.SockSendmsgFentry,
 		p.TcpSendmsgFexit,
 		p.UdpSendmsgFexit,
+		p.UprobeSSL_read,
 		p.UprobeSSL_write,
 	)
 }
