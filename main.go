@@ -116,6 +116,22 @@ func main() {
 	// defer tpsnst.Close()
 	// slog.Info("tracepoint/syscalls/sys_enter_sendto attached successfully")
 
+	// For test only; hardcoded path to libssl.so.3.
+	ex, err := link.OpenExecutable("/usr/lib/x86_64-linux-gnu/libssl.so.3")
+	if err != nil {
+		glog.Errorf("Failed to open executable: %v", err)
+		return
+	}
+
+	upSSLWrite, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
+	if err != nil {
+		glog.Errorf("Failed to attach Uprobe to SSL_write: %v", err)
+		return
+	}
+
+	defer upSSLWrite.Close()
+	glog.Info("uprobe to SSL_write attached successfully")
+
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
 		glog.Errorf("ringbuf reader failed: %v", err)
@@ -185,7 +201,7 @@ func main() {
 				event.Bytes,
 			)
 
-			glog.Info(line.String())
+			// glog.Info(line.String())
 		case 3:
 			if strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "sshd") {
 				continue
@@ -202,7 +218,7 @@ func main() {
 				event.Bytes,
 			)
 
-			glog.Info(line.String())
+			// glog.Info(line.String())
 		case 2:
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/sock_recvmsg",
 				event.Comm,
@@ -215,7 +231,7 @@ func main() {
 				event.Bytes,
 			)
 
-			glog.Info(line.String())
+			// glog.Info(line.String())
 		case 1:
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fentry/sock_sendmsg",
 				event.Comm,
@@ -230,6 +246,13 @@ func main() {
 
 			glog.Info(line.String())
 		default:
+			fmt.Fprintf(&line, "buf=%q, pid=%v, tgid=%v, fn=SSL_write",
+				event.Comm,
+				event.Pid,
+				event.Tgid,
+			)
+
+			glog.Info(line.String())
 		}
 	}
 }

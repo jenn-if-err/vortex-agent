@@ -199,4 +199,32 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
     return 0;
 }
 
+/*
+ * uprobe for SSL_write (called before encryption)
+ */
+SEC("uprobe/SSL_write")
+int BPF_UPROBE(uprobe_SSL_write, void *s, const void *buf, int num) {
+    if (num <= 0) {
+        return 0;
+    }
+
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e) {
+        return 0;
+    }
+
+    e->type  = 0;
+    e->bytes = num > TASK_COMM_LEN ? TASK_COMM_LEN : num;
+    set_proc_info(e);
+
+    __u32 len = num > TASK_COMM_LEN ? TASK_COMM_LEN : num;
+    if (bpf_probe_read_user(&e->comm, len, buf) != 0) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
+    }
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
 char __license[] SEC("license") = "Dual MIT/GPL";

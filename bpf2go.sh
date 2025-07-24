@@ -2,6 +2,7 @@
 
 # Run by `//go generate` in main.go.
 bpf2go \
+    -target amd64 \
     -tags linux \
     -cflags "-O2 -g -Wall -Werror" \
     -type event \
