@@ -17,7 +17,7 @@ spec:
       hostPID: true
       containers:
       - name: vortex-agent
-        image: asia.gcr.io/mobingi-main/vortex-agent:v0.4.0
+        image: asia.gcr.io/mobingi-main/vortex-agent:v0.5.0
         imagePullPolicy: Always
         env:
         - name: MY_NODE_NAME
@@ -28,12 +28,12 @@ spec:
         - containerPort: 8080
         securityContext:
           privileged: true
-        resources:
-          limits:
-            memory: 2000Mi
-          requests:
-            cpu: 100m
-            memory: 200Mi
+        # resources:
+        #   limits:
+        #     memory: 2000Mi
+        #   requests:
+        #     cpu: 100m
+        #     memory: 200Mi
         volumeMounts:
         - name: sys
           mountPath: /sys
