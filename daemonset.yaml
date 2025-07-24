@@ -1,0 +1,44 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vortex-agent
+  labels:
+    app: vortex-agent
+spec:
+  selector:
+    matchLabels:
+      name: vortex-agent
+  template:
+    metadata:
+      labels:
+        name: vortex-agent
+    spec:
+      hostPID: true
+      containers:
+      - name: vortex-agent
+        image: asia.gcr.io/mobingi-main/vortex-agent:v0.4.0
+        imagePullPolicy: Always
+        env:
+        - name: MY_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        ports:
+        - containerPort: 8080
+        securityContext:
+          privileged: true
+        resources:
+          limits:
+            memory: 2000Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+        volumeMounts:
+        - name: sys
+          mountPath: /sys
+          readOnly: true
+      volumes:
+      - name: sys
+        hostPath:
+          path: /sys

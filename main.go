@@ -221,7 +221,7 @@ func main() {
 				event.Bytes,
 			)
 
-			glog.Info(line.String())
+			// glog.Info(line.String())
 		case 8:
 			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uprobe/SSL_read",
 				event.Comm,
@@ -230,7 +230,7 @@ func main() {
 				event.Bytes,
 			)
 
-			glog.Info(line.String())
+			// glog.Info(line.String())
 		case 7:
 			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uretprobe/SSL_write",
 				event.Comm,
@@ -239,7 +239,7 @@ func main() {
 				event.Bytes,
 			)
 
-			glog.Info(line.String())
+			// glog.Info(line.String())
 		case 6:
 			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uprobe/SSL_write",
 				event.Comm,
@@ -248,7 +248,7 @@ func main() {
 				event.Bytes,
 			)
 
-			glog.Info(line.String())
+			// glog.Info(line.String())
 		case 5:
 			// NOTE: Not used now.
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, ret=%v, fn=sys_enter_sendto",
@@ -258,7 +258,7 @@ func main() {
 				event.Bytes,
 			)
 
-			glog.Info(line.String())
+			// glog.Info(line.String())
 		case 4:
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
 				event.Comm,
@@ -314,7 +314,7 @@ func main() {
 				event.Bytes,
 			)
 
-			glog.Info(line.String())
+			// glog.Info(line.String())
 		default:
 		}
 	}
