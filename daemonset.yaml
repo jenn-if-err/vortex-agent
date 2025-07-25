@@ -28,12 +28,6 @@ spec:
         - containerPort: 8080
         securityContext:
           privileged: true
-        # resources:
-        #   limits:
-        #     memory: 2000Mi
-        #   requests:
-        #     cpu: 100m
-        #     memory: 200Mi
         volumeMounts:
         - name: sys
           mountPath: /sys
