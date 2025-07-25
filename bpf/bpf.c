@@ -20,7 +20,7 @@
 #define TYPE_URETPROBE_SSL_READ  9
 
 struct event {
-    u8 comm[TASK_COMM_LEN]; // for debugging
+    __u8 comm[TASK_COMM_LEN]; // for debugging
     __u32 type;
     __u32 pid;
     __u32 tgid;
@@ -36,6 +36,13 @@ struct {
     __uint(max_entries, 256 * 1024); // 256 KB buffer
     __type(value, struct event);
 } events SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key, __u32);
+    __type(value, __u8);
+} tgids_to_trace SEC(".maps");
 
 static __always_inline void set_proc_info(struct event *event) {
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
@@ -87,6 +94,12 @@ int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) 
     e->type = TYPE_FENTRY_SOCK_SENDMSG;
     set_proc_info(e);
 
+    __u32 tgid = e->tgid;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
+    }
+
     int discard = set_sock_sendrecv_sk_info(e, sock, 1);
     if (discard < 0) {
         bpf_ringbuf_discard(e, 0);
@@ -113,6 +126,12 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, i
 
     e->type = TYPE_FEXIT_SOCK_SENDMSG;
     set_proc_info(e);
+
+    __u32 tgid = e->tgid;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
+    }
 
     int discard = set_sock_sendrecv_sk_info(e, sock, ret);
     if (discard < 0) {
@@ -146,6 +165,13 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     e->type  = TYPE_FEXIT_TCP_SENDMSG;
     e->bytes = size;
     set_proc_info(e);
+
+    __u32 tgid = e->tgid;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
+    }
+
     set_sendmsg_sk_info(e, sk);
 
     bpf_ringbuf_submit(e, 0);
@@ -165,6 +191,13 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     e->type  = TYPE_FEXIT_UDP_SENDMSG;
     e->bytes = len;
     set_proc_info(e);
+
+    __u32 tgid = e->tgid;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
+    }
+
     set_sendmsg_sk_info(e, sk);
 
     bpf_ringbuf_submit(e, 0);
