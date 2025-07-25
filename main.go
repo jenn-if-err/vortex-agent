@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -221,7 +222,7 @@ func main() {
 				event.Bytes,
 			)
 
-			// glog.Info(line.String())
+			glog.Info(line.String())
 		case 8:
 			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uprobe/SSL_read",
 				event.Comm,
@@ -230,7 +231,7 @@ func main() {
 				event.Bytes,
 			)
 
-			// glog.Info(line.String())
+			glog.Info(line.String())
 		case 7:
 			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uretprobe/SSL_write",
 				event.Comm,
@@ -239,7 +240,7 @@ func main() {
 				event.Bytes,
 			)
 
-			// glog.Info(line.String())
+			glog.Info(line.String())
 		case 6:
 			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uprobe/SSL_write",
 				event.Comm,
@@ -248,7 +249,7 @@ func main() {
 				event.Bytes,
 			)
 
-			// glog.Info(line.String())
+			glog.Info(line.String())
 		case 5:
 			// NOTE: Not used now.
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, ret=%v, fn=sys_enter_sendto",
@@ -258,7 +259,7 @@ func main() {
 				event.Bytes,
 			)
 
-			// glog.Info(line.String())
+			glog.Info(line.String())
 		case 4:
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
 				event.Comm,
@@ -271,7 +272,7 @@ func main() {
 				event.Bytes,
 			)
 
-			// glog.Info(line.String())
+			glog.Info(line.String())
 		case 3:
 			if strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "sshd") {
 				continue
@@ -288,7 +289,7 @@ func main() {
 				event.Bytes,
 			)
 
-			// glog.Info(line.String())
+			glog.Info(line.String())
 		case 2:
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/sock_recvmsg",
 				event.Comm,
@@ -301,7 +302,7 @@ func main() {
 				event.Bytes,
 			)
 
-			// glog.Info(line.String())
+			glog.Info(line.String())
 		case 1:
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fentry/sock_sendmsg",
 				event.Comm,
@@ -314,7 +315,7 @@ func main() {
 				event.Bytes,
 			)
 
-			// glog.Info(line.String())
+			glog.Info(line.String())
 		default:
 		}
 	}
@@ -346,4 +347,34 @@ func findLibSSL() (string, error) {
 	}
 
 	return "", fmt.Errorf("libssl.so not found")
+}
+
+func readProcsessInfo() {
+	files, err := os.ReadDir("/proc")
+	if err != nil {
+		fmt.Println("Error reading /proc directory:", err)
+		return
+	}
+
+	for _, f := range files {
+		// Check if the directory name is a valid PID (an integer)
+		pid, err := strconv.Atoi(f.Name())
+		if err == nil {
+			// Now 'pid' is the integer PID of a running process
+			fmt.Printf("Found process with PID: %d\n", pid)
+
+			// Further process information can be read from files within /proc/<pid>/
+			// For example, to read the process's command line arguments:
+			cmdlinePath := fmt.Sprintf("/proc/%d/cmdline", pid)
+			cmdlineBytes, err := os.ReadFile(cmdlinePath)
+			if err != nil {
+				// Handle error (e.g., process might have exited)
+				continue
+			}
+			cmdline := string(cmdlineBytes)
+			fmt.Printf("  Command line: %s\n", cmdline)
+
+			// Other files like /proc/<pid>/status or /proc/<pid>/stat can be parsed for more details.
+		}
+	}
 }
