@@ -215,14 +215,18 @@ func main() {
 
 		for {
 			// Can also remove the namespace argument to list all namespaces.
-			pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), metav1.ListOptions{})
+			pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
 			if err != nil {
 				glog.Errorf("List pods failed: %v", err)
 				return
 			}
 
 			for _, pod := range pods.Items {
-				glog.Infof("pod=%s, ns=%s, node=%s", pod.Name, pod.Namespace, pod.Spec.NodeName)
+				if pod.Namespace == "kube-system" {
+					continue // skip kube-system namespace
+				}
+
+				glog.Infof("pod=%s, ns=%s, uid=%s", pod.Name, pod.Namespace, string(pod.ObjectMeta.UID))
 			}
 
 			time.Sleep(10 * time.Second)
