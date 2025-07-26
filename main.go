@@ -16,18 +16,87 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/flowerinthenight/vortex-agent/bpf"
+	"github.com/flowerinthenight/vortex-agent/internal/slog"
 	"github.com/golang/glog"
+)
+
+var (
+	test = flag.Bool("test", false, "Run in test mode")
 )
 
 func main() {
 	flag.Parse()
 	defer glog.Flush()
+
+	if *test {
+		rootPid := getInitNsPid()
+		if rootPid == -1 {
+			slog.Error("invalid init PID namespace")
+			return
+		}
+
+		files, err := os.ReadDir("/proc")
+		if err != nil {
+			slog.Error("Failed to read /proc directory:", "err", err)
+			return
+		}
+
+		for _, f := range files {
+			pid, err := strconv.Atoi(f.Name())
+			if err != nil {
+				continue // Not a valid PID, skip
+			}
+
+			nspidLink, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", pid))
+			if err != nil {
+				slog.Error("Failed to read link for PID namespace:", "pid", pid, "err", err)
+				continue
+			}
+
+			// Format "pid:[<num>]"
+			parts := strings.Split(nspidLink, ":")
+			if len(parts) < 2 {
+				continue
+			}
+
+			nspid, err := strconv.Atoi(parts[1][1 : len(parts[1])-1])
+			if err != nil {
+				continue
+			}
+
+			if nspid != rootPid {
+				slog.Info("Process not in init PID namespace:", "pid", pid, "nspid", nspid)
+				cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+				if err != nil {
+					slog.Error("Failed to read cmdline for PID:", "pid", pid, "err", err)
+					return
+				}
+
+				// Split by null characters, which separate arguments in /proc/cmdline
+				// Filter out empty strings that might result from trailing nulls
+				args := bytes.Split(cmdline, []byte{0x00})
+				var cleanArgs []string
+				for _, arg := range args {
+					s := string(arg)
+					if s != "" {
+						cleanArgs = append(cleanArgs, s)
+					}
+				}
+
+				slog.Info("jailed:", "pid", pid, "cmdline", strings.Join(cleanArgs, " "))
+			}
+		}
+
+		return
+	}
+
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
 
@@ -181,6 +250,67 @@ func main() {
 		if err := rd.Close(); err != nil {
 			glog.Errorf("rd.Close failed: %v", err)
 			os.Exit(1)
+		}
+	}()
+
+	go func() {
+		rootPid := getInitNsPid()
+		if rootPid == -1 {
+			glog.Error("invalid init PID namespace")
+			return
+		}
+
+		for {
+			files, err := os.ReadDir("/proc")
+			if err != nil {
+				glog.Errorf("ReadDir /proc failed: %v", err)
+				return
+			}
+
+			for _, f := range files {
+				pid, err := strconv.Atoi(f.Name())
+				if err != nil {
+					continue
+				}
+
+				nspidLink, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", pid))
+				if err != nil {
+					glog.Errorf("Readlink failed: %v", err)
+					continue
+				}
+
+				// Format "pid:[<num>]"
+				parts := strings.Split(nspidLink, ":")
+				if len(parts) < 2 {
+					continue
+				}
+
+				nspid, err := strconv.Atoi(parts[1][1 : len(parts[1])-1])
+				if err != nil {
+					continue
+				}
+
+				if nspid != rootPid {
+					cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+					if err != nil {
+						glog.Errorf("ReadFile failed: %v", err)
+						return
+					}
+
+					args := bytes.Split(cmdline, []byte{0x00})
+					var fargs []string
+					for _, arg := range args {
+						s := string(arg)
+						if s != "" {
+							fargs = append(fargs, s)
+						}
+					}
+
+					glog.Infof("jailed: pid=%d, cmdline=%s", pid, strings.Join(fargs, " "))
+				}
+			}
+
+			time.Sleep(10 * time.Second)
 		}
 	}()
 
@@ -349,32 +479,22 @@ func findLibSSL() (string, error) {
 	return "", fmt.Errorf("libssl.so not found")
 }
 
-func readProcsessInfo() {
-	files, err := os.ReadDir("/proc")
+func getInitNsPid() int {
+	nspidLink, err := os.Readlink("/proc/1/ns/pid")
 	if err != nil {
-		fmt.Println("Error reading /proc directory:", err)
-		return
+		return -1
 	}
 
-	for _, f := range files {
-		// Check if the directory name is a valid PID (an integer)
-		pid, err := strconv.Atoi(f.Name())
-		if err == nil {
-			// Now 'pid' is the integer PID of a running process
-			fmt.Printf("Found process with PID: %d\n", pid)
-
-			// Further process information can be read from files within /proc/<pid>/
-			// For example, to read the process's command line arguments:
-			cmdlinePath := fmt.Sprintf("/proc/%d/cmdline", pid)
-			cmdlineBytes, err := os.ReadFile(cmdlinePath)
-			if err != nil {
-				// Handle error (e.g., process might have exited)
-				continue
-			}
-			cmdline := string(cmdlineBytes)
-			fmt.Printf("  Command line: %s\n", cmdline)
-
-			// Other files like /proc/<pid>/status or /proc/<pid>/stat can be parsed for more details.
-		}
+	// Format "pid:[<num>]"
+	parts := strings.Split(nspidLink, ":")
+	if len(parts) < 2 {
+		return -1
 	}
+
+	pid, err := strconv.Atoi(parts[1][1 : len(parts[1])-1])
+	if err != nil {
+		return -1
+	}
+
+	return pid
 }
