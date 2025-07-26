@@ -23,6 +23,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/flowerinthenight/vortex-agent/bpf"
+	"github.com/flowerinthenight/vortex-agent/internal"
 	"github.com/golang/glog"
 )
 
@@ -196,8 +197,8 @@ func main() {
 	}()
 
 	go func() {
-		rootPid := getInitNsPid()
-		if rootPid == -1 {
+		rootPidNsId := internal.GetInitPidNsId()
+		if rootPidNsId == -1 {
 			glog.Error("invalid init PID namespace")
 			return
 		}
@@ -232,24 +233,26 @@ func main() {
 					continue
 				}
 
-				if nspid != rootPid {
-					cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-					if err != nil {
-						glog.Errorf("ReadFile failed: %v", err)
-						return
-					}
-
-					args := bytes.Split(cmdline, []byte{0x00})
-					var fargs []string
-					for _, arg := range args {
-						s := string(arg)
-						if s != "" {
-							fargs = append(fargs, s)
-						}
-					}
-
-					glog.Infof("jailed: pid=%d, cmdline=%s", pid, strings.Join(fargs, " "))
+				if nspid == rootPidNsId {
+					continue
 				}
+
+				cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+				if err != nil {
+					glog.Errorf("ReadFile failed: %v", err)
+					return
+				}
+
+				args := bytes.Split(cmdline, []byte{0x00})
+				var fargs []string
+				for _, arg := range args {
+					s := string(arg)
+					if s != "" {
+						fargs = append(fargs, s)
+					}
+				}
+
+				glog.Infof("jailed: pid=%d, cmdline=%s", pid, strings.Join(fargs, " "))
 			}
 
 			time.Sleep(10 * time.Second)
@@ -419,24 +422,4 @@ func findLibSSL() (string, error) {
 	}
 
 	return "", fmt.Errorf("libssl.so not found")
-}
-
-func getInitNsPid() int {
-	nspidLink, err := os.Readlink("/proc/1/ns/pid")
-	if err != nil {
-		return -1
-	}
-
-	// Format "pid:[<num>]"
-	parts := strings.Split(nspidLink, ":")
-	if len(parts) < 2 {
-		return -1
-	}
-
-	pid, err := strconv.Atoi(parts[1][1 : len(parts[1])-1])
-	if err != nil {
-		return -1
-	}
-
-	return pid
 }

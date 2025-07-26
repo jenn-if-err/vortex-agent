@@ -7,11 +7,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/flowerinthenight/vortex-agent/internal"
 	"github.com/flowerinthenight/vortex-agent/internal/slog"
 )
 
 func test() {
-	rootPid := getInitNsPid()
+	rootPid := internal.GetInitPidNsId()
 	if rootPid == -1 {
 		slog.Error("invalid init PID namespace")
 		return
