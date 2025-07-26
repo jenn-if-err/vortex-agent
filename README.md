@@ -18,4 +18,7 @@ $ [sudo] ./bin/vortex-agent -logtostderr
 $ kubectl create clusterrolebinding default-view \
   --clusterrole=view \
   --serviceaccount=default:default
+
+# Deploy to k8s as daemonset:
+$ kubectl create -f daemonset.yaml
 ```
