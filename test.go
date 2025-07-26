@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -12,6 +13,21 @@ import (
 )
 
 func test() {
+	if true {
+		hostname := "spanner.googleapis.com"
+		ips, err := net.LookupIP(hostname)
+		if err != nil {
+			slog.Error("Failed to resolve IP address", "hostname", hostname, "err", err)
+			return
+		}
+
+		for _, ip := range ips {
+			slog.Info("Resolved IP address", "hostname", hostname, "ip", ip.String())
+		}
+
+		return
+	}
+
 	rootPid := internal.GetInitPidNsId()
 	if rootPid == -1 {
 		slog.Error("invalid init PID namespace")

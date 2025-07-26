@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,6 +37,12 @@ import (
 var (
 	testf = flag.Bool("test", false, "Run in test mode")
 )
+
+type trafficInfo struct {
+	ExtraInfo string
+	Ingress   uint64 // bytes received
+	Egress    uint64 // bytes sent
+}
 
 func main() {
 	flag.Parse()
@@ -242,14 +249,10 @@ func main() {
 		}
 	}()
 
-	tracedTgids := make(map[uint32]string)
+	tracedTgids := make(map[uint32]*trafficInfo) // key: tgid
 	tracedTgidsMtx := sync.Mutex{}
 
 	go func(hm *ebpf.Map) {
-		// if true {
-		// 	return
-		// }
-
 		rootPidNsId := internal.GetInitPidNsId()
 		if rootPidNsId == -1 {
 			glog.Error("invalid init PID namespace")
@@ -271,7 +274,6 @@ func main() {
 
 				nspidLink, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", pid))
 				if err != nil {
-					glog.Errorf("Readlink failed: %v", err)
 					continue
 				}
 
@@ -305,7 +307,12 @@ func main() {
 					}
 				}
 
+				fullCmdline := strings.Join(fargs, " ")
 				// glog.Infof("jailed: pid=%d, cmdline=%s", pid, strings.Join(fargs, " "))
+
+				if strings.HasPrefix(fullCmdline, "/pause") {
+					continue // skip pause binaries
+				}
 
 				cgroupb, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 				if err != nil {
@@ -322,6 +329,8 @@ func main() {
 				podUidsMtx.Unlock()
 
 				for k, v := range clone {
+					// NOTE: This is a very fragile way of matching cgroup to pod. Tested only on GKE (Alphaus).
+					// Need to explore other k8s setups, i.e. EKS, AKS, OpenShift, etc.
 					kf := strings.ReplaceAll(k, "-", "_")
 					if strings.Contains(cgroup, kf) {
 						// glog.Infof("found pod: pid=%d, ns/pod=%s, cmdline=%v", pid, v, strings.Join(fargs, " "))
@@ -331,11 +340,14 @@ func main() {
 						if err != nil {
 							glog.Errorf("hm.Put failed: %v", err)
 						} else {
-							val := fmt.Sprintf("%s/%s", v, strings.Join(fargs, " "))
+							val := fmt.Sprintf("%s/%s", v, fullCmdline)
 							tracedTgidsMtx.Lock()
-							tracedTgids[tgid] = val
+							if _, ok := tracedTgids[tgid]; !ok {
+								tracedTgids[tgid] = &trafficInfo{ExtraInfo: val}
+							}
+
 							tracedTgidsMtx.Unlock()
-							glog.Infof("added to tracedTgids: tgid=%d, val=%s", tgid, val)
+							// glog.Infof("added to tracedTgids: tgid=%d, val=%s", tgid, val)
 						}
 					}
 				}
@@ -345,7 +357,41 @@ func main() {
 		}
 	}(objs.TgidsToTrace)
 
-	var count uint64
+	go func() {
+		for {
+			tracedTgidsMtx.Lock()
+			clone := make(map[uint32]*trafficInfo, len(tracedTgids))
+			maps.Copy(clone, tracedTgids)
+			tracedTgidsMtx.Unlock()
+
+			limit := 100
+			for tgid, ei := range clone {
+				var info string
+				if len(ei.ExtraInfo) <= limit {
+					info = ei.ExtraInfo
+				} else {
+					info = ei.ExtraInfo[:limit] + "..."
+				}
+
+				ingress := atomic.LoadUint64(&ei.Ingress)
+				egress := atomic.LoadUint64(&ei.Egress)
+				if (ingress + egress) == 0 {
+					continue // skip if no traffic
+				}
+
+				glog.Infof("traced tgid=%09d, info=%s, ingress=%d, egress=%d",
+					tgid,
+					info,
+					ingress,
+					egress,
+				)
+			}
+
+			time.Sleep(10 * time.Second)
+		}
+	}()
+
+	// var count uint64
 	var line strings.Builder
 	var event bpf.BpfEvent
 
@@ -361,10 +407,10 @@ func main() {
 			continue
 		}
 
-		count++
-		if count%1000 == 0 {
-			glog.Infof("count: %d", count)
-		}
+		// count++
+		// if count%1000 == 0 {
+		// 	glog.Infof("count: %d", count)
+		// }
 
 		// Parse the ringbuf event entry into a bpfEvent structure.
 		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
@@ -422,61 +468,89 @@ func main() {
 
 			glog.Info(line.String())
 		case 4:
-			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
-				event.Comm,
-				event.Pid,
-				event.Tgid,
-				intToIP(event.Saddr),
-				event.Sport,
-				intToIP(event.Daddr),
-				event.Dport,
-				event.Bytes,
-			)
+			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
+			// 	event.Comm,
+			// 	event.Pid,
+			// 	event.Tgid,
+			// 	intToIP(event.Saddr),
+			// 	event.Sport,
+			// 	intToIP(event.Daddr),
+			// 	event.Dport,
+			// 	event.Bytes,
+			// )
 
-			glog.Info(line.String())
+			tracedTgidsMtx.Lock()
+			_, exists := tracedTgids[event.Tgid]
+			tracedTgidsMtx.Unlock()
+			if exists {
+				atomic.AddUint64(&tracedTgids[event.Tgid].Egress, uint64(event.Bytes))
+			}
+
+			// glog.Info(line.String())
 		case 3:
 			if strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "sshd") {
 				continue
 			}
 
-			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_sendmsg",
-				event.Comm,
-				event.Pid,
-				event.Tgid,
-				intToIP(event.Saddr),
-				event.Sport,
-				intToIP(event.Daddr),
-				event.Dport,
-				event.Bytes,
-			)
+			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_sendmsg",
+			// 	event.Comm,
+			// 	event.Pid,
+			// 	event.Tgid,
+			// 	intToIP(event.Saddr),
+			// 	event.Sport,
+			// 	intToIP(event.Daddr),
+			// 	event.Dport,
+			// 	event.Bytes,
+			// )
 
-			glog.Info(line.String())
+			tracedTgidsMtx.Lock()
+			_, exists := tracedTgids[event.Tgid]
+			tracedTgidsMtx.Unlock()
+			if exists {
+				atomic.AddUint64(&tracedTgids[event.Tgid].Egress, uint64(event.Bytes))
+			}
+
+			// glog.Info(line.String())
 		case 2:
-			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/sock_recvmsg",
-				event.Comm,
-				event.Pid,
-				event.Tgid,
-				intToIP(event.Daddr),
-				event.Dport,
-				intToIP(event.Saddr),
-				event.Sport,
-				event.Bytes,
-			)
+			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/sock_recvmsg",
+			// 	event.Comm,
+			// 	event.Pid,
+			// 	event.Tgid,
+			// 	intToIP(event.Daddr),
+			// 	event.Dport,
+			// 	intToIP(event.Saddr),
+			// 	event.Sport,
+			// 	event.Bytes,
+			// )
 
-			glog.Info(line.String())
+			tracedTgidsMtx.Lock()
+			_, exists := tracedTgids[event.Tgid]
+			tracedTgidsMtx.Unlock()
+			if exists {
+				atomic.AddUint64(&tracedTgids[event.Tgid].Ingress, uint64(event.Bytes))
+			}
+
+			// glog.Info(line.String())
 		case 1:
-			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fentry/sock_sendmsg",
-				event.Comm,
-				event.Pid,
-				event.Tgid,
-				intToIP(event.Saddr),
-				event.Sport,
-				intToIP(event.Daddr),
-				event.Dport,
-				event.Bytes,
-			)
+			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fentry/sock_sendmsg",
+			// 	event.Comm,
+			// 	event.Pid,
+			// 	event.Tgid,
+			// 	intToIP(event.Saddr),
+			// 	event.Sport,
+			// 	intToIP(event.Daddr),
+			// 	event.Dport,
+			// 	event.Bytes,
+			// )
 
-			glog.Info(line.String())
+			tracedTgidsMtx.Lock()
+			_, exists := tracedTgids[event.Tgid]
+			tracedTgidsMtx.Unlock()
+			if exists {
+				atomic.AddUint64(&tracedTgids[event.Tgid].Egress, uint64(event.Bytes))
+			}
+
+			// glog.Info(line.String())
 		default:
 		}
 	}
