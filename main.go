@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -25,6 +26,9 @@ import (
 	"github.com/flowerinthenight/vortex-agent/bpf"
 	"github.com/flowerinthenight/vortex-agent/internal"
 	"github.com/golang/glog"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 var (
@@ -197,6 +201,39 @@ func main() {
 	}()
 
 	go func() {
+		config, err := rest.InClusterConfig()
+		if err != nil {
+			glog.Errorf("InClusterConfig failed: %v", err)
+			return
+		}
+
+		clientset, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			glog.Errorf("NewForConfig failed: %v", err)
+			return
+		}
+
+		for {
+			// Can also remove the namespace argument to list all namespaces.
+			pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), metav1.ListOptions{})
+			if err != nil {
+				glog.Errorf("List pods failed: %v", err)
+				return
+			}
+
+			for _, pod := range pods.Items {
+				glog.Infof("pod=%s, ns=%s, node=%s", pod.Name, pod.Namespace, pod.Spec.NodeName)
+			}
+
+			time.Sleep(10 * time.Second)
+		}
+	}()
+
+	go func() {
+		if true {
+			return
+		}
+
 		rootPidNsId := internal.GetInitPidNsId()
 		if rootPidNsId == -1 {
 			glog.Error("invalid init PID namespace")
@@ -237,22 +274,30 @@ func main() {
 					continue
 				}
 
-				cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+				// cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+				// if err != nil {
+				// 	glog.Errorf("ReadFile failed: %v", err)
+				// 	return
+				// }
+
+				// args := bytes.Split(cmdline, []byte{0x00})
+				// var fargs []string
+				// for _, arg := range args {
+				// 	s := string(arg)
+				// 	if s != "" {
+				// 		fargs = append(fargs, s)
+				// 	}
+				// }
+
+				// glog.Infof("jailed: pid=%d, cmdline=%s", pid, strings.Join(fargs, " "))
+
+				cgroup, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 				if err != nil {
 					glog.Errorf("ReadFile failed: %v", err)
 					return
 				}
 
-				args := bytes.Split(cmdline, []byte{0x00})
-				var fargs []string
-				for _, arg := range args {
-					s := string(arg)
-					if s != "" {
-						fargs = append(fargs, s)
-					}
-				}
-
-				glog.Infof("jailed: pid=%d, cmdline=%s", pid, strings.Join(fargs, " "))
+				glog.Infof("jailed: pid=%d, cgroup=%s", pid, string(cgroup))
 			}
 
 			time.Sleep(10 * time.Second)
