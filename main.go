@@ -11,11 +11,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -46,6 +48,9 @@ func main() {
 
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
+
+	podUids := make(map[string]string) // key: pod-uid, value: ns/pod-name
+	podUidsMtx := sync.Mutex{}
 
 	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
@@ -226,17 +231,24 @@ func main() {
 					continue // skip kube-system namespace
 				}
 
-				glog.Infof("pod=%s, ns=%s, uid=%s", pod.Name, pod.Namespace, string(pod.ObjectMeta.UID))
+				// glog.Infof("pod=%s, ns=%s, uid=%s", pod.Name, pod.Namespace, string(pod.ObjectMeta.UID))
+
+				podUidsMtx.Lock()
+				podUids[string(pod.ObjectMeta.UID)] = fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+				podUidsMtx.Unlock()
 			}
 
 			time.Sleep(10 * time.Second)
 		}
 	}()
 
-	go func() {
-		if true {
-			return
-		}
+	tracedTgids := make(map[uint32]string)
+	tracedTgidsMtx := sync.Mutex{}
+
+	go func(hm *ebpf.Map) {
+		// if true {
+		// 	return
+		// }
 
 		rootPidNsId := internal.GetInitPidNsId()
 		if rootPidNsId == -1 {
@@ -275,38 +287,63 @@ func main() {
 				}
 
 				if nspid == rootPidNsId {
-					continue
+					continue // assumed not a container process (host process)
 				}
 
-				// cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-				// if err != nil {
-				// 	glog.Errorf("ReadFile failed: %v", err)
-				// 	return
-				// }
-
-				// args := bytes.Split(cmdline, []byte{0x00})
-				// var fargs []string
-				// for _, arg := range args {
-				// 	s := string(arg)
-				// 	if s != "" {
-				// 		fargs = append(fargs, s)
-				// 	}
-				// }
-
-				// glog.Infof("jailed: pid=%d, cmdline=%s", pid, strings.Join(fargs, " "))
-
-				cgroup, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+				cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 				if err != nil {
 					glog.Errorf("ReadFile failed: %v", err)
 					return
 				}
 
-				glog.Infof("jailed: pid=%d, cgroup=%s", pid, string(cgroup))
+				args := bytes.Split(cmdline, []byte{0x00})
+				var fargs []string
+				for _, arg := range args {
+					s := string(arg)
+					if s != "" {
+						fargs = append(fargs, s)
+					}
+				}
+
+				// glog.Infof("jailed: pid=%d, cmdline=%s", pid, strings.Join(fargs, " "))
+
+				cgroupb, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+				if err != nil {
+					glog.Errorf("ReadFile failed: %v", err)
+					return
+				}
+
+				cgroup := string(cgroupb)
+				// glog.Infof("jailed: pid=%d, cgroup=%s", pid, cgroup)
+
+				podUidsMtx.Lock()
+				clone := make(map[string]string, len(podUids))
+				maps.Copy(clone, podUids)
+				podUidsMtx.Unlock()
+
+				for k, v := range clone {
+					kf := strings.ReplaceAll(k, "-", "_")
+					if strings.Contains(cgroup, kf) {
+						// glog.Infof("found pod: pid=%d, ns/pod=%s, cmdline=%v", pid, v, strings.Join(fargs, " "))
+
+						tgid := uint32(pid)
+						err = hm.Put(uint32(tgid), []byte{1}) // mark as traced
+						if err != nil {
+							glog.Errorf("hm.Put failed: %v", err)
+						} else {
+							val := fmt.Sprintf("%s/%s", v, strings.Join(fargs, " "))
+							tracedTgidsMtx.Lock()
+							tracedTgids[tgid] = val
+							tracedTgidsMtx.Unlock()
+							glog.Infof("added to tracedTgids: tgid=%d, val=%s", tgid, val)
+						}
+					}
+				}
 			}
 
 			time.Sleep(10 * time.Second)
 		}
-	}()
+	}(objs.TgidsToTrace)
 
 	var count uint64
 	var line strings.Builder
