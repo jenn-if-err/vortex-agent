@@ -10,19 +10,20 @@
 #define AF_INET6 10
 
 #define TYPE_FENTRY_SOCK_SENDMSG 1
-#define TYPE_FEXIT_SOCK_SENDMSG  2
+#define TYPE_FEXIT_SOCK_RECVMSG  2
 #define TYPE_FEXIT_TCP_SENDMSG   3
-#define TYPE_FEXIT_UDP_SENDMSG   4
-#define TYPE_TP_SYS_ENTER_SENDTO 5
-#define TYPE_UPROBE_SSL_WRITE    6
-#define TYPE_URETPROBE_SSL_WRITE 7
-#define TYPE_UPROBE_SSL_READ     8
-#define TYPE_URETPROBE_SSL_READ  9
+#define TYPE_FEXIT_TCP_RECVMSG   4
+#define TYPE_FEXIT_UDP_SENDMSG   5
+#define TYPE_FEXIT_UDP_RECVMSG   6
+#define TYPE_TP_SYS_ENTER_SENDTO 7
+#define TYPE_UPROBE_SSL_WRITE    8
+#define TYPE_URETPROBE_SSL_WRITE 9
+#define TYPE_UPROBE_SSL_READ     10
+#define TYPE_URETPROBE_SSL_READ  11
 
 struct event {
     __u8 comm[TASK_COMM_LEN]; // for debugging
     __u32 type;
-    __u32 pid;
     __u32 tgid;
     __s64 bytes;
     __be32 saddr;
@@ -47,7 +48,6 @@ struct {
 static __always_inline void set_proc_info(struct event *event) {
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    event->pid     = pid_tgid & 0xFFFFFFFF;
     event->tgid    = pid_tgid >> 32;
 }
 
@@ -94,10 +94,13 @@ int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) 
     e->type = TYPE_FENTRY_SOCK_SENDMSG;
     set_proc_info(e);
 
-    __u32 tgid = e->tgid;
-    if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
-        bpf_ringbuf_discard(e, 0);
-        return 0;
+    __u32 all = 0xFFFFFFFF;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
+        __u32 tgid = e->tgid;
+        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
+            bpf_ringbuf_discard(e, 0);
+            return 0;
+        }
     }
 
     int discard = set_sock_sendrecv_sk_info(e, sock, 1);
@@ -124,13 +127,16 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, i
         return 0;
     }
 
-    e->type = TYPE_FEXIT_SOCK_SENDMSG;
+    e->type = TYPE_FEXIT_SOCK_RECVMSG;
     set_proc_info(e);
 
-    __u32 tgid = e->tgid;
-    if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
-        bpf_ringbuf_discard(e, 0);
-        return 0;
+    __u32 all = 0xFFFFFFFF;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
+        __u32 tgid = e->tgid;
+        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
+            bpf_ringbuf_discard(e, 0);
+            return 0;
+        }
     }
 
     int discard = set_sock_sendrecv_sk_info(e, sock, ret);
@@ -166,10 +172,46 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     e->bytes = size;
     set_proc_info(e);
 
-    __u32 tgid = e->tgid;
-    if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
-        bpf_ringbuf_discard(e, 0);
+    __u32 all = 0xFFFFFFFF;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
+        __u32 tgid = e->tgid;
+        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
+            bpf_ringbuf_discard(e, 0);
+            return 0;
+        }
+    }
+
+    set_sendmsg_sk_info(e, sk);
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/*
+ * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L425
+ */
+SEC("fexit/tcp_recvmsg")
+int BPF_PROG2(tcp_recvmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, flags, int *, addr_len, int, ret) {
+    if (ret <= 0) {
         return 0;
+    }
+
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e) {
+        return 0;
+    }
+
+    e->type  = TYPE_FEXIT_TCP_RECVMSG;
+    e->bytes = ret;
+    set_proc_info(e);
+
+    __u32 all = 0xFFFFFFFF;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
+        __u32 tgid = e->tgid;
+        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
+            bpf_ringbuf_discard(e, 0);
+            return 0;
+        }
     }
 
     set_sendmsg_sk_info(e, sk);
@@ -192,10 +234,46 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     e->bytes = len;
     set_proc_info(e);
 
-    __u32 tgid = e->tgid;
-    if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
-        bpf_ringbuf_discard(e, 0);
+    __u32 all = 0xFFFFFFFF;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
+        __u32 tgid = e->tgid;
+        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
+            bpf_ringbuf_discard(e, 0);
+            return 0;
+        }
+    }
+
+    set_sendmsg_sk_info(e, sk);
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/*
+ * https://elixir.bootlin.com/linux/v6.1.146/source/net/ipv4/udp_impl.h#L20
+ */
+SEC("fexit/udp_recvmsg")
+int BPF_PROG2(udp_recvmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, flags, int *, addr_len, int, ret) {
+    if (ret <= 0) {
         return 0;
+    }
+
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e) {
+        return 0;
+    }
+
+    e->type  = TYPE_FEXIT_UDP_RECVMSG;
+    e->bytes = ret;
+    set_proc_info(e);
+
+    __u32 all = 0xFFFFFFFF;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
+        __u32 tgid = e->tgid;
+        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
+            bpf_ringbuf_discard(e, 0);
+            return 0;
+        }
     }
 
     set_sendmsg_sk_info(e, sk);

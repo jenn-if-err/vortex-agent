@@ -17,9 +17,7 @@ type BpfEvent struct {
 	_     structs.HostLayout
 	Comm  [16]uint8
 	Type  uint32
-	Pid   uint32
 	Tgid  uint32
-	_     [4]byte
 	Bytes int64
 	Saddr uint32
 	Sport uint16
@@ -74,7 +72,9 @@ type BpfProgramSpecs struct {
 	HandleEnterSendto  *ebpf.ProgramSpec `ebpf:"handle_enter_sendto"`
 	SockRecvmsgFexit   *ebpf.ProgramSpec `ebpf:"sock_recvmsg_fexit"`
 	SockSendmsgFentry  *ebpf.ProgramSpec `ebpf:"sock_sendmsg_fentry"`
+	TcpRecvmsgFexit    *ebpf.ProgramSpec `ebpf:"tcp_recvmsg_fexit"`
 	TcpSendmsgFexit    *ebpf.ProgramSpec `ebpf:"tcp_sendmsg_fexit"`
+	UdpRecvmsgFexit    *ebpf.ProgramSpec `ebpf:"udp_recvmsg_fexit"`
 	UdpSendmsgFexit    *ebpf.ProgramSpec `ebpf:"udp_sendmsg_fexit"`
 	UprobeSSL_read     *ebpf.ProgramSpec `ebpf:"uprobe_SSL_read"`
 	UprobeSSL_write    *ebpf.ProgramSpec `ebpf:"uprobe_SSL_write"`
@@ -140,7 +140,9 @@ type BpfPrograms struct {
 	HandleEnterSendto  *ebpf.Program `ebpf:"handle_enter_sendto"`
 	SockRecvmsgFexit   *ebpf.Program `ebpf:"sock_recvmsg_fexit"`
 	SockSendmsgFentry  *ebpf.Program `ebpf:"sock_sendmsg_fentry"`
+	TcpRecvmsgFexit    *ebpf.Program `ebpf:"tcp_recvmsg_fexit"`
 	TcpSendmsgFexit    *ebpf.Program `ebpf:"tcp_sendmsg_fexit"`
+	UdpRecvmsgFexit    *ebpf.Program `ebpf:"udp_recvmsg_fexit"`
 	UdpSendmsgFexit    *ebpf.Program `ebpf:"udp_sendmsg_fexit"`
 	UprobeSSL_read     *ebpf.Program `ebpf:"uprobe_SSL_read"`
 	UprobeSSL_write    *ebpf.Program `ebpf:"uprobe_SSL_write"`
@@ -153,7 +155,9 @@ func (p *BpfPrograms) Close() error {
 		p.HandleEnterSendto,
 		p.SockRecvmsgFexit,
 		p.SockSendmsgFentry,
+		p.TcpRecvmsgFexit,
 		p.TcpSendmsgFexit,
+		p.UdpRecvmsgFexit,
 		p.UdpSendmsgFexit,
 		p.UprobeSSL_read,
 		p.UprobeSSL_write,

@@ -38,9 +38,11 @@ import (
 const (
 	TYPE_UNKNOWN = iota
 	TYPE_FENTRY_SOCK_SENDMSG
-	TYPE_FEXIT_SOCK_SENDMSG
+	TYPE_FEXIT_SOCK_RECVMSG
 	TYPE_FEXIT_TCP_SENDMSG
+	TYPE_FEXIT_TCP_RECVMSG
 	TYPE_FEXIT_UDP_SENDMSG
+	TYPE_FEXIT_UDP_RECVMSG
 	TYPE_TP_SYS_ENTER_SENDTO
 	TYPE_UPROBE_SSL_WRITE
 	TYPE_URETPROBE_SSL_WRITE
@@ -86,31 +88,31 @@ func main() {
 	defer objs.Close()
 	glog.Info("BPF objects loaded successfully")
 
-	ssm, err := link.AttachTracing(link.TracingOptions{
-		Program:    objs.SockSendmsgFentry,
-		AttachType: ebpf.AttachTraceFEntry,
-	})
+	// ssm, err := link.AttachTracing(link.TracingOptions{
+	// 	Program:    objs.SockSendmsgFentry,
+	// 	AttachType: ebpf.AttachTraceFEntry,
+	// })
 
-	if err != nil {
-		glog.Errorf("fentry/sock_sendmsg failed: %v", err)
-		return
-	}
+	// if err != nil {
+	// 	glog.Errorf("fentry/sock_sendmsg failed: %v", err)
+	// 	return
+	// }
 
-	defer ssm.Close()
-	glog.Info("fentry/sock_sendmsg attached successfully")
+	// defer ssm.Close()
+	// glog.Info("fentry/sock_sendmsg attached successfully")
 
-	srm, err := link.AttachTracing(link.TracingOptions{
-		Program:    objs.SockRecvmsgFexit,
-		AttachType: ebpf.AttachTraceFExit,
-	})
+	// srm, err := link.AttachTracing(link.TracingOptions{
+	// 	Program:    objs.SockRecvmsgFexit,
+	// 	AttachType: ebpf.AttachTraceFExit,
+	// })
 
-	if err != nil {
-		glog.Errorf("fexit/sock_recvmsg failed: %v", err)
-		return
-	}
+	// if err != nil {
+	// 	glog.Errorf("fexit/sock_recvmsg failed: %v", err)
+	// 	return
+	// }
 
-	defer srm.Close()
-	glog.Info("fexit/sock_recvmsg attached successfully")
+	// defer srm.Close()
+	// glog.Info("fexit/sock_recvmsg attached successfully")
 
 	tsm, err := link.AttachTracing(link.TracingOptions{
 		Program:    objs.TcpSendmsgFexit,
@@ -125,6 +127,19 @@ func main() {
 	defer tsm.Close()
 	glog.Info("fexit/tcp_sendmsg attached successfully")
 
+	trm, err := link.AttachTracing(link.TracingOptions{
+		Program:    objs.TcpRecvmsgFexit,
+		AttachType: ebpf.AttachTraceFExit,
+	})
+
+	if err != nil {
+		glog.Errorf("fexit/tcp_recvmsg failed: %v", err)
+		return
+	}
+
+	defer trm.Close()
+	glog.Info("fexit/tcp_recvmsg attached successfully")
+
 	usm, err := link.AttachTracing(link.TracingOptions{
 		Program:    objs.UdpSendmsgFexit,
 		AttachType: ebpf.AttachTraceFExit,
@@ -137,6 +152,19 @@ func main() {
 
 	defer usm.Close()
 	glog.Info("fexit/udp_sendmsg attached successfully")
+
+	urm, err := link.AttachTracing(link.TracingOptions{
+		Program:    objs.UdpRecvmsgFexit,
+		AttachType: ebpf.AttachTraceFExit,
+	})
+
+	if err != nil {
+		glog.Errorf("fexit/udp_recvmsg failed: %v", err)
+		return
+	}
+
+	defer urm.Close()
+	glog.Info("fexit/udp_recvmsg attached successfully")
 
 	// kssm, err := link.Kprobe("sock_sendmsg", objs.SockSendmsgEntry, nil)
 	// if err != nil {
@@ -156,7 +184,7 @@ func main() {
 	// defer tpsnst.Close()
 	// slog.Info("tracepoint/syscalls/sys_enter_sendto attached successfully")
 
-	libsslPath, err := findLibSSL()
+	libsslPath, err := internal.FindLibSSL()
 	if err != nil {
 		glog.Errorf("Error finding libssl.so: %v", err)
 		return
@@ -232,6 +260,7 @@ func main() {
 	ipToDomain := make(map[string]string) // key=ip, value=domain
 	var ipToDomainMtx sync.Mutex
 
+	// TODO: This doesn't work properly. Need to figure out another way.
 	go func() {
 		for {
 			for _, domain := range domains {
@@ -253,10 +282,16 @@ func main() {
 		}
 	}()
 
+	isk8s := internal.IsK8s()
+
 	podUids := make(map[string]string) // key=pod-uid, value=ns/pod-name
 	var podUidsMtx sync.Mutex
 
 	go func() {
+		if !isk8s {
+			return
+		}
+
 		config, err := rest.InClusterConfig()
 		if err != nil {
 			glog.Errorf("InClusterConfig failed: %v", err)
@@ -270,7 +305,6 @@ func main() {
 		}
 
 		for {
-			// Can also remove the namespace argument to list all namespaces.
 			pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
 			if err != nil {
 				glog.Errorf("List pods failed: %v", err)
@@ -300,6 +334,15 @@ func main() {
 	var tracedTgidsMtx sync.Mutex
 
 	go func(hm *ebpf.Map) {
+		if !isk8s {
+			err = hm.Put(uint32(0xFFFFFFFF), []byte{1}) // mark as traced
+			if err != nil {
+				glog.Errorf("hm.Put (0xFFFFFFFF) failed: %v", err)
+			}
+
+			return
+		}
+
 		rootPidNsId := internal.GetInitPidNsId()
 		if rootPidNsId == -1 {
 			glog.Error("invalid init PID namespace")
@@ -396,30 +439,31 @@ func main() {
 					err = hm.Put(uint32(tgid), []byte{1}) // mark as traced
 					if err != nil {
 						glog.Errorf("hm.Put failed: %v", err)
-					} else {
-						ipToDomainClone := func() map[string]string {
-							ipToDomainMtx.Lock()
-							defer ipToDomainMtx.Unlock()
-							clone := make(map[string]string, len(ipToDomain))
-							maps.Copy(clone, ipToDomain)
-							return clone
-						}()
-
-						func() {
-							tracedTgidsUseMtx.Store(1)
-							defer tracedTgidsUseMtx.Store(0)
-
-							val := fmt.Sprintf("%s:%s", v, fullCmdline)
-							tracedTgidsMtx.Lock()
-							defer tracedTgidsMtx.Unlock()
-							if _, ok := tracedTgids[tgid]; !ok {
-								tracedTgids[tgid] = make(map[string]*trafficInfo)
-								for ip := range ipToDomainClone {
-									tracedTgids[tgid][ip] = &trafficInfo{ExtraInfo: val}
-								}
-							}
-						}()
+						continue
 					}
+
+					ipToDomainClone := func() map[string]string {
+						ipToDomainMtx.Lock()
+						defer ipToDomainMtx.Unlock()
+						clone := make(map[string]string, len(ipToDomain))
+						maps.Copy(clone, ipToDomain)
+						return clone
+					}()
+
+					func() {
+						tracedTgidsUseMtx.Store(1)
+						defer tracedTgidsUseMtx.Store(0)
+
+						val := fmt.Sprintf("%s:%s", v, fullCmdline)
+						tracedTgidsMtx.Lock()
+						defer tracedTgidsMtx.Unlock()
+						if _, ok := tracedTgids[tgid]; !ok {
+							tracedTgids[tgid] = make(map[string]*trafficInfo)
+							for ip := range ipToDomainClone {
+								tracedTgids[tgid][ip] = &trafficInfo{ExtraInfo: val}
+							}
+						}
+					}()
 				}
 			}
 
@@ -428,6 +472,10 @@ func main() {
 	}(objs.TgidsToTrace)
 
 	go func() {
+		if !isk8s {
+			return
+		}
+
 		for {
 			ipToDomainClone := func() map[string]string {
 				ipToDomainMtx.Lock()
@@ -510,54 +558,10 @@ func main() {
 		line.Reset()
 
 		switch event.Type {
-		case TYPE_URETPROBE_SSL_READ:
-			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uretprobe/SSL_read",
-				event.Comm,
-				event.Pid,
-				event.Tgid,
-				event.Bytes,
-			)
-
-			glog.Info(line.String())
-		case TYPE_UPROBE_SSL_READ:
-			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uprobe/SSL_read",
-				event.Comm,
-				event.Pid,
-				event.Tgid,
-				event.Bytes,
-			)
-
-			glog.Info(line.String())
-		case TYPE_URETPROBE_SSL_WRITE:
-			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uretprobe/SSL_write",
-				event.Comm,
-				event.Pid,
-				event.Tgid,
-				event.Bytes,
-			)
-
-			glog.Info(line.String())
-		case TYPE_UPROBE_SSL_WRITE:
-			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uprobe/SSL_write",
-				event.Comm,
-				event.Pid,
-				event.Tgid,
-				event.Bytes,
-			)
-
-			glog.Info(line.String())
-		case TYPE_TP_SYS_ENTER_SENDTO:
+		case TYPE_FENTRY_SOCK_SENDMSG:
 			// NOTE: Not used now.
-			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, ret=%v, fn=sys_enter_sendto",
-				event.Comm,
-				event.Pid,
-				event.Tgid,
-				event.Bytes,
-			)
 
-			glog.Info(line.String())
-		case TYPE_FEXIT_UDP_SENDMSG:
-			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
+			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fentry/sock_sendmsg",
 			// 	event.Comm,
 			// 	event.Pid,
 			// 	event.Tgid,
@@ -569,21 +573,39 @@ func main() {
 			// )
 
 			// glog.Info(line.String())
+		case TYPE_FEXIT_SOCK_RECVMSG:
+			// NOTE: Not used now.
+
+			// fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/sock_recvmsg",
+			// 	event.Comm,
+			// 	event.Tgid,
+			// 	internal.IntToIp(event.Daddr),
+			// 	event.Dport,
+			// 	internal.IntToIp(event.Saddr),
+			// 	event.Sport,
+			// 	event.Bytes,
+			// )
+
+			// glog.Info(line.String())
 		case TYPE_FEXIT_TCP_SENDMSG:
 			if strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "sshd") {
 				continue
 			}
 
-			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_sendmsg",
-			// 	event.Comm,
-			// 	event.Pid,
-			// 	event.Tgid,
-			// 	intToIP(event.Saddr),
-			// 	event.Sport,
-			// 	intToIP(event.Daddr),
-			// 	event.Dport,
-			// 	event.Bytes,
-			// )
+			if !isk8s {
+				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_sendmsg",
+					event.Comm,
+					event.Tgid,
+					internal.IntToIp(event.Saddr),
+					event.Sport,
+					internal.IntToIp(event.Daddr),
+					event.Dport,
+					event.Bytes,
+				)
+
+				// glog.Info(line.String())
+				continue
+			}
 
 			if tracedTgidsUseMtx.Load() == 0 {
 				if _, ok := tracedTgids[event.Tgid]; !ok {
@@ -619,55 +641,84 @@ func main() {
 				}()
 			}
 
-			// glog.Info(line.String())
-		case TYPE_FEXIT_SOCK_SENDMSG:
-			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/sock_recvmsg",
-			// 	event.Comm,
-			// 	event.Pid,
-			// 	event.Tgid,
-			// 	intToIP(event.Daddr),
-			// 	event.Dport,
-			// 	intToIP(event.Saddr),
-			// 	event.Sport,
-			// 	event.Bytes,
-			// )
+		case TYPE_FEXIT_TCP_RECVMSG:
+			fmt.Fprintf(&line, "buf=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_recvmsg",
+				event.Comm,
+				event.Tgid,
+				internal.IntToIp(event.Daddr),
+				event.Dport,
+				internal.IntToIp(event.Saddr),
+				event.Sport,
+				event.Bytes,
+			)
 
 			// glog.Info(line.String())
-		case TYPE_FENTRY_SOCK_SENDMSG:
-			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fentry/sock_sendmsg",
-			// 	event.Comm,
-			// 	event.Pid,
-			// 	event.Tgid,
-			// 	intToIP(event.Saddr),
-			// 	event.Sport,
-			// 	intToIP(event.Daddr),
-			// 	event.Dport,
-			// 	event.Bytes,
-			// )
+		case TYPE_FEXIT_UDP_SENDMSG:
+			fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
+				event.Comm,
+				event.Tgid,
+				internal.IntToIp(event.Saddr),
+				event.Sport,
+				internal.IntToIp(event.Daddr),
+				event.Dport,
+				event.Bytes,
+			)
 
-			// glog.Info(line.String())
+			glog.Info(line.String())
+		case TYPE_FEXIT_UDP_RECVMSG:
+			fmt.Fprintf(&line, "buf=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_recvmsg",
+				event.Comm,
+				event.Tgid,
+				internal.IntToIp(event.Daddr),
+				event.Dport,
+				internal.IntToIp(event.Saddr),
+				event.Sport,
+				event.Bytes,
+			)
+
+			glog.Info(line.String())
+		case TYPE_TP_SYS_ENTER_SENDTO:
+			// NOTE: Not used now.
+			fmt.Fprintf(&line, "comm=%s, tgid=%v, ret=%v, fn=sys_enter_sendto",
+				event.Comm,
+				event.Tgid,
+				event.Bytes,
+			)
+
+			glog.Info(line.String())
+		case TYPE_UPROBE_SSL_WRITE:
+			fmt.Fprintf(&line, "buf=%s, tgid=%v, ret=%v, fn=uprobe/SSL_write",
+				event.Comm,
+				event.Tgid,
+				event.Bytes,
+			)
+
+			glog.Info(line.String())
+		case TYPE_URETPROBE_SSL_WRITE:
+			fmt.Fprintf(&line, "buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_write",
+				event.Comm,
+				event.Tgid,
+				event.Bytes,
+			)
+
+			glog.Info(line.String())
+		case TYPE_UPROBE_SSL_READ:
+			fmt.Fprintf(&line, "buf=%s, tgid=%v, ret=%v, fn=uprobe/SSL_read",
+				event.Comm,
+				event.Tgid,
+				event.Bytes,
+			)
+
+			glog.Info(line.String())
+		case TYPE_URETPROBE_SSL_READ:
+			fmt.Fprintf(&line, "buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_read",
+				event.Comm,
+				event.Tgid,
+				event.Bytes,
+			)
+
+			glog.Info(line.String())
 		default:
 		}
 	}
-}
-
-// findLibSSL attempts to locate libssl.so
-func findLibSSL() (string, error) {
-	possiblePaths := []string{
-		"/lib/x86_64-linux-gnu/libssl.so.1.1",
-		"/usr/lib/x86_64-linux-gnu/libssl.so.1.1",
-		"/lib/x86_64-linux-gnu/libssl.so.3", // for OpenSSL 3.x
-		"/usr/lib/x86_64-linux-gnu/libssl.so.3",
-		"/usr/local/lib/libssl.so", // custom installations
-		"/lib64/libssl.so",         // RHEL/CentOS
-	}
-
-	for _, p := range possiblePaths {
-		if _, err := os.Stat(p); err == nil {
-			glog.Infof("found libssl at: %s", p)
-			return p, nil
-		}
-	}
-
-	return "", fmt.Errorf("libssl.so not found")
 }
