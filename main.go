@@ -50,6 +50,10 @@ const (
 	TYPE_URETPROBE_SSL_READ
 )
 
+const (
+	TGID_ENABLE_ALL = 0xFFFFFFFF
+)
+
 var (
 	testf = flag.Bool("test", false, "Run in test mode")
 )
@@ -336,9 +340,9 @@ func main() {
 	go func(hm *ebpf.Map) {
 		if !isk8s {
 			// Enable tracing for all processes if not in k8s.
-			err = hm.Put(uint32(0xFFFFFFFF), []byte{1}) // mark as traced
+			err = hm.Put(uint32(TGID_ENABLE_ALL), []byte{1})
 			if err != nil {
-				glog.Errorf("hm.Put (0xFFFFFFFF) failed: %v", err)
+				glog.Errorf("hm.Put (TGID_ENABLE_ALL) failed: %v", err)
 			}
 
 			return
