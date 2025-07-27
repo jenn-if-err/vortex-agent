@@ -406,7 +406,7 @@ func main() {
 								tracedTgidsUseMtx.Store(1)
 								defer tracedTgidsUseMtx.Store(0)
 
-								val := fmt.Sprintf("%s/%s", v, fullCmdline)
+								val := fmt.Sprintf("%s:%s", v, fullCmdline)
 								tracedTgidsMtx.Lock()
 								defer tracedTgidsMtx.Unlock()
 								if _, ok := tracedTgids[tgid]; !ok {
