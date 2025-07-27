@@ -56,9 +56,6 @@ func main() {
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
 
-	podUids := make(map[string]string) // key: pod-uid, value: ns/pod-name
-	podUidsMtx := sync.Mutex{}
-
 	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
 		glog.Errorf("RemoveMemlock failed: %v", err)
@@ -212,6 +209,37 @@ func main() {
 		}
 	}()
 
+	domains := []string{
+		"spanner.googleapis.com",
+	}
+
+	ipToDomain := make(map[string]string) // key=ip, value=domain
+	var ipToDomainMtx sync.Mutex
+
+	go func() {
+		for {
+			for _, domain := range domains {
+				ips, err := net.LookupIP(domain)
+				if err != nil {
+					continue
+				}
+
+				func() {
+					ipToDomainMtx.Lock()
+					defer ipToDomainMtx.Unlock()
+					for _, ip := range ips {
+						ipToDomain[ip.String()] = domain
+					}
+				}()
+			}
+
+			time.Sleep(60 * time.Second)
+		}
+	}()
+
+	podUids := make(map[string]string) // key=pod-uid, value=ns/pod-name
+	var podUidsMtx sync.Mutex
+
 	go func() {
 		config, err := rest.InClusterConfig()
 		if err != nil {
@@ -240,17 +268,20 @@ func main() {
 
 				// glog.Infof("pod=%s, ns=%s, uid=%s", pod.Name, pod.Namespace, string(pod.ObjectMeta.UID))
 
-				podUidsMtx.Lock()
-				podUids[string(pod.ObjectMeta.UID)] = fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
-				podUidsMtx.Unlock()
+				func() {
+					podUidsMtx.Lock()
+					defer podUidsMtx.Unlock()
+					podUids[string(pod.ObjectMeta.UID)] = fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+				}()
 			}
 
 			time.Sleep(10 * time.Second)
 		}
 	}()
 
-	tracedTgids := make(map[uint32]*trafficInfo) // key: tgid
-	tracedTgidsMtx := sync.Mutex{}
+	tracedTgids := make(map[uint32]map[string]*trafficInfo) // key=tgid, key(in)=ip
+	var tracedTgidsUseMtx atomic.Int32
+	var tracedTgidsMtx sync.Mutex
 
 	go func(hm *ebpf.Map) {
 		rootPidNsId := internal.GetInitPidNsId()
@@ -323,12 +354,15 @@ func main() {
 				cgroup := string(cgroupb)
 				// glog.Infof("jailed: pid=%d, cgroup=%s", pid, cgroup)
 
-				podUidsMtx.Lock()
-				clone := make(map[string]string, len(podUids))
-				maps.Copy(clone, podUids)
-				podUidsMtx.Unlock()
+				podUidsClone := func() map[string]string {
+					podUidsMtx.Lock()
+					defer podUidsMtx.Unlock()
+					clone := make(map[string]string, len(podUids))
+					maps.Copy(clone, podUids)
+					return clone
+				}()
 
-				for k, v := range clone {
+				for k, v := range podUidsClone {
 					// NOTE: This is a very fragile way of matching cgroup to pod. Tested only on GKE (Alphaus).
 					// Need to explore other k8s setups, i.e. EKS, AKS, OpenShift, etc.
 					kf := strings.ReplaceAll(k, "-", "_")
@@ -340,14 +374,28 @@ func main() {
 						if err != nil {
 							glog.Errorf("hm.Put failed: %v", err)
 						} else {
-							val := fmt.Sprintf("%s/%s", v, fullCmdline)
-							tracedTgidsMtx.Lock()
-							if _, ok := tracedTgids[tgid]; !ok {
-								tracedTgids[tgid] = &trafficInfo{ExtraInfo: val}
-							}
+							ipToDomainClone := func() map[string]string {
+								ipToDomainMtx.Lock()
+								defer ipToDomainMtx.Unlock()
+								clone := make(map[string]string, len(ipToDomain))
+								maps.Copy(clone, ipToDomain)
+								return clone
+							}()
 
-							tracedTgidsMtx.Unlock()
-							// glog.Infof("added to tracedTgids: tgid=%d, val=%s", tgid, val)
+							func() {
+								tracedTgidsUseMtx.Store(1)
+								defer tracedTgidsUseMtx.Store(0)
+
+								val := fmt.Sprintf("%s/%s", v, fullCmdline)
+								tracedTgidsMtx.Lock()
+								defer tracedTgidsMtx.Unlock()
+								if _, ok := tracedTgids[tgid]; !ok {
+									tracedTgids[tgid] = make(map[string]*trafficInfo)
+									for ip := range ipToDomainClone {
+										tracedTgids[tgid][ip] = &trafficInfo{ExtraInfo: val}
+									}
+								}
+							}()
 						}
 					}
 				}
@@ -359,39 +407,48 @@ func main() {
 
 	go func() {
 		for {
-			tracedTgidsMtx.Lock()
-			clone := make(map[uint32]*trafficInfo, len(tracedTgids))
-			maps.Copy(clone, tracedTgids)
-			tracedTgidsMtx.Unlock()
+			tracedTgidsClone := func() map[uint32]map[string]*trafficInfo {
+				tracedTgidsUseMtx.Store(1)
+				defer tracedTgidsUseMtx.Store(0)
+
+				tracedTgidsMtx.Lock()
+				defer tracedTgidsMtx.Unlock()
+				clone := make(map[uint32]map[string]*trafficInfo, len(tracedTgids))
+				maps.Copy(clone, tracedTgids)
+				return clone
+			}()
 
 			limit := 100
-			for tgid, ei := range clone {
+			for tgid, mip := range tracedTgidsClone {
 				var info string
-				if len(ei.ExtraInfo) <= limit {
-					info = ei.ExtraInfo
-				} else {
-					info = ei.ExtraInfo[:limit] + "..."
-				}
+				for ip, ei := range mip {
+					if len(ei.ExtraInfo) <= limit {
+						info = ei.ExtraInfo
+					} else {
+						info = ei.ExtraInfo[:limit] + "..."
+					}
 
-				ingress := atomic.LoadUint64(&ei.Ingress)
-				egress := atomic.LoadUint64(&ei.Egress)
-				if (ingress + egress) == 0 {
-					continue // skip if no traffic
-				}
+					ingress := atomic.LoadUint64(&ei.Ingress)
+					egress := atomic.LoadUint64(&ei.Egress)
+					if (ingress + egress) == 0 {
+						continue // skip if no traffic
+					}
 
-				glog.Infof("traced tgid=%09d, info=%s, ingress=%d, egress=%d",
-					tgid,
-					info,
-					ingress,
-					egress,
-				)
+					glog.Infof("traced: tgid=%d, ip=%v, info=%s, ingress=%d, egress=%d",
+						tgid,
+						ip,
+						info,
+						ingress,
+						egress,
+					)
+				}
 			}
 
 			time.Sleep(10 * time.Second)
 		}
 	}()
 
-	// var count uint64
+	var count uint64
 	var line strings.Builder
 	var event bpf.BpfEvent
 
@@ -407,15 +464,14 @@ func main() {
 			continue
 		}
 
-		// count++
-		// if count%1000 == 0 {
-		// 	glog.Infof("count: %d", count)
-		// }
-
-		// Parse the ringbuf event entry into a bpfEvent structure.
 		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
 			glog.Errorf("parsing ringbuf event failed: %v", err)
 			continue
+		}
+
+		count++
+		if count%1000 == 0 {
+			glog.Infof("processed %d events", count)
 		}
 
 		line.Reset()
@@ -479,13 +535,6 @@ func main() {
 			// 	event.Bytes,
 			// )
 
-			tracedTgidsMtx.Lock()
-			_, exists := tracedTgids[event.Tgid]
-			tracedTgidsMtx.Unlock()
-			if exists {
-				atomic.AddUint64(&tracedTgids[event.Tgid].Egress, uint64(event.Bytes))
-			}
-
 			// glog.Info(line.String())
 		case 3:
 			if strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "sshd") {
@@ -503,11 +552,38 @@ func main() {
 			// 	event.Bytes,
 			// )
 
-			tracedTgidsMtx.Lock()
-			_, exists := tracedTgids[event.Tgid]
-			tracedTgidsMtx.Unlock()
-			if exists {
-				atomic.AddUint64(&tracedTgids[event.Tgid].Egress, uint64(event.Bytes))
+			if tracedTgidsUseMtx.Load() == 0 {
+				if _, ok := tracedTgids[event.Tgid]; !ok {
+					continue
+				}
+
+				dstIp := internal.IntToIp(event.Daddr).String()
+				if _, ok := tracedTgids[event.Tgid][dstIp]; !ok {
+					continue // double check; should be present
+				}
+
+				atomic.AddUint64(
+					&tracedTgids[event.Tgid][dstIp].Egress,
+					uint64(event.Bytes),
+				)
+			} else {
+				func() {
+					tracedTgidsMtx.Lock()
+					defer tracedTgidsMtx.Unlock()
+					if _, ok := tracedTgids[event.Tgid]; !ok {
+						return
+					}
+
+					dstIp := internal.IntToIp(event.Daddr).String()
+					if _, ok := tracedTgids[event.Tgid][dstIp]; !ok {
+						return
+					}
+
+					atomic.AddUint64(
+						&tracedTgids[event.Tgid][dstIp].Egress,
+						uint64(event.Bytes),
+					)
+				}()
 			}
 
 			// glog.Info(line.String())
@@ -523,13 +599,6 @@ func main() {
 			// 	event.Bytes,
 			// )
 
-			tracedTgidsMtx.Lock()
-			_, exists := tracedTgids[event.Tgid]
-			tracedTgidsMtx.Unlock()
-			if exists {
-				atomic.AddUint64(&tracedTgids[event.Tgid].Ingress, uint64(event.Bytes))
-			}
-
 			// glog.Info(line.String())
 		case 1:
 			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fentry/sock_sendmsg",
@@ -543,24 +612,10 @@ func main() {
 			// 	event.Bytes,
 			// )
 
-			tracedTgidsMtx.Lock()
-			_, exists := tracedTgids[event.Tgid]
-			tracedTgidsMtx.Unlock()
-			if exists {
-				atomic.AddUint64(&tracedTgids[event.Tgid].Egress, uint64(event.Bytes))
-			}
-
 			// glog.Info(line.String())
 		default:
 		}
 	}
-}
-
-// intToIP converts IPv4 number to net.IP
-func intToIP(ipNum uint32) net.IP {
-	ip := make(net.IP, 4)
-	binary.LittleEndian.PutUint32(ip, ipNum)
-	return ip
 }
 
 // findLibSSL attempts to locate libssl.so

@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"net"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/flowerinthenight/vortex-agent/internal"
 	"github.com/flowerinthenight/vortex-agent/internal/slog"
@@ -14,17 +16,66 @@ import (
 
 func test() {
 	if true {
-		hostname := "spanner.googleapis.com"
-		ips, err := net.LookupIP(hostname)
-		if err != nil {
-			slog.Error("Failed to resolve IP address", "hostname", hostname, "err", err)
-			return
+		type vT struct {
+			a int
+			b uint64
 		}
 
-		for _, ip := range ips {
-			slog.Info("Resolved IP address", "hostname", hostname, "ip", ip.String())
-		}
+		m := make(map[int]map[int]*vT)
+		m[0] = make(map[int]*vT)
+		m[0][1] = &vT{}
 
+		var x sync.Mutex
+		var w sync.WaitGroup
+		var useLock atomic.Int32
+		var ulcnt uint64
+
+		w.Add(1)
+		go func() {
+			defer w.Done()
+			for i := range []int{1, 2, 3, 4, 5} {
+				func() {
+					useLock.Store(1)
+					defer useLock.Store(0)
+
+					x.Lock()
+					defer x.Unlock()
+					m[i] = make(map[int]*vT)
+					m[i][1] = &vT{}
+				}()
+
+				time.Sleep(5 * time.Second)
+			}
+		}()
+
+		start := time.Now()
+
+		w.Add(1)
+		go func() {
+			defer w.Done()
+			for range 3_000_000_000 {
+				var print bool
+				if useLock.Load() == 0 {
+					atomic.AddUint64(&m[0][1].b, 1)
+					print = false
+				} else {
+					if !print {
+						slog.Info("useLock is set, locking")
+						print = true
+					}
+
+					func() {
+						x.Lock()
+						defer x.Unlock()
+						atomic.AddUint64(&m[0][1].b, 1)
+						atomic.AddUint64(&ulcnt, 1)
+					}()
+				}
+			}
+		}()
+
+		w.Wait()
+		slog.Info("test completed:", "m", m, "lockCount", ulcnt, "duration", time.Since(start))
 		return
 	}
 
