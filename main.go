@@ -379,7 +379,7 @@ func main() {
 				}()
 
 				for k, v := range podUidsClone {
-					// NOTE: This is a very fragile way of matching cgroup to pod.
+					// NOTE: This is a very fragile way of matching cgroups to pods.
 					// Tested only on GKE (Alphaus). Need to explore other k8s setups,
 					// i.e. EKS, AKS, OpenShift, etc.
 					kf := strings.ReplaceAll(k, "-", "_")
