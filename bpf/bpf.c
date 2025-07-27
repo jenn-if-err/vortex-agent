@@ -38,6 +38,10 @@ struct {
     __type(value, struct event);
 } events SEC(".maps");
 
+/*
+ * Map to control which TGIDs are traced. A key of 0xFFFFFFFF means all
+ * TGIDs are traced. Otherwise, only the provided TGIDs are traced.
+ */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);

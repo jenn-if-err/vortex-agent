@@ -640,7 +640,6 @@ func main() {
 					)
 				}()
 			}
-
 		case TYPE_FEXIT_TCP_RECVMSG:
 			fmt.Fprintf(&line, "buf=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_recvmsg",
 				event.Comm,
