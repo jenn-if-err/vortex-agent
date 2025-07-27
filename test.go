@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/flowerinthenight/vortex-agent/internal"
 	"github.com/flowerinthenight/vortex-agent/internal/slog"
 )
 
@@ -79,11 +78,11 @@ func test() {
 		return
 	}
 
-	rootPid := internal.GetInitPidNsId()
-	if rootPid == -1 {
-		slog.Error("invalid init PID namespace")
-		return
-	}
+	// rootPid := internal.GetInitPidNsId()
+	// if rootPid == -1 {
+	// 	slog.Error("invalid init PID namespace")
+	// 	return
+	// }
 
 	files, err := os.ReadDir("/proc")
 	if err != nil {
@@ -97,52 +96,96 @@ func test() {
 			continue // Not a valid PID, skip
 		}
 
-		nspidLink, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", pid))
-		if err != nil {
-			slog.Error("Failed to read link for PID namespace:", "pid", pid, "err", err)
-			continue
-		}
-
-		// Format "pid:[<num>]"
-		parts := strings.Split(nspidLink, ":")
-		if len(parts) < 2 {
-			continue
-		}
-
-		nspid, err := strconv.Atoi(parts[1][1 : len(parts[1])-1])
-		if err != nil {
-			continue
-		}
-
-		if nspid != rootPid {
-			slog.Info("Process not in init PID namespace:", "pid", pid, "nspid", nspid)
-			cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		func() {
+			filePath := fmt.Sprintf("/proc/%d/maps", pid)
+			file, err := os.Open(filePath)
 			if err != nil {
-				slog.Error("Failed to read cmdline for PID:", "pid", pid, "err", err)
+				slog.Error("Open failed:", "pid", pid, "err", err)
 				return
 			}
 
-			// Split by null characters, which separate arguments in /proc/cmdline
-			// Filter out empty strings that might result from trailing nulls
-			args := bytes.Split(cmdline, []byte{0x00})
-			var cleanArgs []string
-			for _, arg := range args {
-				s := string(arg)
-				if s != "" {
-					cleanArgs = append(cleanArgs, s)
+			defer file.Close()
+			scanner := bufio.NewScanner(file)
+			for scanner.Scan() {
+				line := scanner.Text()
+				parts := strings.Fields(line)
+
+				if len(parts) >= 6 {
+					addressRange := parts[0]
+					permissions := parts[1]
+					offset := parts[2]
+					deviceName := parts[3]
+					inode, _ := strconv.Atoi(parts[4])
+					path := ""
+					if len(parts) > 5 {
+						path = strings.Join(parts[5:], " ")
+					}
+
+					if strings.Contains(path, "libssl") {
+						slog.Info("map:",
+							"pid", pid,
+							"addressRange", addressRange,
+							"permissions", permissions,
+							"offset", offset,
+							"deviceName", deviceName,
+							"inode", inode,
+							"path", path,
+						)
+					}
 				}
 			}
 
-			slog.Info("jailed:", "pid", pid, "cmdline", strings.Join(cleanArgs, " "))
-		}
+			if err := scanner.Err(); err != nil {
+				slog.Error("Error reading file:", "pid", pid, "err", err)
+			}
+		}()
 
-		cgroupb, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
-		if err != nil {
-			slog.Error("ReadFile failed:", "pid", pid, "err", err)
-			return
-		}
+		// nspidLink, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", pid))
+		// if err != nil {
+		// 	slog.Error("Failed to read link for PID namespace:", "pid", pid, "err", err)
+		// 	continue
+		// }
 
-		cgroup := string(cgroupb)
-		slog.Info("cgroup for PID", "pid", pid, "cgroup", cgroup)
+		// // Format "pid:[<num>]"
+		// parts := strings.Split(nspidLink, ":")
+		// if len(parts) < 2 {
+		// 	continue
+		// }
+
+		// nspid, err := strconv.Atoi(parts[1][1 : len(parts[1])-1])
+		// if err != nil {
+		// 	continue
+		// }
+
+		// if nspid != rootPid {
+		// 	slog.Info("Process not in init PID namespace:", "pid", pid, "nspid", nspid)
+		// 	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		// 	if err != nil {
+		// 		slog.Error("Failed to read cmdline for PID:", "pid", pid, "err", err)
+		// 		return
+		// 	}
+
+		// 	// Split by null characters, which separate arguments in /proc/cmdline
+		// 	// Filter out empty strings that might result from trailing nulls
+		// 	args := bytes.Split(cmdline, []byte{0x00})
+		// 	var cleanArgs []string
+		// 	for _, arg := range args {
+		// 		s := string(arg)
+		// 		if s != "" {
+		// 			cleanArgs = append(cleanArgs, s)
+		// 		}
+		// 	}
+
+		// 	slog.Info("jailed:", "pid", pid, "cmdline", strings.Join(cleanArgs, " "))
+		// }
+
+		// cgroupb, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+		// if err != nil {
+		// 	slog.Error("ReadFile failed:", "pid", pid, "err", err)
+		// 	return
+		// }
+
+		// cgroup := string(cgroupb)
+		// slog.Info("cgroup for PID", "pid", pid, "cgroup", cgroup)
 	}
 }

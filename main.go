@@ -346,6 +346,10 @@ func main() {
 			}
 
 			return
+		} else {
+			if true {
+				return // TODO: test only; remove later
+			}
 		}
 
 		rootPidNsId := internal.GetInitPidNsId()
@@ -578,6 +582,7 @@ func main() {
 			// )
 
 			// glog.Info(line.String())
+
 		case TYPE_FEXIT_SOCK_RECVMSG:
 			// NOTE: Not used now.
 
@@ -592,6 +597,7 @@ func main() {
 			// )
 
 			// glog.Info(line.String())
+
 		case TYPE_FEXIT_TCP_SENDMSG:
 			if strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "sshd") {
 				continue
@@ -608,7 +614,7 @@ func main() {
 					event.Bytes,
 				)
 
-				// glog.Info(line.String())
+				glog.Info(line.String())
 				continue
 			}
 
@@ -646,41 +652,47 @@ func main() {
 				}()
 			}
 		case TYPE_FEXIT_TCP_RECVMSG:
-			fmt.Fprintf(&line, "buf=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_recvmsg",
-				event.Comm,
-				event.Tgid,
-				internal.IntToIp(event.Daddr),
-				event.Dport,
-				internal.IntToIp(event.Saddr),
-				event.Sport,
-				event.Bytes,
-			)
+			if !isk8s {
+				fmt.Fprintf(&line, "buf=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_recvmsg",
+					event.Comm,
+					event.Tgid,
+					internal.IntToIp(event.Daddr),
+					event.Dport,
+					internal.IntToIp(event.Saddr),
+					event.Sport,
+					event.Bytes,
+				)
 
-			// glog.Info(line.String())
+				glog.Info(line.String())
+			}
 		case TYPE_FEXIT_UDP_SENDMSG:
-			fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
-				event.Comm,
-				event.Tgid,
-				internal.IntToIp(event.Saddr),
-				event.Sport,
-				internal.IntToIp(event.Daddr),
-				event.Dport,
-				event.Bytes,
-			)
+			if !isk8s {
+				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
+					event.Comm,
+					event.Tgid,
+					internal.IntToIp(event.Saddr),
+					event.Sport,
+					internal.IntToIp(event.Daddr),
+					event.Dport,
+					event.Bytes,
+				)
 
-			glog.Info(line.String())
+				glog.Info(line.String())
+			}
 		case TYPE_FEXIT_UDP_RECVMSG:
-			fmt.Fprintf(&line, "buf=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_recvmsg",
-				event.Comm,
-				event.Tgid,
-				internal.IntToIp(event.Daddr),
-				event.Dport,
-				internal.IntToIp(event.Saddr),
-				event.Sport,
-				event.Bytes,
-			)
+			if !isk8s {
+				fmt.Fprintf(&line, "buf=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_recvmsg",
+					event.Comm,
+					event.Tgid,
+					internal.IntToIp(event.Daddr),
+					event.Dport,
+					internal.IntToIp(event.Saddr),
+					event.Sport,
+					event.Bytes,
+				)
 
-			glog.Info(line.String())
+				glog.Info(line.String())
+			}
 		case TYPE_TP_SYS_ENTER_SENDTO:
 			// NOTE: Not used now.
 			fmt.Fprintf(&line, "comm=%s, tgid=%v, ret=%v, fn=sys_enter_sendto",

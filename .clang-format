@@ -4,7 +4,7 @@ BasedOnStyle: LLVM
 Language: Cpp
 IndentWidth: 4
 UseTab: Never
-ColumnLimit: 0
+ColumnLimit: 120
 AlignConsecutiveAssignments: true
 AlignTrailingComments: true
 IncludeBlocks: Preserve

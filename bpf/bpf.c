@@ -57,7 +57,7 @@ static __always_inline void set_proc_info(struct event *event) {
 
 static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct socket *sock, long ret) {
     event->bytes = ret;
-    int ret_val = 0;
+    int ret_val  = 0;
 
     __s16 sk_type = 0;
     BPF_CORE_READ_INTO(&sk_type, sock, type);
@@ -195,7 +195,7 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
  * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L425
  */
 SEC("fexit/tcp_recvmsg")
-int BPF_PROG2(tcp_recvmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, flags, int *, addr_len, int, ret) {
+int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
     if (ret <= 0) {
         return 0;
     }
@@ -257,7 +257,7 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
  * https://elixir.bootlin.com/linux/v6.1.146/source/net/ipv4/udp_impl.h#L20
  */
 SEC("fexit/udp_recvmsg")
-int BPF_PROG2(udp_recvmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, flags, int *, addr_len, int, ret) {
+int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
     if (ret <= 0) {
         return 0;
     }
