@@ -15,7 +15,7 @@ import (
 )
 
 func test() {
-	if true {
+	if false {
 		type vT struct {
 			a int
 			b uint64
@@ -135,5 +135,14 @@ func test() {
 
 			slog.Info("jailed:", "pid", pid, "cmdline", strings.Join(cleanArgs, " "))
 		}
+
+		cgroupb, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+		if err != nil {
+			slog.Error("ReadFile failed:", "pid", pid, "err", err)
+			return
+		}
+
+		cgroup := string(cgroupb)
+		slog.Info("cgroup for PID", "pid", pid, "cgroup", cgroup)
 	}
 }
