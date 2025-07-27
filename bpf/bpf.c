@@ -328,7 +328,7 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
  */
 
 /*
- * uprobe|uretprobe for SSL_write (called before encryption).
+ * uprobe for SSL_write (called before encryption).
  * int SSL_write(SSL *s, const void *buf, int num);
  */
 SEC("uprobe/SSL_write")
@@ -354,6 +354,10 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
     return 0;
 }
 
+/*
+ * uretprobe for SSL_write (called after encryption); provides return value.
+ * int SSL_write(SSL *s, const void *buf, int num);
+ */
 SEC("uretprobe/SSL_write")
 int uretprobe_SSL_write(struct pt_regs *ctx) {
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
@@ -377,7 +381,7 @@ int uretprobe_SSL_write(struct pt_regs *ctx) {
 }
 
 /*
- * uprobe|uretprobe for SSL_read (called after decryption).
+ * uprobe for SSL_read (called after decryption).
  * int SSL_read(SSL *s, void *buf, int num);
  */
 SEC("uprobe/SSL_read")
@@ -403,6 +407,10 @@ int uprobe_SSL_read(struct pt_regs *ctx) {
     return 0;
 }
 
+/*
+ * uretprobe for SSL_read (called after decryption); provides return value.
+ * int SSL_read(SSL *s, void *buf, int num);
+ */
 SEC("uretprobe/SSL_read")
 int uretprobe_SSL_read(struct pt_regs *ctx) {
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
