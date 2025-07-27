@@ -226,6 +226,7 @@ func main() {
 	domains := []string{
 		"spanner.googleapis.com",
 		"bigquery.googleapis.com",
+		"pubsub.googleapis.com",
 	}
 
 	ipToDomain := make(map[string]string) // key=ip, value=domain
@@ -378,45 +379,46 @@ func main() {
 				}()
 
 				for k, v := range podUidsClone {
-					// NOTE: This is a very fragile way of matching cgroup to pod. Tested only on GKE (Alphaus).
-					// Need to explore other k8s setups, i.e. EKS, AKS, OpenShift, etc.
+					// NOTE: This is a very fragile way of matching cgroup to pod.
+					// Tested only on GKE (Alphaus). Need to explore other k8s setups,
+					// i.e. EKS, AKS, OpenShift, etc.
 					kf := strings.ReplaceAll(k, "-", "_")
-					if strings.Contains(cgroup, kf) {
-						// glog.Infof("found pod: pid=%d, ns/pod=%s, cmdline=%v", pid, v, strings.Join(fargs, " "))
+					if !strings.Contains(cgroup, kf) {
+						continue
+					}
 
-						// For demo only, skip Alphaus' rmdaily - so many python processes.
-						if strings.Contains(v, "rmdaily") {
-							continue // TODO: remove later
-						}
+					// For demo only, skip Alphaus' rmdaily - so many python processes.
+					if strings.Contains(v, "rmdaily") {
+						continue // TODO: remove later
+					}
 
-						tgid := uint32(pid)
-						err = hm.Put(uint32(tgid), []byte{1}) // mark as traced
-						if err != nil {
-							glog.Errorf("hm.Put failed: %v", err)
-						} else {
-							ipToDomainClone := func() map[string]string {
-								ipToDomainMtx.Lock()
-								defer ipToDomainMtx.Unlock()
-								clone := make(map[string]string, len(ipToDomain))
-								maps.Copy(clone, ipToDomain)
-								return clone
-							}()
+					tgid := uint32(pid)
+					err = hm.Put(uint32(tgid), []byte{1}) // mark as traced
+					if err != nil {
+						glog.Errorf("hm.Put failed: %v", err)
+					} else {
+						ipToDomainClone := func() map[string]string {
+							ipToDomainMtx.Lock()
+							defer ipToDomainMtx.Unlock()
+							clone := make(map[string]string, len(ipToDomain))
+							maps.Copy(clone, ipToDomain)
+							return clone
+						}()
 
-							func() {
-								tracedTgidsUseMtx.Store(1)
-								defer tracedTgidsUseMtx.Store(0)
+						func() {
+							tracedTgidsUseMtx.Store(1)
+							defer tracedTgidsUseMtx.Store(0)
 
-								val := fmt.Sprintf("%s:%s", v, fullCmdline)
-								tracedTgidsMtx.Lock()
-								defer tracedTgidsMtx.Unlock()
-								if _, ok := tracedTgids[tgid]; !ok {
-									tracedTgids[tgid] = make(map[string]*trafficInfo)
-									for ip := range ipToDomainClone {
-										tracedTgids[tgid][ip] = &trafficInfo{ExtraInfo: val}
-									}
+							val := fmt.Sprintf("%s:%s", v, fullCmdline)
+							tracedTgidsMtx.Lock()
+							defer tracedTgidsMtx.Unlock()
+							if _, ok := tracedTgids[tgid]; !ok {
+								tracedTgids[tgid] = make(map[string]*trafficInfo)
+								for ip := range ipToDomainClone {
+									tracedTgids[tgid][ip] = &trafficInfo{ExtraInfo: val}
 								}
-							}()
-						}
+							}
+						}()
 					}
 				}
 			}
