@@ -317,12 +317,11 @@ func main() {
 					continue // skip kube-system namespace
 				}
 
-				// glog.Infof("pod=%s, ns=%s, uid=%s", pod.Name, pod.Namespace, string(pod.ObjectMeta.UID))
-
 				func() {
 					podUidsMtx.Lock()
 					defer podUidsMtx.Unlock()
-					podUids[string(pod.ObjectMeta.UID)] = fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+					val := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+					podUids[string(pod.ObjectMeta.UID)] = val
 				}()
 			}
 
@@ -336,6 +335,7 @@ func main() {
 
 	go func(hm *ebpf.Map) {
 		if !isk8s {
+			// Enable tracing for all processes if not in k8s.
 			err = hm.Put(uint32(0xFFFFFFFF), []byte{1}) // mark as traced
 			if err != nil {
 				glog.Errorf("hm.Put (0xFFFFFFFF) failed: %v", err)
