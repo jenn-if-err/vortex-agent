@@ -86,7 +86,7 @@ func main() {
 	}
 
 	defer objs.Close()
-	glog.Info("BPF objects loaded successfully")
+	glog.Info("BPF objects loaded")
 
 	// ssm, err := link.AttachTracing(link.TracingOptions{
 	// 	Program:    objs.SockSendmsgFentry,
@@ -125,7 +125,7 @@ func main() {
 	}
 
 	defer tsm.Close()
-	glog.Info("fexit/tcp_sendmsg attached successfully")
+	glog.Info("fexit/tcp_sendmsg attached")
 
 	trm, err := link.AttachTracing(link.TracingOptions{
 		Program:    objs.TcpRecvmsgFexit,
@@ -138,7 +138,7 @@ func main() {
 	}
 
 	defer trm.Close()
-	glog.Info("fexit/tcp_recvmsg attached successfully")
+	glog.Info("fexit/tcp_recvmsg attached")
 
 	usm, err := link.AttachTracing(link.TracingOptions{
 		Program:    objs.UdpSendmsgFexit,
@@ -151,7 +151,7 @@ func main() {
 	}
 
 	defer usm.Close()
-	glog.Info("fexit/udp_sendmsg attached successfully")
+	glog.Info("fexit/udp_sendmsg attached")
 
 	urm, err := link.AttachTracing(link.TracingOptions{
 		Program:    objs.UdpRecvmsgFexit,
@@ -164,7 +164,7 @@ func main() {
 	}
 
 	defer urm.Close()
-	glog.Info("fexit/udp_recvmsg attached successfully")
+	glog.Info("fexit/udp_recvmsg attached")
 
 	// kssm, err := link.Kprobe("sock_sendmsg", objs.SockSendmsgEntry, nil)
 	// if err != nil {
@@ -173,7 +173,7 @@ func main() {
 	// }
 
 	// defer kssm.Close()
-	// slog.Info("kprobe/sock_sendmsg attached successfully")
+	// slog.Info("kprobe/sock_sendmsg attached")
 
 	// tpsnst, err := link.Tracepoint("syscalls", "sys_enter_sendto", objs.HandleEnterSendto, nil)
 	// if err != nil {
@@ -182,7 +182,7 @@ func main() {
 	// }
 
 	// defer tpsnst.Close()
-	// slog.Info("tracepoint/syscalls/sys_enter_sendto attached successfully")
+	// slog.Info("tracepoint/syscalls/sys_enter_sendto attached")
 
 	libsslPath, err := internal.FindLibSSL()
 	if err != nil {
@@ -205,7 +205,7 @@ func main() {
 		}
 
 		defer upSSLWrite.Close()
-		glog.Info("uprobe/SSL_write attached successfully")
+		glog.Info("uprobe/SSL_write attached")
 
 		urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
 		if err != nil {
@@ -214,7 +214,7 @@ func main() {
 		}
 
 		defer urpSSLWrite.Close()
-		glog.Info("uretprobe/SSL_write attached successfully")
+		glog.Info("uretprobe/SSL_write attached")
 
 		upSSLRead, err := ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
 		if err != nil {
@@ -223,7 +223,7 @@ func main() {
 		}
 
 		defer upSSLRead.Close()
-		glog.Info("uprobe/SSL_read attached successfully")
+		glog.Info("uprobe/SSL_read attached")
 
 		urpSSLRead, err := ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
 		if err != nil {
@@ -232,7 +232,7 @@ func main() {
 		}
 
 		defer urpSSLRead.Close()
-		glog.Info("uretprobe/SSL_read attached successfully")
+		glog.Info("uretprobe/SSL_read attached")
 	}
 
 	rd, err := ringbuf.NewReader(objs.Events)
