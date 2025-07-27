@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"unsafe"
-
-	"github.com/golang/glog"
 )
 
 // IsLE checks the endianness of the system
@@ -69,7 +67,6 @@ func FindLibSSL() (string, error) {
 
 	for _, p := range possiblePaths {
 		if _, err := os.Stat(p); err == nil {
-			glog.Infof("found libssl at: %s", p)
 			return p, nil
 		}
 	}

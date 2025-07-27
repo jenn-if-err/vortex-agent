@@ -191,6 +191,7 @@ func main() {
 	}
 
 	if libsslPath != "" {
+		glog.Infof("found libssl at: %s", libsslPath)
 		ex, err := link.OpenExecutable(libsslPath)
 		if err != nil {
 			glog.Errorf("OpenExecutable failed: %v", err)
