@@ -34,6 +34,20 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+// Same defs from bpf.c:
+const (
+	TYPE_UNKNOWN = iota
+	TYPE_FENTRY_SOCK_SENDMSG
+	TYPE_FEXIT_SOCK_SENDMSG
+	TYPE_FEXIT_TCP_SENDMSG
+	TYPE_FEXIT_UDP_SENDMSG
+	TYPE_TP_SYS_ENTER_SENDTO
+	TYPE_UPROBE_SSL_WRITE
+	TYPE_URETPROBE_SSL_WRITE
+	TYPE_UPROBE_SSL_READ
+	TYPE_URETPROBE_SSL_READ
+)
+
 var (
 	testf = flag.Bool("test", false, "Run in test mode")
 )
@@ -211,6 +225,7 @@ func main() {
 
 	domains := []string{
 		"spanner.googleapis.com",
+		"bigquery.googleapis.com",
 	}
 
 	ipToDomain := make(map[string]string) // key=ip, value=domain
@@ -369,6 +384,11 @@ func main() {
 					if strings.Contains(cgroup, kf) {
 						// glog.Infof("found pod: pid=%d, ns/pod=%s, cmdline=%v", pid, v, strings.Join(fargs, " "))
 
+						// For demo only, skip Alphaus' rmdaily - so many python processes.
+						if strings.Contains(v, "rmdaily") {
+							continue // TODO: remove later
+						}
+
 						tgid := uint32(pid)
 						err = hm.Put(uint32(tgid), []byte{1}) // mark as traced
 						if err != nil {
@@ -407,6 +427,14 @@ func main() {
 
 	go func() {
 		for {
+			ipToDomainClone := func() map[string]string {
+				ipToDomainMtx.Lock()
+				defer ipToDomainMtx.Unlock()
+				clone := make(map[string]string, len(ipToDomain))
+				maps.Copy(clone, ipToDomain)
+				return clone
+			}()
+
 			tracedTgidsClone := func() map[uint32]map[string]*trafficInfo {
 				tracedTgidsUseMtx.Store(1)
 				defer tracedTgidsUseMtx.Store(0)
@@ -434,9 +462,10 @@ func main() {
 						continue // skip if no traffic
 					}
 
-					glog.Infof("traced: tgid=%d, ip=%v, info=%s, ingress=%d, egress=%d",
+					glog.Infof("tgid=%d, ip=%v|%v, info=%s, ingress=%d, egress=%d",
 						tgid,
 						ip,
+						ipToDomainClone[ip],
 						info,
 						ingress,
 						egress,
@@ -444,11 +473,13 @@ func main() {
 				}
 			}
 
+			glog.Infof("%d tgids under trace", len(tracedTgidsClone))
+
 			time.Sleep(10 * time.Second)
 		}
 	}()
 
-	var count uint64
+	// var count uint64
 	var line strings.Builder
 	var event bpf.BpfEvent
 
@@ -469,15 +500,15 @@ func main() {
 			continue
 		}
 
-		count++
-		if count%1000 == 0 {
-			glog.Infof("processed %d events", count)
-		}
+		// count++
+		// if count%1000 == 0 {
+		// 	glog.Infof("processed %d events", count)
+		// }
 
 		line.Reset()
 
 		switch event.Type {
-		case 9:
+		case TYPE_URETPROBE_SSL_READ:
 			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uretprobe/SSL_read",
 				event.Comm,
 				event.Pid,
@@ -486,7 +517,7 @@ func main() {
 			)
 
 			glog.Info(line.String())
-		case 8:
+		case TYPE_UPROBE_SSL_READ:
 			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uprobe/SSL_read",
 				event.Comm,
 				event.Pid,
@@ -495,7 +526,7 @@ func main() {
 			)
 
 			glog.Info(line.String())
-		case 7:
+		case TYPE_URETPROBE_SSL_WRITE:
 			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uretprobe/SSL_write",
 				event.Comm,
 				event.Pid,
@@ -504,7 +535,7 @@ func main() {
 			)
 
 			glog.Info(line.String())
-		case 6:
+		case TYPE_UPROBE_SSL_WRITE:
 			fmt.Fprintf(&line, "buf=%s, pid=%v, tgid=%v, ret=%v, fn=uprobe/SSL_write",
 				event.Comm,
 				event.Pid,
@@ -513,7 +544,7 @@ func main() {
 			)
 
 			glog.Info(line.String())
-		case 5:
+		case TYPE_TP_SYS_ENTER_SENDTO:
 			// NOTE: Not used now.
 			fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, ret=%v, fn=sys_enter_sendto",
 				event.Comm,
@@ -523,7 +554,7 @@ func main() {
 			)
 
 			glog.Info(line.String())
-		case 4:
+		case TYPE_FEXIT_UDP_SENDMSG:
 			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
 			// 	event.Comm,
 			// 	event.Pid,
@@ -536,7 +567,7 @@ func main() {
 			// )
 
 			// glog.Info(line.String())
-		case 3:
+		case TYPE_FEXIT_TCP_SENDMSG:
 			if strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "sshd") {
 				continue
 			}
@@ -587,7 +618,7 @@ func main() {
 			}
 
 			// glog.Info(line.String())
-		case 2:
+		case TYPE_FEXIT_SOCK_SENDMSG:
 			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/sock_recvmsg",
 			// 	event.Comm,
 			// 	event.Pid,
@@ -600,7 +631,7 @@ func main() {
 			// )
 
 			// glog.Info(line.String())
-		case 1:
+		case TYPE_FENTRY_SOCK_SENDMSG:
 			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fentry/sock_sendmsg",
 			// 	event.Comm,
 			// 	event.Pid,
