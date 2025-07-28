@@ -188,55 +188,59 @@ func main() {
 	// defer tpsnst.Close()
 	// slog.Info("tracepoint/syscalls/sys_enter_sendto attached")
 
-	libsslPath, err := internal.FindLibSSL()
-	if err != nil {
-		glog.Errorf("Error finding libssl.so: %v", err)
-		return
-	}
+	isk8s := internal.IsK8s()
 
-	if libsslPath != "" {
-		glog.Infof("found libssl at: %s", libsslPath)
-		ex, err := link.OpenExecutable(libsslPath)
+	if !isk8s {
+		libsslPath, err := internal.FindLibSSL("")
 		if err != nil {
-			glog.Errorf("OpenExecutable failed: %v", err)
+			glog.Errorf("Error finding libssl.so: %v", err)
 			return
 		}
 
-		upSSLWrite, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
-		if err != nil {
-			glog.Errorf("Uprobe (uprobe/SSL_write) failed: %v", err)
-			return
+		if libsslPath != "" {
+			glog.Infof("found libssl at: %s", libsslPath)
+			ex, err := link.OpenExecutable(libsslPath)
+			if err != nil {
+				glog.Errorf("OpenExecutable failed: %v", err)
+				return
+			}
+
+			upSSLWrite, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
+			if err != nil {
+				glog.Errorf("uprobe/SSL_write failed: %v", err)
+				return
+			}
+
+			defer upSSLWrite.Close()
+			glog.Info("uprobe/SSL_write attached")
+
+			urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+			if err != nil {
+				glog.Errorf("uretprobe/SSL_write failed: %v", err)
+				return
+			}
+
+			defer urpSSLWrite.Close()
+			glog.Info("uretprobe/SSL_write attached")
+
+			upSSLRead, err := ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+			if err != nil {
+				glog.Errorf("uprobe/SSL_read failed: %v", err)
+				return
+			}
+
+			defer upSSLRead.Close()
+			glog.Info("uprobe/SSL_read attached")
+
+			urpSSLRead, err := ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
+			if err != nil {
+				glog.Errorf("uretprobe/SSL_read failed: %v", err)
+				return
+			}
+
+			defer urpSSLRead.Close()
+			glog.Info("uretprobe/SSL_read attached")
 		}
-
-		defer upSSLWrite.Close()
-		glog.Info("uprobe/SSL_write attached")
-
-		urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
-		if err != nil {
-			glog.Errorf("Uretprobe (uretprobe/SSL_write) failed: %v", err)
-			return
-		}
-
-		defer urpSSLWrite.Close()
-		glog.Info("uretprobe/SSL_write attached")
-
-		upSSLRead, err := ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
-		if err != nil {
-			glog.Errorf("Uprobe (uprobe/SSL_read) failed: %v", err)
-			return
-		}
-
-		defer upSSLRead.Close()
-		glog.Info("uprobe/SSL_read attached")
-
-		urpSSLRead, err := ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
-		if err != nil {
-			glog.Errorf("Uretprobe (uretprobe/SSL_read) failed: %v", err)
-			return
-		}
-
-		defer urpSSLRead.Close()
-		glog.Info("uretprobe/SSL_read attached")
 	}
 
 	rd, err := ringbuf.NewReader(objs.Events)
@@ -287,8 +291,6 @@ func main() {
 		}
 	}()
 
-	isk8s := internal.IsK8s()
-
 	podUids := make(map[string]string) // key=pod-uid, value=ns/pod-name
 	var podUidsMtx sync.Mutex
 
@@ -337,6 +339,15 @@ func main() {
 	var tracedTgidsUseMtx atomic.Int32
 	var tracedTgidsMtx sync.Mutex
 
+	linksToClose := []link.Link{}
+	defer func(list *[]link.Link) {
+		for _, l := range *list {
+			if err := l.Close(); err != nil {
+				glog.Errorf("link.Close failed: %v", err)
+			}
+		}
+	}(&linksToClose)
+
 	go func(hm *ebpf.Map) {
 		if !isk8s {
 			// Enable tracing for all processes if not in k8s.
@@ -357,6 +368,8 @@ func main() {
 			glog.Error("invalid init PID namespace")
 			return
 		}
+
+		sslAttached := make(map[string]bool) // key=libssl path, value=true
 
 		for {
 			files, err := os.ReadDir("/proc")
@@ -413,6 +426,80 @@ func main() {
 					continue // skip pause binaries
 				}
 
+				// For demo only, skip Alphaus' rmdaily - so many python processes.
+				if strings.Contains(fullCmdline, "rmdaily") {
+					continue // TODO: remove later
+				}
+
+				// For demo only, skip Alphaus' rmdaily - so many python processes.
+				if strings.Contains(fullCmdline, "google-cloud-sdk") {
+					continue // TODO: remove later
+				}
+
+				// ---------------------------------------------
+				// TODO: fn is adding to list outside of goroutine!
+				func() {
+					rootPath := fmt.Sprintf("/proc/%d/root", pid)
+					libsslPath, err := internal.FindLibSSL(rootPath)
+					if err != nil {
+						return
+					}
+
+					if libsslPath == "" {
+						return
+					}
+
+					if _, ok := sslAttached[rootPath]; ok {
+						return // already attached
+					}
+
+					sslAttached[rootPath] = true // mark as attached
+
+					glog.Infof("found libssl at: %s", libsslPath)
+					ex, err := link.OpenExecutable(libsslPath)
+					if err != nil {
+						glog.Errorf("OpenExecutable failed: %v", err)
+						return
+					}
+
+					upSSLWrite, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
+					if err != nil {
+						glog.Errorf("uprobe/SSL_write (%v) failed: %v", libsslPath, err)
+						return
+					}
+
+					linksToClose = append(linksToClose, upSSLWrite)
+					glog.Infof("uprobe/SSL_write attached for %v", libsslPath)
+
+					urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+					if err != nil {
+						glog.Errorf("uretprobe/SSL_write (%v) failed: %v", libsslPath, err)
+						return
+					}
+
+					linksToClose = append(linksToClose, urpSSLWrite)
+					glog.Infof("uretprobe/SSL_write attached for %v", libsslPath)
+
+					upSSLRead, err := ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+					if err != nil {
+						glog.Errorf("uprobe/SSL_read (%v) failed: %v", libsslPath, err)
+						return
+					}
+
+					linksToClose = append(linksToClose, upSSLRead)
+					glog.Infof("uprobe/SSL_read attached for %v", libsslPath)
+
+					urpSSLRead, err := ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
+					if err != nil {
+						glog.Errorf("uretprobe/SSL_read (%v) failed: %v", libsslPath, err)
+						return
+					}
+
+					linksToClose = append(linksToClose, urpSSLRead)
+					glog.Infof("uretprobe/SSL_read attached for %v", libsslPath)
+				}()
+				// ---------------------------------------------
+
 				cgroupb, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 				if err != nil {
 					glog.Errorf("ReadFile failed: %v", err)
@@ -441,6 +528,11 @@ func main() {
 
 					// For demo only, skip Alphaus' rmdaily - so many python processes.
 					if strings.Contains(v, "rmdaily") {
+						continue // TODO: remove later
+					}
+
+					// For demo only, skip Alphaus' rmdaily - so many python processes.
+					if strings.Contains(fullCmdline, "google-cloud-sdk") {
 						continue // TODO: remove later
 					}
 
@@ -481,7 +573,7 @@ func main() {
 	}(objs.TgidsToTrace)
 
 	go func() {
-		if !isk8s {
+		if !isk8s || true {
 			return
 		}
 

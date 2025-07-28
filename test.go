@@ -14,6 +14,18 @@ import (
 )
 
 func test() {
+	if true {
+		a := []int{}
+		defer func(l *[]int) {
+			for i, v := range *l {
+				slog.Info("defer called", "index", i, "value", v)
+			}
+		}(&a)
+
+		a = append(a, 1, 2, 3)
+		return
+	}
+
 	if false {
 		type vT struct {
 			a int
@@ -121,7 +133,7 @@ func test() {
 						path = strings.Join(parts[5:], " ")
 					}
 
-					if strings.Contains(path, "libssl") {
+					if strings.Contains(path, "libssl.so") {
 						slog.Info("map:",
 							"pid", pid,
 							"addressRange", addressRange,

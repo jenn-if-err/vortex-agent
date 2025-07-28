@@ -55,7 +55,7 @@ func IsK8s() bool {
 	return exists
 }
 
-func FindLibSSL() (string, error) {
+func FindLibSSL(root string) (string, error) {
 	possiblePaths := []string{
 		"/lib/x86_64-linux-gnu/libssl.so.1.1",
 		"/usr/lib/x86_64-linux-gnu/libssl.so.1.1",
@@ -66,8 +66,9 @@ func FindLibSSL() (string, error) {
 	}
 
 	for _, p := range possiblePaths {
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
+		path := fmt.Sprintf("%s%s", root, p)
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
 		}
 	}
 
