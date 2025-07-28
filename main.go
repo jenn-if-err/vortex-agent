@@ -56,6 +56,10 @@ const (
 
 var (
 	testf = flag.Bool("test", false, "Run in test mode")
+
+	cctx = func(p context.Context) context.Context {
+		return context.WithValue(p, struct{}{}, nil)
+	}
 )
 
 type trafficInfo struct {
@@ -73,6 +77,7 @@ func main() {
 		return
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
 
@@ -253,6 +258,7 @@ func main() {
 
 	go func() {
 		<-stopper
+		cancel()
 
 		if err := rd.Close(); err != nil {
 			glog.Errorf("rd.Close failed: %v", err)
@@ -268,10 +274,18 @@ func main() {
 
 	ipToDomain := make(map[string]string) // key=ip, value=domain
 	var ipToDomainMtx sync.Mutex
+	ipToDomainCtx := cctx(ctx)
+
+	var wg sync.WaitGroup
 
 	// TODO: This doesn't work properly. Need to figure out another way.
+	wg.Add(1)
 	go func() {
-		for {
+		defer wg.Done()
+		ticker := time.NewTicker(time.Second * 60)
+		var active atomic.Int32
+
+		do := func() {
 			for _, domain := range domains {
 				ips, err := net.LookupIP(domain)
 				if err != nil {
@@ -286,15 +300,31 @@ func main() {
 					}
 				}()
 			}
+		}
 
-			time.Sleep(60 * time.Second)
+		for {
+			select {
+			case <-ipToDomainCtx.Done():
+				ticker.Stop()
+				return
+			case <-ticker.C:
+			}
+
+			if active.Load() == 1 {
+				continue
+			}
+
+			go do()
 		}
 	}()
 
 	podUids := make(map[string]string) // key=pod-uid, value=ns/pod-name
 	var podUidsMtx sync.Mutex
+	podUidsCtx := cctx(ctx)
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if !isk8s {
 			return
 		}
@@ -311,8 +341,11 @@ func main() {
 			return
 		}
 
-		for {
-			pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
+		ticker := time.NewTicker(time.Second * 10)
+		var active atomic.Int32
+
+		do := func() {
+			pods, err := clientset.CoreV1().Pods("").List(podUidsCtx, metav1.ListOptions{})
 			if err != nil {
 				glog.Errorf("List pods failed: %v", err)
 				return
@@ -330,14 +363,28 @@ func main() {
 					podUids[string(pod.ObjectMeta.UID)] = val
 				}()
 			}
+		}
 
-			time.Sleep(10 * time.Second)
+		for {
+			select {
+			case <-podUidsCtx.Done():
+				ticker.Stop()
+				return
+			case <-ticker.C:
+			}
+
+			if active.Load() == 1 {
+				continue
+			}
+
+			go do()
 		}
 	}()
 
 	tracedTgids := make(map[uint32]map[string]*trafficInfo) // key=tgid, key(in)=ip
 	var tracedTgidsUseMtx atomic.Int32
 	var tracedTgidsMtx sync.Mutex
+	tracedTgidsCtx := cctx(ctx)
 
 	linksToClose := []link.Link{}
 	defer func(list *[]link.Link) {
@@ -348,7 +395,9 @@ func main() {
 		}
 	}(&linksToClose)
 
+	wg.Add(1)
 	go func(hm *ebpf.Map) {
+		defer wg.Done()
 		if !isk8s {
 			// Enable tracing for all processes if not in k8s.
 			err = hm.Put(uint32(TGID_ENABLE_ALL), []byte{1})
@@ -371,7 +420,10 @@ func main() {
 
 		sslAttached := make(map[string]bool) // key=libssl path, value=true
 
-		for {
+		ticker := time.NewTicker(time.Second * 10)
+		var active atomic.Int32
+
+		do := func() {
 			files, err := os.ReadDir("/proc")
 			if err != nil {
 				glog.Errorf("ReadDir /proc failed: %v", err)
@@ -439,6 +491,10 @@ func main() {
 				// ---------------------------------------------
 				// TODO: fn is adding to list outside of goroutine!
 				func() {
+					if true {
+						return // TODO: test only; remove later
+					}
+
 					rootPath := fmt.Sprintf("/proc/%d/root", pid)
 					libsslPath, err := internal.FindLibSSL(rootPath)
 					if err != nil {
@@ -567,17 +623,37 @@ func main() {
 					}()
 				}
 			}
+		}
 
-			time.Sleep(10 * time.Second)
+		for {
+			select {
+			case <-tracedTgidsCtx.Done():
+				ticker.Stop()
+				return
+			case <-ticker.C:
+			}
+
+			if active.Load() == 1 {
+				continue
+			}
+
+			go do()
 		}
 	}(objs.TgidsToTrace)
 
+	printerCtx := cctx(ctx)
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if !isk8s || true {
 			return
 		}
 
-		for {
+		ticker := time.NewTicker(time.Second * 10)
+		var active atomic.Int32
+
+		do := func() {
 			ipToDomainClone := func() map[string]string {
 				ipToDomainMtx.Lock()
 				defer ipToDomainMtx.Unlock()
@@ -625,8 +701,21 @@ func main() {
 			}
 
 			glog.Infof("%d tgids under trace", len(tracedTgidsClone))
+		}
 
-			time.Sleep(10 * time.Second)
+		for {
+			select {
+			case <-printerCtx.Done():
+				ticker.Stop()
+				return
+			case <-ticker.C:
+			}
+
+			if active.Load() == 1 {
+				continue
+			}
+
+			go do()
 		}
 	}()
 
@@ -639,7 +728,7 @@ func main() {
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				glog.Info("received signal, exiting...")
-				return
+				break
 			}
 
 			glog.Errorf("reading from reader failed: %v", err)
@@ -706,7 +795,7 @@ func main() {
 					event.Bytes,
 				)
 
-				glog.Info(line.String())
+				// glog.Info(line.String())
 				continue
 			}
 
@@ -745,7 +834,7 @@ func main() {
 			}
 		case TYPE_FEXIT_TCP_RECVMSG:
 			if !isk8s {
-				fmt.Fprintf(&line, "buf=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_recvmsg",
+				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_recvmsg",
 					event.Comm,
 					event.Tgid,
 					internal.IntToIp(event.Daddr),
@@ -755,7 +844,7 @@ func main() {
 					event.Bytes,
 				)
 
-				glog.Info(line.String())
+				// glog.Info(line.String())
 			}
 		case TYPE_FEXIT_UDP_SENDMSG:
 			if !isk8s {
@@ -769,11 +858,11 @@ func main() {
 					event.Bytes,
 				)
 
-				glog.Info(line.String())
+				// glog.Info(line.String())
 			}
 		case TYPE_FEXIT_UDP_RECVMSG:
 			if !isk8s {
-				fmt.Fprintf(&line, "buf=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_recvmsg",
+				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_recvmsg",
 					event.Comm,
 					event.Tgid,
 					internal.IntToIp(event.Daddr),
@@ -829,4 +918,6 @@ func main() {
 		default:
 		}
 	}
+
+	wg.Wait()
 }
