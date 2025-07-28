@@ -27,6 +27,12 @@ type BpfEvent struct {
 	_     [2]byte
 }
 
+type BpfSslCtx struct {
+	_   structs.HostLayout
+	Buf [16]uint8
+	Num int32
+}
+
 // LoadBpf returns the embedded CollectionSpec for Bpf.
 func LoadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -87,6 +93,8 @@ type BpfProgramSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type BpfMapSpecs struct {
 	Events       *ebpf.MapSpec `ebpf:"events"`
+	SslReadMap   *ebpf.MapSpec `ebpf:"ssl_read_map"`
+	SslWriteMap  *ebpf.MapSpec `ebpf:"ssl_write_map"`
 	TgidsToTrace *ebpf.MapSpec `ebpf:"tgids_to_trace"`
 }
 
@@ -117,12 +125,16 @@ func (o *BpfObjects) Close() error {
 // It can be passed to LoadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type BpfMaps struct {
 	Events       *ebpf.Map `ebpf:"events"`
+	SslReadMap   *ebpf.Map `ebpf:"ssl_read_map"`
+	SslWriteMap  *ebpf.Map `ebpf:"ssl_write_map"`
 	TgidsToTrace *ebpf.Map `ebpf:"tgids_to_trace"`
 }
 
 func (m *BpfMaps) Close() error {
 	return _BpfClose(
 		m.Events,
+		m.SslReadMap,
+		m.SslWriteMap,
 		m.TgidsToTrace,
 	)
 }

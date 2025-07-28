@@ -49,15 +49,34 @@ struct {
     __type(value, __u8);
 } tgids_to_trace SEC(".maps");
 
+struct ssl_ctx {
+    __u8 buf[TASK_COMM_LEN];
+    int num;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key, __u64);
+    __type(value, struct ssl_ctx);
+} ssl_write_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key, __u64);
+    __type(value, struct ssl_ctx);
+} ssl_read_map SEC(".maps");
+
 static __always_inline void set_proc_info(struct event *event) {
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    event->tgid    = pid_tgid >> 32;
+    event->tgid = pid_tgid >> 32;
 }
 
 static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct socket *sock, long ret) {
     event->bytes = ret;
-    int ret_val  = 0;
+    int ret_val = 0;
 
     __s16 sk_type = 0;
     BPF_CORE_READ_INTO(&sk_type, sock, type);
@@ -172,7 +191,7 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
         return 0;
     }
 
-    e->type  = TYPE_FEXIT_TCP_SENDMSG;
+    e->type = TYPE_FEXIT_TCP_SENDMSG;
     e->bytes = size;
     set_proc_info(e);
 
@@ -205,7 +224,7 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return 0;
     }
 
-    e->type  = TYPE_FEXIT_TCP_RECVMSG;
+    e->type = TYPE_FEXIT_TCP_RECVMSG;
     e->bytes = ret;
     set_proc_info(e);
 
@@ -234,7 +253,7 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
         return 0;
     }
 
-    e->type  = TYPE_FEXIT_UDP_SENDMSG;
+    e->type = TYPE_FEXIT_UDP_SENDMSG;
     e->bytes = len;
     set_proc_info(e);
 
@@ -267,7 +286,7 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return 0;
     }
 
-    e->type  = TYPE_FEXIT_UDP_RECVMSG;
+    e->type = TYPE_FEXIT_UDP_RECVMSG;
     e->bytes = ret;
     set_proc_info(e);
 
@@ -310,7 +329,7 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
         return 0;
     }
 
-    e->type  = TYPE_TP_SYS_ENTER_SENDTO;
+    e->type = TYPE_TP_SYS_ENTER_SENDTO;
     e->bytes = len;
     set_proc_info(e);
 
@@ -333,6 +352,19 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
  */
 SEC("uprobe/SSL_write")
 int uprobe_SSL_write(struct pt_regs *ctx) {
+    struct ssl_ctx val = {
+        .num = (int)PT_REGS_PARM3(ctx),
+    };
+
+    void *buf = (void *)PT_REGS_PARM2(ctx);
+    __u32 num = (__u32)val.num;
+    __u32 len = num > TASK_COMM_LEN ? TASK_COMM_LEN : num;
+    if (bpf_probe_read_user(&val.buf, len, buf) != 0) {
+        bpf_printk("ret/ssl_write: bpf_probe_read_user failed");
+        return 0;
+    }
+
+    /*
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e) {
         return 0;
@@ -350,7 +382,13 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
         return 0;
     }
 
+
     bpf_ringbuf_submit(e, 0);
+    */
+
+    __u64 id = bpf_get_current_pid_tgid();
+    bpf_map_update_elem(&ssl_write_map, &id, &val, BPF_ANY);
+
     return 0;
 }
 
@@ -360,8 +398,17 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
  */
 SEC("uretprobe/SSL_write")
 int uretprobe_SSL_write(struct pt_regs *ctx) {
+    __u64 tgid = bpf_get_current_pid_tgid();
+    struct ssl_ctx *val = bpf_map_lookup_elem(&ssl_write_map, &tgid);
+    if (!val) {
+        bpf_printk("ret/ssl_write: bpf_map_lookup_elem failed");
+        return 0;
+    }
+
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e) {
+        bpf_printk("ret/ssl_write: bpf_ringbuf_reserve failed");
+        bpf_map_delete_elem(&ssl_write_map, &tgid);
         return 0;
     }
 
@@ -369,14 +416,25 @@ int uretprobe_SSL_write(struct pt_regs *ctx) {
     set_proc_info(e);
 
     int ret = (int)PT_REGS_RC(ctx);
-    if (ret < 0) {
+    if (ret <= 0) {
+        bpf_printk("ret/ssl_write: ret=%d", ret);
+        bpf_map_delete_elem(&ssl_write_map, &tgid);
         bpf_ringbuf_discard(e, 0);
         return 0;
     }
 
     e->bytes = (__s64)ret;
+    __u32 len = ret > TASK_COMM_LEN ? TASK_COMM_LEN : ret;
+    if (bpf_probe_read(&e->comm, len, val->buf) != 0) {
+        bpf_printk("ret/ssl_write: bpf_probe_read failed");
+        bpf_map_delete_elem(&ssl_write_map, &tgid);
+        bpf_ringbuf_discard(e, 0);
+        return 0;
+    }
 
+    bpf_map_delete_elem(&ssl_write_map, &tgid);
     bpf_ringbuf_submit(e, 0);
+
     return 0;
 }
 
@@ -386,6 +444,7 @@ int uretprobe_SSL_write(struct pt_regs *ctx) {
  */
 SEC("uprobe/SSL_read")
 int uprobe_SSL_read(struct pt_regs *ctx) {
+    /*
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e) {
         return 0;
@@ -405,6 +464,24 @@ int uprobe_SSL_read(struct pt_regs *ctx) {
 
     bpf_ringbuf_submit(e, 0);
     return 0;
+    */
+
+    struct ssl_ctx val = {
+        .num = (int)PT_REGS_PARM3(ctx),
+    };
+
+    void *buf = (void *)PT_REGS_PARM2(ctx);
+    __u32 num = (__u32)val.num;
+    __u32 len = num > TASK_COMM_LEN ? TASK_COMM_LEN : num;
+    if (bpf_probe_read_user(&val.buf, len, buf) != 0) {
+        bpf_printk("ssl_read: bpf_probe_read_user failed");
+        return 0;
+    }
+
+    __u64 id = bpf_get_current_pid_tgid();
+    bpf_map_update_elem(&ssl_read_map, &id, &val, BPF_ANY);
+
+    return 0;
 }
 
 /*
@@ -413,6 +490,7 @@ int uprobe_SSL_read(struct pt_regs *ctx) {
  */
 SEC("uretprobe/SSL_read")
 int uretprobe_SSL_read(struct pt_regs *ctx) {
+    /*
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e) {
         return 0;
@@ -427,9 +505,55 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
         return 0;
     }
 
-    e->bytes = (__s64)ret;
+    e->bytes  = (__s64)ret;
+    void *buf = (void *)PT_REGS_PARM2(ctx);
+    __u32 len = ret > TASK_COMM_LEN ? TASK_COMM_LEN : ret;
+    if (bpf_probe_read_user(&e->comm, len, buf) != 0) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
+    }
 
     bpf_ringbuf_submit(e, 0);
+    return 0;
+    */
+
+    __u64 tgid = bpf_get_current_pid_tgid();
+    struct ssl_ctx *val = bpf_map_lookup_elem(&ssl_read_map, &tgid);
+    if (!val) {
+        bpf_printk("ret/ssl_read: bpf_map_lookup_elem failed");
+        return 0;
+    }
+
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e) {
+        bpf_printk("ret/ssl_read: bpf_ringbuf_reserve failed");
+        bpf_map_delete_elem(&ssl_read_map, &tgid);
+        return 0;
+    }
+
+    e->type = TYPE_URETPROBE_SSL_READ;
+    set_proc_info(e);
+
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret <= 0) {
+        bpf_printk("ret/ssl_read: ret=%d", ret);
+        bpf_map_delete_elem(&ssl_read_map, &tgid);
+        bpf_ringbuf_discard(e, 0);
+        return 0;
+    }
+
+    e->bytes = (__s64)ret;
+    __u32 len = ret > TASK_COMM_LEN ? TASK_COMM_LEN : ret;
+    if (bpf_probe_read(&e->comm, len, val->buf) != 0) {
+        bpf_printk("ret/ssl_read: bpf_probe_read");
+        bpf_map_delete_elem(&ssl_read_map, &tgid);
+        bpf_ringbuf_discard(e, 0);
+        return 0;
+    }
+
+    bpf_map_delete_elem(&ssl_read_map, &tgid);
+    bpf_ringbuf_submit(e, 0);
+
     return 0;
 }
 
