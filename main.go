@@ -872,7 +872,7 @@ func main() {
 					event.Bytes,
 				)
 
-				glog.Info(line.String())
+				// glog.Info(line.String())
 			}
 		case TYPE_TP_SYS_ENTER_SENDTO:
 			// NOTE: Not used now.
