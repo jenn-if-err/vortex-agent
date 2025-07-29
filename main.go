@@ -269,7 +269,6 @@ func main() {
 	domains := []string{
 		"spanner.googleapis.com",
 		"bigquery.googleapis.com",
-		"pubsub.googleapis.com",
 	}
 
 	ipToDomain := make(map[string]string) // key=ip, value=domain
@@ -282,10 +281,13 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ticker := time.NewTicker(time.Second * 60)
+		ticker := time.NewTicker(time.Second * 10)
 		var active atomic.Int32
 
 		do := func() {
+			active.Store(1)
+			defer active.Store(0)
+
 			for _, domain := range domains {
 				ips, err := net.LookupIP(domain)
 				if err != nil {
@@ -345,6 +347,9 @@ func main() {
 		var active atomic.Int32
 
 		do := func() {
+			active.Store(1)
+			defer active.Store(0)
+
 			pods, err := clientset.CoreV1().Pods("").List(podUidsCtx, metav1.ListOptions{})
 			if err != nil {
 				glog.Errorf("List pods failed: %v", err)
@@ -407,7 +412,7 @@ func main() {
 
 			return
 		} else {
-			if true {
+			if false {
 				return // TODO: test only; remove later
 			}
 		}
@@ -424,6 +429,9 @@ func main() {
 		var active atomic.Int32
 
 		do := func() {
+			active.Store(1)
+			defer active.Store(0)
+
 			files, err := os.ReadDir("/proc")
 			if err != nil {
 				glog.Errorf("ReadDir /proc failed: %v", err)
@@ -646,7 +654,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if !isk8s || true {
+		if !isk8s {
 			return
 		}
 
@@ -654,6 +662,9 @@ func main() {
 		var active atomic.Int32
 
 		do := func() {
+			active.Store(1)
+			defer active.Store(0)
+
 			ipToDomainClone := func() map[string]string {
 				ipToDomainMtx.Lock()
 				defer ipToDomainMtx.Unlock()
