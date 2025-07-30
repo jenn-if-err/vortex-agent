@@ -221,14 +221,14 @@ func main() {
 			defer upSSLWrite.Close()
 			glog.Info("uprobe/SSL_write attached")
 
-			urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_write failed: %v", err)
-				return
-			}
+			// urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+			// if err != nil {
+			// 	glog.Errorf("uretprobe/SSL_write failed: %v", err)
+			// 	return
+			// }
 
-			defer urpSSLWrite.Close()
-			glog.Info("uretprobe/SSL_write attached")
+			// defer urpSSLWrite.Close()
+			// glog.Info("uretprobe/SSL_write attached")
 
 			upSSLRead, err := ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
 			if err != nil {
@@ -541,14 +541,14 @@ func main() {
 					linksToClose = append(linksToClose, upSSLWrite)
 					glog.Infof("uprobe/SSL_write attached for %v", libsslPath)
 
-					urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
-					if err != nil {
-						glog.Errorf("uretprobe/SSL_write (%v) failed: %v", libsslPath, err)
-						return
-					}
+					// urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+					// if err != nil {
+					// 	glog.Errorf("uretprobe/SSL_write (%v) failed: %v", libsslPath, err)
+					// 	return
+					// }
 
-					linksToClose = append(linksToClose, urpSSLWrite)
-					glog.Infof("uretprobe/SSL_write attached for %v", libsslPath)
+					// linksToClose = append(linksToClose, urpSSLWrite)
+					// glog.Infof("uretprobe/SSL_write attached for %v", libsslPath)
 
 					upSSLRead, err := ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
 					if err != nil {

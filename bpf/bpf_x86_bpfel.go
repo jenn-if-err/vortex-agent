@@ -15,7 +15,7 @@ import (
 
 type BpfEvent struct {
 	_     structs.HostLayout
-	Comm  [16]uint8
+	Comm  [256]uint8
 	Type  uint32
 	Tgid  uint32
 	Bytes int64
@@ -25,12 +25,6 @@ type BpfEvent struct {
 	Daddr uint32
 	Dport uint16
 	_     [2]byte
-}
-
-type BpfSslCtx struct {
-	_   structs.HostLayout
-	Buf [16]uint8
-	Num int32
 }
 
 // LoadBpf returns the embedded CollectionSpec for Bpf.
@@ -75,17 +69,16 @@ type BpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type BpfProgramSpecs struct {
-	HandleEnterSendto  *ebpf.ProgramSpec `ebpf:"handle_enter_sendto"`
-	SockRecvmsgFexit   *ebpf.ProgramSpec `ebpf:"sock_recvmsg_fexit"`
-	SockSendmsgFentry  *ebpf.ProgramSpec `ebpf:"sock_sendmsg_fentry"`
-	TcpRecvmsgFexit    *ebpf.ProgramSpec `ebpf:"tcp_recvmsg_fexit"`
-	TcpSendmsgFexit    *ebpf.ProgramSpec `ebpf:"tcp_sendmsg_fexit"`
-	UdpRecvmsgFexit    *ebpf.ProgramSpec `ebpf:"udp_recvmsg_fexit"`
-	UdpSendmsgFexit    *ebpf.ProgramSpec `ebpf:"udp_sendmsg_fexit"`
-	UprobeSSL_read     *ebpf.ProgramSpec `ebpf:"uprobe_SSL_read"`
-	UprobeSSL_write    *ebpf.ProgramSpec `ebpf:"uprobe_SSL_write"`
-	UretprobeSSL_read  *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_read"`
-	UretprobeSSL_write *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_write"`
+	HandleEnterSendto *ebpf.ProgramSpec `ebpf:"handle_enter_sendto"`
+	SockRecvmsgFexit  *ebpf.ProgramSpec `ebpf:"sock_recvmsg_fexit"`
+	SockSendmsgFentry *ebpf.ProgramSpec `ebpf:"sock_sendmsg_fentry"`
+	TcpRecvmsgFexit   *ebpf.ProgramSpec `ebpf:"tcp_recvmsg_fexit"`
+	TcpSendmsgFexit   *ebpf.ProgramSpec `ebpf:"tcp_sendmsg_fexit"`
+	UdpRecvmsgFexit   *ebpf.ProgramSpec `ebpf:"udp_recvmsg_fexit"`
+	UdpSendmsgFexit   *ebpf.ProgramSpec `ebpf:"udp_sendmsg_fexit"`
+	UprobeSSL_read    *ebpf.ProgramSpec `ebpf:"uprobe_SSL_read"`
+	UprobeSSL_write   *ebpf.ProgramSpec `ebpf:"uprobe_SSL_write"`
+	UretprobeSSL_read *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_read"`
 }
 
 // BpfMapSpecs contains maps before they are loaded into the kernel.
@@ -94,7 +87,6 @@ type BpfProgramSpecs struct {
 type BpfMapSpecs struct {
 	Events       *ebpf.MapSpec `ebpf:"events"`
 	SslReadMap   *ebpf.MapSpec `ebpf:"ssl_read_map"`
-	SslWriteMap  *ebpf.MapSpec `ebpf:"ssl_write_map"`
 	TgidsToTrace *ebpf.MapSpec `ebpf:"tgids_to_trace"`
 }
 
@@ -126,7 +118,6 @@ func (o *BpfObjects) Close() error {
 type BpfMaps struct {
 	Events       *ebpf.Map `ebpf:"events"`
 	SslReadMap   *ebpf.Map `ebpf:"ssl_read_map"`
-	SslWriteMap  *ebpf.Map `ebpf:"ssl_write_map"`
 	TgidsToTrace *ebpf.Map `ebpf:"tgids_to_trace"`
 }
 
@@ -134,7 +125,6 @@ func (m *BpfMaps) Close() error {
 	return _BpfClose(
 		m.Events,
 		m.SslReadMap,
-		m.SslWriteMap,
 		m.TgidsToTrace,
 	)
 }
@@ -149,17 +139,16 @@ type BpfVariables struct {
 //
 // It can be passed to LoadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type BpfPrograms struct {
-	HandleEnterSendto  *ebpf.Program `ebpf:"handle_enter_sendto"`
-	SockRecvmsgFexit   *ebpf.Program `ebpf:"sock_recvmsg_fexit"`
-	SockSendmsgFentry  *ebpf.Program `ebpf:"sock_sendmsg_fentry"`
-	TcpRecvmsgFexit    *ebpf.Program `ebpf:"tcp_recvmsg_fexit"`
-	TcpSendmsgFexit    *ebpf.Program `ebpf:"tcp_sendmsg_fexit"`
-	UdpRecvmsgFexit    *ebpf.Program `ebpf:"udp_recvmsg_fexit"`
-	UdpSendmsgFexit    *ebpf.Program `ebpf:"udp_sendmsg_fexit"`
-	UprobeSSL_read     *ebpf.Program `ebpf:"uprobe_SSL_read"`
-	UprobeSSL_write    *ebpf.Program `ebpf:"uprobe_SSL_write"`
-	UretprobeSSL_read  *ebpf.Program `ebpf:"uretprobe_SSL_read"`
-	UretprobeSSL_write *ebpf.Program `ebpf:"uretprobe_SSL_write"`
+	HandleEnterSendto *ebpf.Program `ebpf:"handle_enter_sendto"`
+	SockRecvmsgFexit  *ebpf.Program `ebpf:"sock_recvmsg_fexit"`
+	SockSendmsgFentry *ebpf.Program `ebpf:"sock_sendmsg_fentry"`
+	TcpRecvmsgFexit   *ebpf.Program `ebpf:"tcp_recvmsg_fexit"`
+	TcpSendmsgFexit   *ebpf.Program `ebpf:"tcp_sendmsg_fexit"`
+	UdpRecvmsgFexit   *ebpf.Program `ebpf:"udp_recvmsg_fexit"`
+	UdpSendmsgFexit   *ebpf.Program `ebpf:"udp_sendmsg_fexit"`
+	UprobeSSL_read    *ebpf.Program `ebpf:"uprobe_SSL_read"`
+	UprobeSSL_write   *ebpf.Program `ebpf:"uprobe_SSL_write"`
+	UretprobeSSL_read *ebpf.Program `ebpf:"uretprobe_SSL_read"`
 }
 
 func (p *BpfPrograms) Close() error {
@@ -174,7 +163,6 @@ func (p *BpfPrograms) Close() error {
 		p.UprobeSSL_read,
 		p.UprobeSSL_write,
 		p.UretprobeSSL_read,
-		p.UretprobeSSL_write,
 	)
 }
 
