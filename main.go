@@ -77,6 +77,8 @@ func main() {
 		return
 	}
 
+	sslTestOnly := true
+
 	ctx, cancel := context.WithCancel(context.Background())
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
@@ -281,6 +283,10 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		if !isk8s {
+			return
+		}
+
 		ticker := time.NewTicker(time.Second * 10)
 		var active atomic.Int32
 
@@ -795,7 +801,7 @@ func main() {
 				continue
 			}
 
-			if !isk8s {
+			if !isk8s && !sslTestOnly {
 				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_sendmsg",
 					event.Comm,
 					event.Tgid,
@@ -806,7 +812,7 @@ func main() {
 					event.Bytes,
 				)
 
-				// glog.Info(line.String())
+				glog.Info(line.String())
 				continue
 			}
 
@@ -844,7 +850,7 @@ func main() {
 				}()
 			}
 		case TYPE_FEXIT_TCP_RECVMSG:
-			if !isk8s {
+			if !isk8s && !sslTestOnly {
 				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_recvmsg",
 					event.Comm,
 					event.Tgid,
@@ -855,10 +861,10 @@ func main() {
 					event.Bytes,
 				)
 
-				// glog.Info(line.String())
+				glog.Info(line.String())
 			}
 		case TYPE_FEXIT_UDP_SENDMSG:
-			if !isk8s {
+			if !isk8s && !sslTestOnly {
 				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
 					event.Comm,
 					event.Tgid,
@@ -869,10 +875,10 @@ func main() {
 					event.Bytes,
 				)
 
-				// glog.Info(line.String())
+				glog.Info(line.String())
 			}
 		case TYPE_FEXIT_UDP_RECVMSG:
-			if !isk8s {
+			if !isk8s && !sslTestOnly {
 				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_recvmsg",
 					event.Comm,
 					event.Tgid,
@@ -883,7 +889,7 @@ func main() {
 					event.Bytes,
 				)
 
-				// glog.Info(line.String())
+				glog.Info(line.String())
 			}
 		case TYPE_TP_SYS_ENTER_SENDTO:
 			// NOTE: Not used now.
