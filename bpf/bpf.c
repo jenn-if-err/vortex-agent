@@ -359,7 +359,7 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
         .len = &num,
     };
 
-    /* We assume 1000 should be enough for most cases? */
+    /* Is BUF_LEN * 1000 enough? */
     bpf_loop(1000, do_SSL_loop, &data, 0);
 
     return 0;
@@ -410,7 +410,7 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
         .len = &ret,
     };
 
-    /* We assume 1000 should be enough for most cases? */
+    /* Is BUF_LEN * 1000 enough? */
     bpf_loop(1000, do_SSL_loop, &data, 0);
     bpf_map_delete_elem(&ssl_read_map, &tgid);
 
