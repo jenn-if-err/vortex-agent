@@ -71,16 +71,14 @@ static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct
 
     __s16 sk_type = 0;
     BPF_CORE_READ_INTO(&sk_type, sock, type);
-    if (!(sk_type == SOCK_STREAM || sk_type == SOCK_DGRAM)) {
+    if (!(sk_type == SOCK_STREAM || sk_type == SOCK_DGRAM))
         ret_val = -1;
-    }
 
     __u16 family = 0;
     BPF_CORE_READ_INTO(&family, sock->sk, __sk_common.skc_family);
 
-    if (!(family == AF_INET || family == AF_INET6)) {
+    if (!(family == AF_INET || family == AF_INET6))
         ret_val = -1;
-    }
 
     BPF_CORE_READ_INTO(&event->saddr, sock->sk, __sk_common.skc_rcv_saddr);
     BPF_CORE_READ_INTO(&event->sport, sock->sk, __sk_common.skc_num);
@@ -92,6 +90,15 @@ static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct
     return ret_val;
 }
 
+static __always_inline int should_trace(__u32 tgid) {
+    __u32 all = 0xFFFFFFFF;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL)
+        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL)
+            return 0;
+
+    return 1;
+}
+
 /*
  * fentry/fexit hooks can be found in:
  * /sys/kernel/tracing/available_filter_functions
@@ -101,20 +108,15 @@ static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct
 SEC("fentry/sock_sendmsg")
 int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) {
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
+    if (!e)
         return 0;
-    }
 
     e->type = TYPE_FENTRY_SOCK_SENDMSG;
     set_proc_info(e);
 
-    __u32 all = 0xFFFFFFFF;
-    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
-        __u32 tgid = e->tgid;
-        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
-            bpf_ringbuf_discard(e, 0);
-            return 0;
-        }
+    if (should_trace(e->tgid) == 0) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
     }
 
     int discard = set_sock_sendrecv_sk_info(e, sock, 1);
@@ -132,25 +134,19 @@ int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) 
  */
 SEC("fexit/sock_recvmsg")
 int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, int, flags, int, ret) {
-    if (ret <= 0) {
+    if (ret <= 0)
         return 0;
-    }
 
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
+    if (!e)
         return 0;
-    }
 
     e->type = TYPE_FEXIT_SOCK_RECVMSG;
     set_proc_info(e);
 
-    __u32 all = 0xFFFFFFFF;
-    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
-        __u32 tgid = e->tgid;
-        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
-            bpf_ringbuf_discard(e, 0);
-            return 0;
-        }
+    if (should_trace(e->tgid) == 0) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
     }
 
     int discard = set_sock_sendrecv_sk_info(e, sock, ret);
@@ -172,31 +168,29 @@ static __always_inline void set_sendmsg_sk_info(struct event *event, struct sock
     event->dport = bpf_htons(dport);
 }
 
+
+
 /*
  * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332
  */
 SEC("fexit/tcp_sendmsg")
 int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
+    if (!e)
         return 0;
-    }
 
     e->type = TYPE_FEXIT_TCP_SENDMSG;
     e->bytes = size;
     set_proc_info(e);
 
-    __u32 all = 0xFFFFFFFF;
-    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
-        __u32 tgid = e->tgid;
-        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
-            bpf_ringbuf_discard(e, 0);
-            return 0;
-        }
+    if (should_trace(e->tgid) == 0) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
     }
 
     set_sendmsg_sk_info(e, sk);
     bpf_ringbuf_submit(e, 0);
+
     return 0;
 }
 
@@ -205,30 +199,25 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
  */
 SEC("fexit/tcp_recvmsg")
 int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
-    if (ret <= 0) {
+    if (ret <= 0)
         return 0;
-    }
 
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
+    if (!e)
         return 0;
-    }
 
     e->type = TYPE_FEXIT_TCP_RECVMSG;
     e->bytes = ret;
     set_proc_info(e);
 
-    __u32 all = 0xFFFFFFFF;
-    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
-        __u32 tgid = e->tgid;
-        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
-            bpf_ringbuf_discard(e, 0);
-            return 0;
-        }
+    if (should_trace(e->tgid) == 0) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
     }
 
     set_sendmsg_sk_info(e, sk);
     bpf_ringbuf_submit(e, 0);
+
     return 0;
 }
 
@@ -238,25 +227,21 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 SEC("fexit/udp_sendmsg")
 int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, ret) {
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
+    if (!e)
         return 0;
-    }
 
     e->type = TYPE_FEXIT_UDP_SENDMSG;
     e->bytes = len;
     set_proc_info(e);
 
-    __u32 all = 0xFFFFFFFF;
-    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
-        __u32 tgid = e->tgid;
-        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
-            bpf_ringbuf_discard(e, 0);
-            return 0;
-        }
+    if (should_trace(e->tgid) == 0) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
     }
 
     set_sendmsg_sk_info(e, sk);
     bpf_ringbuf_submit(e, 0);
+
     return 0;
 }
 
@@ -265,30 +250,25 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
  */
 SEC("fexit/udp_recvmsg")
 int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
-    if (ret <= 0) {
+    if (ret <= 0)
         return 0;
-    }
 
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
+    if (!e)
         return 0;
-    }
 
     e->type = TYPE_FEXIT_UDP_RECVMSG;
     e->bytes = ret;
     set_proc_info(e);
 
-    __u32 all = 0xFFFFFFFF;
-    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL) {
-        __u32 tgid = e->tgid;
-        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL) {
-            bpf_ringbuf_discard(e, 0);
-            return 0;
-        }
+    if (should_trace(e->tgid) == 0) {
+        bpf_ringbuf_discard(e, 0);
+        return 0;
     }
 
     set_sendmsg_sk_info(e, sk);
     bpf_ringbuf_submit(e, 0);
+
     return 0;
 }
 
@@ -307,14 +287,12 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 SEC("tp/syscalls/sys_enter_sendto")
 int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
     size_t len = BPF_CORE_READ(ctx, args[2]);
-    if (len == 0) {
+    if (len == 0)
         return 0;
-    }
 
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
+    if (!e)
         return 0;
-    }
 
     e->type = TYPE_TP_SYS_ENTER_SENDTO;
     e->bytes = len;
@@ -340,9 +318,8 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
 SEC("uprobe/SSL_write")
 int uprobe_SSL_write(struct pt_regs *ctx) {
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
+    if (!e)
         return 0;
-    }
 
     e->type = TYPE_UPROBE_SSL_WRITE;
     set_proc_info(e);
@@ -358,7 +335,6 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
     }
 
     bpf_ringbuf_submit(e, 0);
-
     return 0;
 }
 
