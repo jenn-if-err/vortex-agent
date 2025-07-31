@@ -23,15 +23,20 @@
 
 #define BUF_LEN 256
 
+#define TGID_ENABLE_ALL 0xFFFFFFFF
+#define CHUNKED_END_IDX 0xFFFFFFFF
+
 struct event {
-    /* __u8 comm[TASK_COMM_LEN]; // for debugging */
-    __u8 comm[BUF_LEN]; // for debugging
+    __u8 comm[TASK_COMM_LEN]; // bin; for debugging
+    __u8 buf[BUF_LEN];
+    __s64 bytes;
+    __u32 chunk_idx;
     __u32 type;
     __u32 tgid;
-    __s64 bytes;
+    __u32 pid;
     __be32 saddr;
-    __u16 sport;
     __be32 daddr;
+    __u16 sport;
     __be16 dport;
 };
 
@@ -42,7 +47,7 @@ struct {
 } events SEC(".maps");
 
 /*
- * Map to control which TGIDs are traced. A key of 0xFFFFFFFF means all
+ * Map to control which TGIDs are traced. A key of TGID_ENABLE_ALL means all
  * TGIDs are traced. Otherwise, only trace whatever's in the map.
  */
 struct {
@@ -62,6 +67,7 @@ struct {
 static __always_inline void set_proc_info(struct event *event) {
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     __u64 pid_tgid = bpf_get_current_pid_tgid();
+    event->pid = pid_tgid & 0xFFFFFFFF;
     event->tgid = pid_tgid >> 32;
 }
 
@@ -91,7 +97,7 @@ static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct
 }
 
 static __always_inline int should_trace(__u32 tgid) {
-    __u32 all = 0xFFFFFFFF;
+    __u32 all = TGID_ENABLE_ALL;
     if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL)
         if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL)
             return 0;
@@ -107,7 +113,8 @@ static __always_inline int should_trace(__u32 tgid) {
  */
 SEC("fentry/sock_sendmsg")
 int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) {
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
         return 0;
 
@@ -137,7 +144,8 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, i
     if (ret <= 0)
         return 0;
 
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
         return 0;
 
@@ -173,7 +181,8 @@ static __always_inline void set_sendmsg_sk_info(struct event *event, struct sock
  */
 SEC("fexit/tcp_sendmsg")
 int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
         return 0;
 
@@ -200,7 +209,8 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     if (ret <= 0)
         return 0;
 
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
         return 0;
 
@@ -224,7 +234,8 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
  */
 SEC("fexit/udp_sendmsg")
 int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, ret) {
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
         return 0;
 
@@ -251,7 +262,8 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     if (ret <= 0)
         return 0;
 
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
         return 0;
 
@@ -288,7 +300,8 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
     if (len == 0)
         return 0;
 
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
         return 0;
 
@@ -310,17 +323,20 @@ struct loop_data {
  * Send data to user space in chunks of BUF_LEN bytes.
  */
 static int do_SSL_loop(__u32 index, struct loop_data *data) {
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
         return 1; /* end loop */
 
     __u32 len = (__u32)*data->len > BUF_LEN ? BUF_LEN : (__u32)*data->len;
+    set_proc_info(e);
     e->type = data->type;
     e->bytes = len;
-    set_proc_info(e);
+    e->chunk_idx = index;
 
+    e->buf[0] = '\0';
     char *buf = *data->buf;
-    if (bpf_probe_read_user(&e->comm, len, buf) == 0)
+    if (bpf_probe_read_user(&e->buf, len, buf) == 0)
         bpf_ringbuf_submit(e, 0);
     else
         bpf_ringbuf_discard(e, 0); /* discard but still adjust values? */
@@ -361,6 +377,19 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
 
     /* Is BUF_LEN * 1000 enough? */
     bpf_loop(1000, do_SSL_loop, &data, 0);
+
+    /* Signal previous chunked stream's end. */
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e)
+        return 0;
+
+    e->type = TYPE_UPROBE_SSL_WRITE;
+    set_proc_info(e);
+    e->bytes = -1;
+    e->chunk_idx = CHUNKED_END_IDX;
+    e->buf[0] = '\0';
+    bpf_ringbuf_submit(e, 0);
 
     return 0;
 }
@@ -413,6 +442,19 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
     /* Is BUF_LEN * 1000 enough? */
     bpf_loop(1000, do_SSL_loop, &data, 0);
     bpf_map_delete_elem(&ssl_read_map, &tgid);
+
+    /* Signal previous chunked stream's end. */
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e)
+        return 0;
+
+    e->type = TYPE_URETPROBE_SSL_READ;
+    set_proc_info(e);
+    e->bytes = -1;
+    e->chunk_idx = CHUNKED_END_IDX;
+    e->buf[0] = '\0';
+    bpf_ringbuf_submit(e, 0);
 
     return 0;
 }
