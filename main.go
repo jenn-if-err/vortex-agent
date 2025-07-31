@@ -902,7 +902,7 @@ func main() {
 			glog.Info(line.String())
 		case TYPE_UPROBE_SSL_WRITE:
 			fmt.Fprintf(&line, "buf=%s, tgid=%v, ret=%v, fn=uprobe/SSL_write",
-				event.Comm,
+				string(event.Comm[:]),
 				event.Tgid,
 				event.Bytes,
 			)
@@ -910,7 +910,7 @@ func main() {
 			glog.Info(line.String())
 		case TYPE_URETPROBE_SSL_WRITE:
 			fmt.Fprintf(&line, "buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_write",
-				event.Comm,
+				string(event.Comm[:]),
 				event.Tgid,
 				event.Bytes,
 			)
@@ -918,7 +918,7 @@ func main() {
 			glog.Info(line.String())
 		case TYPE_UPROBE_SSL_READ:
 			fmt.Fprintf(&line, "buf=%s, tgid=%v, ret=%v, fn=uprobe/SSL_read",
-				event.Comm,
+				string(event.Comm[:]),
 				event.Tgid,
 				event.Bytes,
 			)
@@ -926,7 +926,7 @@ func main() {
 			glog.Info(line.String())
 		case TYPE_URETPROBE_SSL_READ:
 			fmt.Fprintf(&line, "buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_read",
-				event.Comm,
+				string(event.Comm[:]),
 				event.Tgid,
 				event.Bytes,
 			)
