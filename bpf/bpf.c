@@ -168,8 +168,6 @@ static __always_inline void set_sendmsg_sk_info(struct event *event, struct sock
     event->dport = bpf_htons(dport);
 }
 
-
-
 /*
  * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332
  */
@@ -302,6 +300,41 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
     return 0;
 }
 
+struct loop_data {
+    __u32 type;
+    char **buf;
+    int *len;
+};
+
+/*
+ * Send data to user space in chunks of BUF_LEN bytes.
+ */
+static int do_SSL_loop(__u32 index, struct loop_data *data) {
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e)
+        return 1; /* end loop */
+
+    __u32 len = (__u32)*data->len > BUF_LEN ? BUF_LEN : (__u32)*data->len;
+    e->type = data->type;
+    e->bytes = len;
+    set_proc_info(e);
+
+    char *buf = *data->buf;
+    if (bpf_probe_read_user(&e->comm, len, buf) == 0)
+        bpf_ringbuf_submit(e, 0);
+    else
+        bpf_ringbuf_discard(e, 0);
+
+    *data->buf = *data->buf + len; /* forward buffer pointer */
+
+    int sub = *data->len <= BUF_LEN ? *data->len : BUF_LEN;
+    *data->len = *data->len - sub;
+    if (*data->len <= 0)
+        return 1; /* end loop */
+
+    return 0; /* continue loop */
+}
+
 /*
  * Methods for accessing container-based file systems for u[ret]probes.
  *
@@ -317,74 +350,20 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
  */
 SEC("uprobe/SSL_write")
 int uprobe_SSL_write(struct pt_regs *ctx) {
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e)
-        return 0;
+    char *buf = (char *)PT_REGS_PARM2(ctx);
+    int num = (int)PT_REGS_PARM3(ctx);
 
-    e->type = TYPE_UPROBE_SSL_WRITE;
-    set_proc_info(e);
+    struct loop_data data = {
+        .type = TYPE_UPROBE_SSL_WRITE,
+        .buf = &buf,
+        .len = &num,
+    };
 
-    const char *buf = (const char *)PT_REGS_PARM2(ctx);
-    __u32 num = (__u32)PT_REGS_PARM3(ctx);
-    e->bytes = num;
-    __u32 len = num > BUF_LEN ? BUF_LEN : num;
-    if (bpf_probe_read_user(&e->comm, len, buf) != 0) {
-        bpf_printk("ret/ssl_write: bpf_probe_read_user failed");
-        bpf_ringbuf_discard(e, 0);
-        return 0;
-    }
-
-    bpf_ringbuf_submit(e, 0);
-    return 0;
-}
-
-/*
- * uretprobe for SSL_write (called after encryption); provides return value.
- * int SSL_write(SSL *s, const void *buf, int num);
- */
-/*
-SEC("uretprobe/SSL_write")
-int uretprobe_SSL_write(struct pt_regs *ctx) {
-    __u64 tgid = bpf_get_current_pid_tgid();
-    struct ssl_ctx *val = bpf_map_lookup_elem(&ssl_write_map, &tgid);
-    if (!val) {
-        bpf_printk("ret/ssl_write: bpf_map_lookup_elem failed");
-        return 0;
-    }
-
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
-        bpf_printk("ret/ssl_write: bpf_ringbuf_reserve failed");
-        bpf_map_delete_elem(&ssl_write_map, &tgid);
-        return 0;
-    }
-
-    e->type = TYPE_URETPROBE_SSL_WRITE;
-    set_proc_info(e);
-
-    int ret = (int)PT_REGS_RC(ctx);
-    if (ret <= 0) {
-        bpf_printk("ret/ssl_write: ret=%d", ret);
-        bpf_map_delete_elem(&ssl_write_map, &tgid);
-        bpf_ringbuf_discard(e, 0);
-        return 0;
-    }
-
-    e->bytes = (__s64)ret;
-    __u32 len = ret > BUF_LEN ? BUF_LEN : ret;
-    if (bpf_probe_read(&e->comm, len, val->buf) != 0) {
-        bpf_printk("ret/ssl_write: bpf_probe_read failed");
-        bpf_map_delete_elem(&ssl_write_map, &tgid);
-        bpf_ringbuf_discard(e, 0);
-        return 0;
-    }
-
-    bpf_map_delete_elem(&ssl_write_map, &tgid);
-    bpf_ringbuf_submit(e, 0);
+    /* We assume 1000 should be enough for most cases? */
+    bpf_loop(1000, do_SSL_loop, &data, 0);
 
     return 0;
 }
-*/
 
 /*
  * uprobe for SSL_read (called after decryption).
@@ -423,26 +402,17 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
         return 0;
     }
 
-    struct event *e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e) {
-        bpf_map_delete_elem(&ssl_read_map, &tgid);
-        return 0;
-    }
+    char *buf = (char *)*pbuf;
 
-    e->type = TYPE_URETPROBE_SSL_READ;
-    set_proc_info(e);
+    struct loop_data data = {
+        .type = TYPE_URETPROBE_SSL_READ,
+        .buf = &buf,
+        .len = &ret,
+    };
 
-    const char *buf = *pbuf;
-    e->bytes = ret;
-    __u32 len = ret > BUF_LEN ? BUF_LEN : ret;
-    if (bpf_probe_read_user(&e->comm, len, buf) != 0) {
-        bpf_map_delete_elem(&ssl_read_map, &tgid);
-        bpf_ringbuf_discard(e, 0);
-        return 0;
-    }
-
+    /* We assume 1000 should be enough for most cases? */
+    bpf_loop(1000, do_SSL_loop, &data, 0);
     bpf_map_delete_elem(&ssl_read_map, &tgid);
-    bpf_ringbuf_submit(e, 0);
 
     return 0;
 }
