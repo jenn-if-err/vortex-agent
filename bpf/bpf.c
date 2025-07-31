@@ -323,7 +323,7 @@ static int do_SSL_loop(__u32 index, struct loop_data *data) {
     if (bpf_probe_read_user(&e->comm, len, buf) == 0)
         bpf_ringbuf_submit(e, 0);
     else
-        bpf_ringbuf_discard(e, 0);
+        bpf_ringbuf_discard(e, 0); /* discard but still adjust values? */
 
     *data->buf = *data->buf + len; /* forward buffer pointer */
 
