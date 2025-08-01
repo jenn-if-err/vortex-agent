@@ -26,6 +26,9 @@
 #define TGID_ENABLE_ALL 0xFFFFFFFF
 #define CHUNKED_END_IDX 0xFFFFFFFF
 
+/*
+ * Event structure to be sent to user space.
+ */
 struct event {
     __u8 comm[TASK_COMM_LEN]; // bin; for debugging
     __u8 buf[BUF_LEN];
@@ -40,6 +43,9 @@ struct event {
     __be16 dport;
 };
 
+/*
+ * Map to store events for user space consumption.
+ */
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 256 * 1024); // 256 KB buffer
@@ -80,6 +86,9 @@ struct {
     __type(value, __u8);
 } ssl_handshakes SEC(".maps");
 
+/*
+ * Set process information in the event structure.
+ */
 static __always_inline void set_proc_info(struct event *event) {
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
     __u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -114,6 +123,9 @@ static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct
 }
 */
 
+/*
+ * Are we tracing this TGID?
+ */
 static __always_inline int should_trace(__u32 tgid) {
     __u32 all = TGID_ENABLE_ALL;
     if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL)
@@ -189,6 +201,10 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, i
 }
 */
 
+/*
+ * Set the socket information in the event structure for sendmsg/recvmsg.
+ * This is used for both TCP and UDP send/recv messages.
+ */
 static __always_inline void set_sendmsg_sk_info(struct event *event, struct sock *sk) {
     BPF_CORE_READ_INTO(&event->saddr, sk, __sk_common.skc_rcv_saddr);
     BPF_CORE_READ_INTO(&event->sport, sk, __sk_common.skc_num);
@@ -336,6 +352,9 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
 */
 
 /*
+ * uretprobe for SSL_do_handshake (called after handshake is done).
+ * Track SSL handshakes before tracing SSL_write/SSL_read.
+ *
  * int SSL_do_handshake(SSL *ssl);
  */
 SEC("uretprobe/SSL_do_handshake")
@@ -357,7 +376,7 @@ struct loop_data {
 };
 
 /*
- * Send data to user space in chunks of BUF_LEN bytes.
+ * bpf_loop callback: send data to user space in chunks of BUF_LEN bytes.
  */
 static int do_SSL_loop(__u32 index, struct loop_data *data) {
     struct event *e;
