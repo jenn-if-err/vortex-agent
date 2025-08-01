@@ -57,12 +57,23 @@ struct {
     __type(value, __u8);
 } tgids_to_trace SEC(".maps");
 
+/*
+ * Map to store the user buffer pointer for SSL_read. The key is the PID/TGID,
+ * and the value is a pointer to the user buffer.
+ */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
     __type(key, __u64);
     __type(value, const char *);
 } ssl_read_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key, __u64);
+    __type(value, __u8);
+} ssl_handshakes SEC(".maps");
 
 static __always_inline void set_proc_info(struct event *event) {
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
@@ -71,6 +82,7 @@ static __always_inline void set_proc_info(struct event *event) {
     event->tgid = pid_tgid >> 32;
 }
 
+/*
 static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct socket *sock, long ret) {
     event->bytes = ret;
     int ret_val = 0;
@@ -95,6 +107,7 @@ static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct
 
     return ret_val;
 }
+*/
 
 static __always_inline int should_trace(__u32 tgid) {
     __u32 all = TGID_ENABLE_ALL;
@@ -111,6 +124,7 @@ static __always_inline int should_trace(__u32 tgid) {
  *
  * https://elixir.bootlin.com/linux/v6.1.146/source/include/linux/net.h#L261
  */
+/*
 SEC("fentry/sock_sendmsg")
 int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) {
     struct event *e;
@@ -135,10 +149,12 @@ int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) 
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
+*/
 
 /*
  * https://elixir.bootlin.com/linux/v6.1.146/source/include/linux/net.h#L262
  */
+/*
 SEC("fexit/sock_recvmsg")
 int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, int, flags, int, ret) {
     if (ret <= 0)
@@ -166,6 +182,7 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, i
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
+*/
 
 static __always_inline void set_sendmsg_sk_info(struct event *event, struct sock *sk) {
     BPF_CORE_READ_INTO(&event->saddr, sk, __sk_common.skc_rcv_saddr);
@@ -285,7 +302,7 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 /*
  * NOTE: Not registered/used in user-agent code, ref only.
  *
- * From '/sys/kernel/tracing/events/syscalls/sys_enter_sendto/format':
+ * /sys/kernel/tracing/events/syscalls/sys_enter_sendto/format
  *
  *  int fd
  *  void *buff
@@ -294,6 +311,7 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
  *  struct sockaddr *addr
  *  int addr_len
  */
+/*
 SEC("tp/syscalls/sys_enter_sendto")
 int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
     size_t len = BPF_CORE_READ(ctx, args[2]);
@@ -310,6 +328,36 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
     set_proc_info(e);
 
     bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+*/
+
+/*
+ * /sys/kernel/tracing/events/sched/sched_process_exit/format
+ *
+ *  char comm[16]
+ *  pid_t pid
+ *  int prio
+ */
+SEC("tp/sched/sched_process_exit")
+int tp_sched_sched_process_exit(struct trace_event_raw_sched_process_template *ctx) {
+    __u64 tgid = bpf_get_current_pid_tgid();
+    bpf_map_delete_elem(&ssl_handshakes, &tgid);
+    return 0;
+}
+
+/*
+ * int SSL_do_handshake(SSL *ssl);
+ */
+SEC("uretprobe/SSL_do_handshake")
+int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret <= 0)
+        return 0;
+
+    __u8 enable = 1; /* not used */
+    __u64 tgid = bpf_get_current_pid_tgid();
+    bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
     return 0;
 }
 
@@ -366,6 +414,11 @@ static int do_SSL_loop(__u32 index, struct loop_data *data) {
  */
 SEC("uprobe/SSL_write")
 int uprobe_SSL_write(struct pt_regs *ctx) {
+    __u64 tgid = bpf_get_current_pid_tgid();
+    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &tgid);
+    if (!enable)
+        return 0;
+
     char *buf = (char *)PT_REGS_PARM2(ctx);
     int num = (int)PT_REGS_PARM3(ctx);
 
@@ -403,9 +456,13 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
  */
 SEC("uprobe/SSL_read")
 int uprobe_SSL_read(struct pt_regs *ctx) {
+    __u64 tgid = bpf_get_current_pid_tgid();
+    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &tgid);
+    if (!enable)
+        return 0;
+
     const char *buf = (const char *)PT_REGS_PARM2(ctx);
-    __u64 id = bpf_get_current_pid_tgid();
-    bpf_map_update_elem(&ssl_read_map, &id, &buf, BPF_ANY);
+    bpf_map_update_elem(&ssl_read_map, &tgid, &buf, BPF_ANY);
     return 0;
 }
 
@@ -426,10 +483,8 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
     }
 
     const char **pbuf = bpf_map_lookup_elem(&ssl_read_map, &tgid);
-    if (!pbuf) {
-        bpf_map_delete_elem(&ssl_read_map, &tgid);
+    if (!pbuf)
         return 0;
-    }
 
     char *buf = (char *)*pbuf;
 

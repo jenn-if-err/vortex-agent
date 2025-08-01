@@ -71,25 +71,25 @@ type BpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type BpfProgramSpecs struct {
-	HandleEnterSendto *ebpf.ProgramSpec `ebpf:"handle_enter_sendto"`
-	SockRecvmsgFexit  *ebpf.ProgramSpec `ebpf:"sock_recvmsg_fexit"`
-	SockSendmsgFentry *ebpf.ProgramSpec `ebpf:"sock_sendmsg_fentry"`
-	TcpRecvmsgFexit   *ebpf.ProgramSpec `ebpf:"tcp_recvmsg_fexit"`
-	TcpSendmsgFexit   *ebpf.ProgramSpec `ebpf:"tcp_sendmsg_fexit"`
-	UdpRecvmsgFexit   *ebpf.ProgramSpec `ebpf:"udp_recvmsg_fexit"`
-	UdpSendmsgFexit   *ebpf.ProgramSpec `ebpf:"udp_sendmsg_fexit"`
-	UprobeSSL_read    *ebpf.ProgramSpec `ebpf:"uprobe_SSL_read"`
-	UprobeSSL_write   *ebpf.ProgramSpec `ebpf:"uprobe_SSL_write"`
-	UretprobeSSL_read *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_read"`
+	TcpRecvmsgFexit          *ebpf.ProgramSpec `ebpf:"tcp_recvmsg_fexit"`
+	TcpSendmsgFexit          *ebpf.ProgramSpec `ebpf:"tcp_sendmsg_fexit"`
+	TpSchedSchedProcessExit  *ebpf.ProgramSpec `ebpf:"tp_sched_sched_process_exit"`
+	UdpRecvmsgFexit          *ebpf.ProgramSpec `ebpf:"udp_recvmsg_fexit"`
+	UdpSendmsgFexit          *ebpf.ProgramSpec `ebpf:"udp_sendmsg_fexit"`
+	UprobeSSL_read           *ebpf.ProgramSpec `ebpf:"uprobe_SSL_read"`
+	UprobeSSL_write          *ebpf.ProgramSpec `ebpf:"uprobe_SSL_write"`
+	UretprobeSSL_doHandshake *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_do_handshake"`
+	UretprobeSSL_read        *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_read"`
 }
 
 // BpfMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type BpfMapSpecs struct {
-	Events       *ebpf.MapSpec `ebpf:"events"`
-	SslReadMap   *ebpf.MapSpec `ebpf:"ssl_read_map"`
-	TgidsToTrace *ebpf.MapSpec `ebpf:"tgids_to_trace"`
+	Events        *ebpf.MapSpec `ebpf:"events"`
+	SslHandshakes *ebpf.MapSpec `ebpf:"ssl_handshakes"`
+	SslReadMap    *ebpf.MapSpec `ebpf:"ssl_read_map"`
+	TgidsToTrace  *ebpf.MapSpec `ebpf:"tgids_to_trace"`
 }
 
 // BpfVariableSpecs contains global variables before they are loaded into the kernel.
@@ -118,14 +118,16 @@ func (o *BpfObjects) Close() error {
 //
 // It can be passed to LoadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type BpfMaps struct {
-	Events       *ebpf.Map `ebpf:"events"`
-	SslReadMap   *ebpf.Map `ebpf:"ssl_read_map"`
-	TgidsToTrace *ebpf.Map `ebpf:"tgids_to_trace"`
+	Events        *ebpf.Map `ebpf:"events"`
+	SslHandshakes *ebpf.Map `ebpf:"ssl_handshakes"`
+	SslReadMap    *ebpf.Map `ebpf:"ssl_read_map"`
+	TgidsToTrace  *ebpf.Map `ebpf:"tgids_to_trace"`
 }
 
 func (m *BpfMaps) Close() error {
 	return _BpfClose(
 		m.Events,
+		m.SslHandshakes,
 		m.SslReadMap,
 		m.TgidsToTrace,
 	)
@@ -141,29 +143,27 @@ type BpfVariables struct {
 //
 // It can be passed to LoadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type BpfPrograms struct {
-	HandleEnterSendto *ebpf.Program `ebpf:"handle_enter_sendto"`
-	SockRecvmsgFexit  *ebpf.Program `ebpf:"sock_recvmsg_fexit"`
-	SockSendmsgFentry *ebpf.Program `ebpf:"sock_sendmsg_fentry"`
-	TcpRecvmsgFexit   *ebpf.Program `ebpf:"tcp_recvmsg_fexit"`
-	TcpSendmsgFexit   *ebpf.Program `ebpf:"tcp_sendmsg_fexit"`
-	UdpRecvmsgFexit   *ebpf.Program `ebpf:"udp_recvmsg_fexit"`
-	UdpSendmsgFexit   *ebpf.Program `ebpf:"udp_sendmsg_fexit"`
-	UprobeSSL_read    *ebpf.Program `ebpf:"uprobe_SSL_read"`
-	UprobeSSL_write   *ebpf.Program `ebpf:"uprobe_SSL_write"`
-	UretprobeSSL_read *ebpf.Program `ebpf:"uretprobe_SSL_read"`
+	TcpRecvmsgFexit          *ebpf.Program `ebpf:"tcp_recvmsg_fexit"`
+	TcpSendmsgFexit          *ebpf.Program `ebpf:"tcp_sendmsg_fexit"`
+	TpSchedSchedProcessExit  *ebpf.Program `ebpf:"tp_sched_sched_process_exit"`
+	UdpRecvmsgFexit          *ebpf.Program `ebpf:"udp_recvmsg_fexit"`
+	UdpSendmsgFexit          *ebpf.Program `ebpf:"udp_sendmsg_fexit"`
+	UprobeSSL_read           *ebpf.Program `ebpf:"uprobe_SSL_read"`
+	UprobeSSL_write          *ebpf.Program `ebpf:"uprobe_SSL_write"`
+	UretprobeSSL_doHandshake *ebpf.Program `ebpf:"uretprobe_SSL_do_handshake"`
+	UretprobeSSL_read        *ebpf.Program `ebpf:"uretprobe_SSL_read"`
 }
 
 func (p *BpfPrograms) Close() error {
 	return _BpfClose(
-		p.HandleEnterSendto,
-		p.SockRecvmsgFexit,
-		p.SockSendmsgFentry,
 		p.TcpRecvmsgFexit,
 		p.TcpSendmsgFexit,
+		p.TpSchedSchedProcessExit,
 		p.UdpRecvmsgFexit,
 		p.UdpSendmsgFexit,
 		p.UprobeSSL_read,
 		p.UprobeSSL_write,
+		p.UretprobeSSL_doHandshake,
 		p.UretprobeSSL_read,
 	)
 }

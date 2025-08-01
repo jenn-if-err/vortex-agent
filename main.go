@@ -186,14 +186,14 @@ func main() {
 	// defer kssm.Close()
 	// slog.Info("kprobe/sock_sendmsg attached")
 
-	// tpsnst, err := link.Tracepoint("syscalls", "sys_enter_sendto", objs.HandleEnterSendto, nil)
-	// if err != nil {
-	// 	slog.Error("tracepoint/syscalls/sys_enter_sendto failed:", "err", err)
-	// 	return
-	// }
+	tpspx, err := link.Tracepoint("sched", "sched_process_exit", objs.TpSchedSchedProcessExit, nil)
+	if err != nil {
+		glog.Errorf("tracepoint/sched/sched_process_exit failed: %v", err)
+		return
+	}
 
-	// defer tpsnst.Close()
-	// slog.Info("tracepoint/syscalls/sys_enter_sendto attached")
+	defer tpspx.Close()
+	glog.Infof("tracepoint/sched/sched_process_exit attached")
 
 	isk8s := internal.IsK8s()
 
@@ -211,6 +211,15 @@ func main() {
 				glog.Errorf("OpenExecutable failed: %v", err)
 				return
 			}
+
+			upSSLDoHs, err := ex.Uretprobe("SSL_do_handshake", objs.UretprobeSSL_doHandshake, nil)
+			if err != nil {
+				glog.Errorf("uretprobe/SSL_do_handshake failed: %v", err)
+				return
+			}
+
+			defer upSSLDoHs.Close()
+			glog.Info("uretprobe/SSL_do_handshake attached")
 
 			upSSLWrite, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
 			if err != nil {
