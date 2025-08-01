@@ -65,7 +65,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
     __type(key, __u64);
-    __type(value, const char *);
+    __type(value, char *);
 } ssl_read_map SEC(".maps");
 
 /*
@@ -450,7 +450,7 @@ int uprobe_SSL_read(struct pt_regs *ctx) {
     if (!enable)
         return 0;
 
-    const char *buf = (const char *)PT_REGS_PARM2(ctx);
+    char *buf = (char *)PT_REGS_PARM2(ctx);
     bpf_map_update_elem(&ssl_read_map, &tgid, &buf, BPF_ANY);
     return 0;
 }
@@ -471,7 +471,7 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
         return 0;
     }
 
-    const char **pbuf = bpf_map_lookup_elem(&ssl_read_map, &tgid);
+    char **pbuf = bpf_map_lookup_elem(&ssl_read_map, &tgid);
     if (!pbuf)
         return 0;
 
