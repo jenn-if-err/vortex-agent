@@ -504,6 +504,8 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
 }
 
 /*
+ * Tracepoint for process exit; clean up our ssl_handshakes map.
+ *
  * /sys/kernel/tracing/events/sched/sched_process_exit/format
  *
  *  char comm[16]
