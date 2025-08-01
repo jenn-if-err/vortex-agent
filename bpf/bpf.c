@@ -305,8 +305,6 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 }
 
 /*
- * NOTE: Not registered/used in user-agent code, ref only.
- *
  * /sys/kernel/tracing/events/syscalls/sys_enter_sendto/format
  *
  *  int fd
@@ -346,7 +344,7 @@ int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
     if (ret <= 0)
         return 0;
 
-    __u8 enable = 1; /* not used */
+    __u8 enable = 1; /* no meaning */
     __u64 tgid = bpf_get_current_pid_tgid();
     bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
     return 0;
