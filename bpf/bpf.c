@@ -338,20 +338,6 @@ int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
 */
 
 /*
- * /sys/kernel/tracing/events/sched/sched_process_exit/format
- *
- *  char comm[16]
- *  pid_t pid
- *  int prio
- */
-SEC("tp/sched/sched_process_exit")
-int tp_sched_sched_process_exit(struct trace_event_raw_sched_process_template *ctx) {
-    __u64 tgid = bpf_get_current_pid_tgid();
-    bpf_map_delete_elem(&ssl_handshakes, &tgid);
-    return 0;
-}
-
-/*
  * int SSL_do_handshake(SSL *ssl);
  */
 SEC("uretprobe/SSL_do_handshake")
@@ -516,6 +502,20 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
     e->buf[0] = '\0';
     bpf_ringbuf_submit(e, 0);
 
+    return 0;
+}
+
+/*
+ * /sys/kernel/tracing/events/sched/sched_process_exit/format
+ *
+ *  char comm[16]
+ *  pid_t pid
+ *  int prio
+ */
+SEC("tp/sched/sched_process_exit")
+int tp_sched_sched_process_exit(struct trace_event_raw_sched_process_template *ctx) {
+    __u64 tgid = bpf_get_current_pid_tgid();
+    bpf_map_delete_elem(&ssl_handshakes, &tgid);
     return 0;
 }
 
