@@ -205,7 +205,7 @@ func main() {
 		}
 
 		if libsslPath != "" {
-			glog.Infof("found libssl at: %s", libsslPath)
+			glog.Infof("found libssl at [%s]", libsslPath)
 			ex, err := link.OpenExecutable(libsslPath)
 			if err != nil {
 				glog.Errorf("OpenExecutable failed: %v", err)
@@ -902,14 +902,19 @@ func main() {
 			}
 		case TYPE_TP_SYS_ENTER_SENDTO:
 			// NOTE: Not used now.
-			fmt.Fprintf(&line, "comm=%s, tgid=%v, ret=%v, fn=sys_enter_sendto",
-				event.Comm,
-				event.Tgid,
-				event.Bytes,
-			)
+			// fmt.Fprintf(&line, "comm=%s, tgid=%v, ret=%v, fn=sys_enter_sendto",
+			// 	event.Comm,
+			// 	event.Tgid,
+			// 	event.Bytes,
+			// )
 
-			glog.Info(line.String())
+			// glog.Info(line.String())
+
 		case TYPE_UPROBE_SSL_WRITE:
+			if event.Bytes < 0 {
+				continue
+			}
+
 			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uprobe/SSL_write",
 				event.Comm,
 				event.Buf,
@@ -918,7 +923,12 @@ func main() {
 			)
 
 			glog.Info(line.String())
+
 		case TYPE_URETPROBE_SSL_WRITE:
+			if event.Bytes < 0 {
+				continue
+			}
+
 			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_write",
 				event.Comm,
 				event.Buf,
@@ -927,7 +937,12 @@ func main() {
 			)
 
 			glog.Info(line.String())
+
 		case TYPE_UPROBE_SSL_READ:
+			if event.Bytes < 0 {
+				continue
+			}
+
 			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uprobe/SSL_read",
 				event.Comm,
 				event.Buf,
@@ -936,7 +951,12 @@ func main() {
 			)
 
 			glog.Info(line.String())
+
 		case TYPE_URETPROBE_SSL_READ:
+			if event.Bytes < 0 {
+				continue
+			}
+
 			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_read",
 				event.Comm,
 				event.Buf,
@@ -945,6 +965,7 @@ func main() {
 			)
 
 			glog.Info(line.String())
+
 		default:
 		}
 	}
