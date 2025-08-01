@@ -68,6 +68,11 @@ struct {
     __type(value, const char *);
 } ssl_read_map SEC(".maps");
 
+/*
+ * Map to track SSL handshakes. The key is the PID/TGID, and the value is a
+ * simple byte (not used, just to indicate that the handshake is in progress).
+ * This map is used to determine if we should trace SSL_write/SSL_read.
+ */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
