@@ -197,6 +197,15 @@ func main() {
 
 	isk8s := internal.IsK8s()
 
+	hostLinks := []link.Link{}
+	defer func(list *[]link.Link) {
+		for _, l := range *list {
+			if err := l.Close(); err != nil {
+				glog.Errorf("link.Close failed: %v", err)
+			}
+		}
+	}(&hostLinks)
+
 	if !isk8s {
 		libsslPath, err := internal.FindLibSSL("")
 		if err != nil {
@@ -212,23 +221,21 @@ func main() {
 				return
 			}
 
-			upSSLDoHs, err := ex.Uretprobe("SSL_do_handshake", objs.UretprobeSSL_doHandshake, nil)
+			l, err := ex.Uretprobe("SSL_do_handshake", objs.UretprobeSSL_doHandshake, nil)
 			if err != nil {
 				glog.Errorf("uretprobe/SSL_do_handshake failed: %v", err)
-				return
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uretprobe/SSL_do_handshake attached")
 			}
 
-			defer upSSLDoHs.Close()
-			glog.Info("uretprobe/SSL_do_handshake attached")
-
-			upSSLWrite, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
+			l, err = ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
 			if err != nil {
 				glog.Errorf("uprobe/SSL_write failed: %v", err)
-				return
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uprobe/SSL_write attached")
 			}
-
-			defer upSSLWrite.Close()
-			glog.Info("uprobe/SSL_write attached")
 
 			// urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
 			// if err != nil {
@@ -239,23 +246,21 @@ func main() {
 			// defer urpSSLWrite.Close()
 			// glog.Info("uretprobe/SSL_write attached")
 
-			upSSLRead, err := ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+			l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
 			if err != nil {
 				glog.Errorf("uprobe/SSL_read failed: %v", err)
-				return
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uprobe/SSL_read attached")
 			}
 
-			defer upSSLRead.Close()
-			glog.Info("uprobe/SSL_read attached")
-
-			urpSSLRead, err := ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
+			l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
 			if err != nil {
 				glog.Errorf("uretprobe/SSL_read failed: %v", err)
-				return
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uretprobe/SSL_read attached")
 			}
-
-			defer urpSSLRead.Close()
-			glog.Info("uretprobe/SSL_read attached")
 		}
 	}
 
