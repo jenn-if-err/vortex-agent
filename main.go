@@ -99,6 +99,15 @@ func main() {
 	defer objs.Close()
 	glog.Info("BPF objects loaded")
 
+	hostLinks := []link.Link{}
+	defer func(list *[]link.Link) {
+		for _, l := range *list {
+			if err := l.Close(); err != nil {
+				glog.Errorf("link.Close failed: %v", err)
+			}
+		}
+	}(&hostLinks)
+
 	// ssm, err := link.AttachTracing(link.TracingOptions{
 	// 	Program:    objs.SockSendmsgFentry,
 	// 	AttachType: ebpf.AttachTraceFEntry,
@@ -125,57 +134,53 @@ func main() {
 	// defer srm.Close()
 	// glog.Info("fexit/sock_recvmsg attached successfully")
 
-	tsm, err := link.AttachTracing(link.TracingOptions{
+	l, err := link.AttachTracing(link.TracingOptions{
 		Program:    objs.TcpSendmsgFexit,
 		AttachType: ebpf.AttachTraceFExit,
 	})
 
 	if err != nil {
 		glog.Errorf("fexit/tcp_sendmsg failed: %v", err)
-		return
+	} else {
+		hostLinks = append(hostLinks, l)
+		glog.Info("fexit/tcp_sendmsg attached")
 	}
 
-	defer tsm.Close()
-	glog.Info("fexit/tcp_sendmsg attached")
-
-	trm, err := link.AttachTracing(link.TracingOptions{
+	l, err = link.AttachTracing(link.TracingOptions{
 		Program:    objs.TcpRecvmsgFexit,
 		AttachType: ebpf.AttachTraceFExit,
 	})
 
 	if err != nil {
 		glog.Errorf("fexit/tcp_recvmsg failed: %v", err)
-		return
+	} else {
+		hostLinks = append(hostLinks, l)
+		glog.Info("fexit/tcp_recvmsg attached")
 	}
 
-	defer trm.Close()
-	glog.Info("fexit/tcp_recvmsg attached")
-
-	usm, err := link.AttachTracing(link.TracingOptions{
+	l, err = link.AttachTracing(link.TracingOptions{
 		Program:    objs.UdpSendmsgFexit,
 		AttachType: ebpf.AttachTraceFExit,
 	})
 
 	if err != nil {
 		glog.Errorf("fexit/udp_sendmsg failed: %v", err)
-		return
+	} else {
+		hostLinks = append(hostLinks, l)
+		glog.Info("fexit/udp_sendmsg attached")
 	}
 
-	defer usm.Close()
-	glog.Info("fexit/udp_sendmsg attached")
-
-	urm, err := link.AttachTracing(link.TracingOptions{
+	l, err = link.AttachTracing(link.TracingOptions{
 		Program:    objs.UdpRecvmsgFexit,
 		AttachType: ebpf.AttachTraceFExit,
 	})
 
 	if err != nil {
 		glog.Errorf("fexit/udp_recvmsg failed: %v", err)
-		return
+	} else {
+		hostLinks = append(hostLinks, l)
+		glog.Info("fexit/udp_recvmsg attached")
 	}
-
-	defer urm.Close()
-	glog.Info("fexit/udp_recvmsg attached")
 
 	// kssm, err := link.Kprobe("sock_sendmsg", objs.SockSendmsgEntry, nil)
 	// if err != nil {
@@ -186,25 +191,15 @@ func main() {
 	// defer kssm.Close()
 	// slog.Info("kprobe/sock_sendmsg attached")
 
-	tpspx, err := link.Tracepoint("sched", "sched_process_exit", objs.TpSchedSchedProcessExit, nil)
+	l, err = link.Tracepoint("sched", "sched_process_exit", objs.TpSchedSchedProcessExit, nil)
 	if err != nil {
 		glog.Errorf("tracepoint/sched/sched_process_exit failed: %v", err)
-		return
+	} else {
+		hostLinks = append(hostLinks, l)
+		glog.Infof("tracepoint/sched/sched_process_exit attached")
 	}
 
-	defer tpspx.Close()
-	glog.Infof("tracepoint/sched/sched_process_exit attached")
-
 	isk8s := internal.IsK8s()
-
-	hostLinks := []link.Link{}
-	defer func(list *[]link.Link) {
-		for _, l := range *list {
-			if err := l.Close(); err != nil {
-				glog.Errorf("link.Close failed: %v", err)
-			}
-		}
-	}(&hostLinks)
 
 	if !isk8s {
 		libsslPath, err := internal.FindLibSSL("")
