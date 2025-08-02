@@ -411,14 +411,14 @@ func main() {
 	var tracedTgidsMtx sync.Mutex
 	tracedTgidsCtx := cctx(ctx)
 
-	linksToClose := []link.Link{}
+	cgroupLinks := []link.Link{}
 	defer func(list *[]link.Link) {
 		for _, l := range *list {
 			if err := l.Close(); err != nil {
 				glog.Errorf("link.Close failed: %v", err)
 			}
 		}
-	}(&linksToClose)
+	}(&cgroupLinks)
 
 	wg.Add(1)
 	go func(hm *ebpf.Map) {
@@ -546,14 +546,13 @@ func main() {
 						return
 					}
 
-					upSSLWrite, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
+					l, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
 					if err != nil {
 						glog.Errorf("uprobe/SSL_write (%v) failed: %v", libsslPath, err)
-						return
+					} else {
+						cgroupLinks = append(cgroupLinks, l)
+						glog.Infof("uprobe/SSL_write attached for %v", libsslPath)
 					}
-
-					linksToClose = append(linksToClose, upSSLWrite)
-					glog.Infof("uprobe/SSL_write attached for %v", libsslPath)
 
 					// urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
 					// if err != nil {
@@ -564,23 +563,21 @@ func main() {
 					// linksToClose = append(linksToClose, urpSSLWrite)
 					// glog.Infof("uretprobe/SSL_write attached for %v", libsslPath)
 
-					upSSLRead, err := ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+					l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
 					if err != nil {
 						glog.Errorf("uprobe/SSL_read (%v) failed: %v", libsslPath, err)
-						return
+					} else {
+						cgroupLinks = append(cgroupLinks, l)
+						glog.Infof("uprobe/SSL_read attached for %v", libsslPath)
 					}
 
-					linksToClose = append(linksToClose, upSSLRead)
-					glog.Infof("uprobe/SSL_read attached for %v", libsslPath)
-
-					urpSSLRead, err := ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
+					l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
 					if err != nil {
 						glog.Errorf("uretprobe/SSL_read (%v) failed: %v", libsslPath, err)
-						return
+					} else {
+						cgroupLinks = append(cgroupLinks, l)
+						glog.Infof("uretprobe/SSL_read attached for %v", libsslPath)
 					}
-
-					linksToClose = append(linksToClose, urpSSLRead)
-					glog.Infof("uretprobe/SSL_read attached for %v", libsslPath)
 				}()
 				// ---------------------------------------------
 
