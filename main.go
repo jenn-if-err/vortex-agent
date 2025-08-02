@@ -855,6 +855,7 @@ func main() {
 					)
 				}()
 			}
+
 		case TYPE_FEXIT_TCP_RECVMSG:
 			if !isk8s && !sslTestOnly {
 				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_recvmsg",
@@ -869,6 +870,7 @@ func main() {
 
 				glog.Info(line.String())
 			}
+
 		case TYPE_FEXIT_UDP_SENDMSG:
 			if !isk8s && !sslTestOnly {
 				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
@@ -883,6 +885,7 @@ func main() {
 
 				glog.Info(line.String())
 			}
+
 		case TYPE_FEXIT_UDP_RECVMSG:
 			if !isk8s && !sslTestOnly {
 				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_recvmsg",
@@ -897,6 +900,7 @@ func main() {
 
 				glog.Info(line.String())
 			}
+
 		case TYPE_TP_SYS_ENTER_SENDTO:
 			// NOTE: Not used now.
 			// fmt.Fprintf(&line, "comm=%s, tgid=%v, ret=%v, fn=sys_enter_sendto",
