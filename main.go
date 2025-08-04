@@ -906,9 +906,9 @@ func main() {
 				continue
 			}
 
-			fmt.Fprintf(&line, "[uprobe/SSL_write] comm=%s, ", event.Comm)
+			fmt.Fprintf(&line, "[uprobe/SSL_write] ")
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "[uprobe/SSL_write] tgid=%v, len=%v", event.Tgid, event.ChunkLen)
+			fmt.Fprintf(&line, "tgid=%v, len=%v", event.Tgid, event.ChunkLen)
 			glog.Info(line.String())
 
 		case TYPE_URETPROBE_SSL_WRITE:
@@ -951,9 +951,9 @@ func main() {
 				}
 			}
 
-			fmt.Fprintf(&line, "-> [uretprobe/SSL_read] idx=%v, comm=%s, ", event.ChunkIdx, event.Comm)
-			fmt.Fprintf(&line, "-> buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "-> tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
+			fmt.Fprintf(&line, "-> [uretprobe/SSL_read] idx=%v, ", event.ChunkIdx)
+			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
+			fmt.Fprintf(&line, "tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())
 
 		default:
