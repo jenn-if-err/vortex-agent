@@ -54,6 +54,27 @@ const (
 	TGID_ENABLE_ALL = 0xFFFFFFFF
 )
 
+const (
+	FrameData         uint8 = 0x0
+	FrameHeaders      uint8 = 0x1
+	FramePriority     uint8 = 0x2
+	FrameRstStream    uint8 = 0x3
+	FrameSettings     uint8 = 0x4
+	FramePushPromise  uint8 = 0x5
+	FramePing         uint8 = 0x6
+	FrameGoAway       uint8 = 0x7
+	FrameWindowUpdate uint8 = 0x8
+	FrameContinuation uint8 = 0x9
+)
+
+const (
+	FlagPadded uint8 = 0x8
+)
+
+const (
+	CHUNK_END_IDX = 0xFFFFFFFF
+)
+
 var (
 	testf = flag.Bool("test", false, "Run in test mode")
 
@@ -918,7 +939,7 @@ func main() {
 
 			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uprobe/SSL_write",
 				event.Comm,
-				event.Buf,
+				readable(event.Buf[:], max(event.Bytes, 0)),
 				event.Tgid,
 				event.Bytes,
 			)
@@ -932,7 +953,7 @@ func main() {
 
 			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_write",
 				event.Comm,
-				event.Buf,
+				readable(event.Buf[:], max(event.Bytes, 0)),
 				event.Tgid,
 				event.Bytes,
 			)
@@ -946,7 +967,7 @@ func main() {
 
 			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uprobe/SSL_read",
 				event.Comm,
-				event.Buf,
+				readable(event.Buf[:], max(event.Bytes, 0)),
 				event.Tgid,
 				event.Bytes,
 			)
@@ -954,13 +975,42 @@ func main() {
 			glog.Info(line.String())
 
 		case TYPE_URETPROBE_SSL_READ:
-			if event.Bytes < 0 {
+			if event.Bytes < 9 || event.ChunkIdx == CHUNK_END_IDX {
 				continue
+			}
+
+			if event.ChunkIdx == 0 {
+				buf := bytes.NewReader(event.Buf[:])
+				header := make([]byte, 9)
+				_, err = buf.Read(header)
+				if err != nil {
+					glog.Errorf("uretprobe/SSL_read: incomplete frame header: %v", err)
+					continue
+				}
+
+				// Parse header: length is 24 bits (3 bytes), big-endian
+				length := uint32(header[0])<<16 | uint32(header[1])<<8 | uint32(header[2])
+				frameType := header[3]
+				flags := header[4]
+				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // Mask out the reserved bit
+
+				glog.Infof("-> [idx=%v] HTTP/2 Frame: type=0x%x, length=%d, flags=0x%x, streamId=%d",
+					event.ChunkIdx, frameType, length, flags, streamId)
+
+				switch frameType {
+				case FrameData:
+					glog.Infof("  -> [DATA]: len=%v", length)
+				case FrameHeaders:
+					glog.Infof("  -> [HEADERS]: binary, HPACK compressed")
+					continue
+				default:
+					continue
+				}
 			}
 
 			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_read",
 				event.Comm,
-				event.Buf,
+				readable(event.Buf[:], max(event.Bytes, 0)),
 				event.Tgid,
 				event.Bytes,
 			)
@@ -972,4 +1022,23 @@ func main() {
 	}
 
 	wg.Wait()
+}
+
+func readable(s []byte, len int64) string {
+	var b strings.Builder
+	for i, c := range s {
+		if len > 0 && int64(i) >= len {
+			break // respect the length limit
+		}
+
+		if c == '\x00' {
+			b.WriteByte('.')
+			continue // replace null bytes with a dot
+		}
+
+		if (c >= 32 && c <= 126) || c == '\n' || c == '\r' || c == '\t' {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
