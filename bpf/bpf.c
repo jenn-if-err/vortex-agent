@@ -32,7 +32,8 @@
 struct event {
     __u8 comm[TASK_COMM_LEN]; // bin; for debugging
     __u8 buf[BUF_LEN];
-    __s64 bytes;
+    __s64 total_len;
+    __s64 chunk_len;
     __u32 chunk_idx;
     __u32 type;
     __u32 tgid;
@@ -225,7 +226,7 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
         return 0;
 
     e->type = TYPE_FEXIT_TCP_SENDMSG;
-    e->bytes = size;
+    e->total_len = size;
     set_proc_info(e);
 
     if (should_trace(e->tgid) == 0) {
@@ -253,7 +254,7 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return 0;
 
     e->type = TYPE_FEXIT_TCP_RECVMSG;
-    e->bytes = ret;
+    e->total_len = ret;
     set_proc_info(e);
 
     if (should_trace(e->tgid) == 0) {
@@ -278,7 +279,7 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
         return 0;
 
     e->type = TYPE_FEXIT_UDP_SENDMSG;
-    e->bytes = len;
+    e->total_len = len;
     set_proc_info(e);
 
     if (should_trace(e->tgid) == 0) {
@@ -306,7 +307,7 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return 0;
 
     e->type = TYPE_FEXIT_UDP_RECVMSG;
-    e->bytes = ret;
+    e->total_len = ret;
     set_proc_info(e);
 
     if (should_trace(e->tgid) == 0) {
@@ -373,6 +374,7 @@ struct loop_data {
     __u32 type;
     char **buf;
     int *len;
+    int *orig_len;
 };
 
 /*
@@ -387,7 +389,8 @@ static int do_SSL_loop(__u32 index, struct loop_data *data) {
     __u32 len = (__u32)*data->len > BUF_LEN ? BUF_LEN : (__u32)*data->len;
     set_proc_info(e);
     e->type = data->type;
-    e->bytes = len;
+    e->total_len = *data->orig_len;
+    e->chunk_len = len;
     e->chunk_idx = index;
 
     e->buf[0] = '\0';
@@ -429,11 +432,13 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
 
     char *buf = (char *)PT_REGS_PARM2(ctx);
     int num = (int)PT_REGS_PARM3(ctx);
+    int orig_num = num;
 
     struct loop_data data = {
         .type = TYPE_UPROBE_SSL_WRITE,
         .buf = &buf,
         .len = &num,
+        .orig_len = &orig_num,
     };
 
     /* Is BUF_LEN * 1000 enough? */
@@ -447,7 +452,8 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
 
     e->type = TYPE_UPROBE_SSL_WRITE;
     set_proc_info(e);
-    e->bytes = -1;
+    e->total_len = orig_num;
+    e->chunk_len = -1;
     e->chunk_idx = CHUNKED_END_IDX;
     e->buf[0] = '\0';
     bpf_ringbuf_submit(e, 0);
@@ -495,11 +501,13 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
         return 0;
 
     char *buf = (char *)*pbuf;
+    int orig_len = ret;
 
     struct loop_data data = {
         .type = TYPE_URETPROBE_SSL_READ,
         .buf = &buf,
         .len = &ret,
+        .orig_len = &orig_len,
     };
 
     /* Is BUF_LEN * 1000 enough? */
@@ -514,7 +522,8 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
 
     e->type = TYPE_URETPROBE_SSL_READ;
     set_proc_info(e);
-    e->bytes = -1;
+    e->total_len = orig_len;
+    e->chunk_len = -1;
     e->chunk_idx = CHUNKED_END_IDX;
     e->buf[0] = '\0';
     bpf_ringbuf_submit(e, 0);

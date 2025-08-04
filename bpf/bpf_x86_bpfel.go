@@ -17,7 +17,8 @@ type BpfEvent struct {
 	_        structs.HostLayout
 	Comm     [16]uint8
 	Buf      [256]uint8
-	Bytes    int64
+	TotalLen int64
+	ChunkLen int64
 	ChunkIdx uint32
 	Type     uint32
 	Tgid     uint32

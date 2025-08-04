@@ -74,3 +74,24 @@ func FindLibSSL(root string) (string, error) {
 
 	return "", fmt.Errorf("libssl.so not found")
 }
+
+// For debugging SSL buffers.
+func Readable(s []byte, len int64) string {
+	var b strings.Builder
+	for i, c := range s {
+		if len > 0 && int64(i) >= len {
+			break // respect the length limit
+		}
+
+		if c == '\x00' {
+			b.WriteByte('.')
+			continue // replace null bytes with a dot
+		}
+
+		if (c >= 32 && c <= 126) || c == '\n' || c == '\r' || c == '\t' {
+			b.WriteByte(c)
+		}
+	}
+
+	return b.String()
+}

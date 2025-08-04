@@ -830,16 +830,10 @@ func main() {
 			}
 
 			if !isk8s && !sslTestOnly {
-				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_sendmsg",
-					event.Comm,
-					event.Tgid,
-					internal.IntToIp(event.Saddr),
-					event.Sport,
-					internal.IntToIp(event.Daddr),
-					event.Dport,
-					event.Bytes,
-				)
-
+				fmt.Fprintf(&line, "[fexit/tcp_sendmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
+				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
+				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+				fmt.Fprintf(&line, "len=%v", event.TotalLen)
 				glog.Info(line.String())
 				continue
 			}
@@ -856,7 +850,7 @@ func main() {
 
 				atomic.AddUint64(
 					&tracedTgids[event.Tgid][dstIp].Egress,
-					uint64(event.Bytes),
+					uint64(event.TotalLen),
 				)
 			} else {
 				func() {
@@ -873,70 +867,48 @@ func main() {
 
 					atomic.AddUint64(
 						&tracedTgids[event.Tgid][dstIp].Egress,
-						uint64(event.Bytes),
+						uint64(event.TotalLen),
 					)
 				}()
 			}
 
 		case TYPE_FEXIT_TCP_RECVMSG:
 			if !isk8s && !sslTestOnly {
-				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/tcp_recvmsg",
-					event.Comm,
-					event.Tgid,
-					internal.IntToIp(event.Daddr),
-					event.Dport,
-					internal.IntToIp(event.Saddr),
-					event.Sport,
-					event.Bytes,
-				)
-
+				fmt.Fprintf(&line, "[fexit/tcp_recvmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
+				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
+				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+				fmt.Fprintf(&line, "len=%v", event.TotalLen)
 				glog.Info(line.String())
 			}
 
 		case TYPE_FEXIT_UDP_SENDMSG:
 			if !isk8s && !sslTestOnly {
-				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_sendmsg",
-					event.Comm,
-					event.Tgid,
-					internal.IntToIp(event.Saddr),
-					event.Sport,
-					internal.IntToIp(event.Daddr),
-					event.Dport,
-					event.Bytes,
-				)
-
+				fmt.Fprintf(&line, "[fexit/udp_sendmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
+				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
+				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+				fmt.Fprintf(&line, "len=%v", event.TotalLen)
 				glog.Info(line.String())
 			}
 
 		case TYPE_FEXIT_UDP_RECVMSG:
 			if !isk8s && !sslTestOnly {
-				fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/udp_recvmsg",
-					event.Comm,
-					event.Tgid,
-					internal.IntToIp(event.Daddr),
-					event.Dport,
-					internal.IntToIp(event.Saddr),
-					event.Sport,
-					event.Bytes,
-				)
-
+				fmt.Fprintf(&line, "[fexit/udp_recvmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
+				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
+				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+				fmt.Fprintf(&line, "len=%v", event.TotalLen)
 				glog.Info(line.String())
 			}
 
 		case TYPE_TP_SYS_ENTER_SENDTO:
 
 		case TYPE_UPROBE_SSL_WRITE:
-			if event.Bytes < 0 {
+			if event.ChunkLen < 0 {
 				continue
 			}
 
-			fmt.Fprintf(&line, "[fn=uprobe/SSL_write] comm=%s, buf=%s, tgid=%v, ret=%v",
-				event.Comm,
-				readable(event.Buf[:], max(event.Bytes, 0)),
-				event.Tgid,
-				event.Bytes,
-			)
-
+			fmt.Fprintf(&line, "[uprobe/SSL_write] comm=%s, ", event.Comm)
+			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
+			fmt.Fprintf(&line, "[uprobe/SSL_write] tgid=%v, len=%v", event.Tgid, event.ChunkLen)
 			glog.Info(line.String())
 
 		case TYPE_URETPROBE_SSL_WRITE:
@@ -948,7 +920,7 @@ func main() {
 				continue
 			}
 
-			if event.ChunkIdx == 0 && event.Bytes >= 9 {
+			if event.ChunkIdx == 0 && event.ChunkLen >= 9 {
 				buf := bytes.NewReader(event.Buf[:])
 				header := make([]byte, 9)
 				_, err = buf.Read(header)
@@ -957,14 +929,17 @@ func main() {
 					continue
 				}
 
-				// Parse header: length is 24 bits (3 bytes), big-endian
+				// Parse header: length is 24 bits (3 bytes), big-endian.
 				length := uint32(header[0])<<16 | uint32(header[1])<<8 | uint32(header[2])
 				frameType := header[3]
 				flags := header[4]
-				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // Mask out the reserved bit
+				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
 
-				glog.Infof("[uretprobe/SSL_read] HTTP/2 Frame: type=0x%x, length=%d, flags=0x%x, streamId=%d",
-					frameType, length, flags, streamId)
+				var h strings.Builder
+				fmt.Fprintf(&h, "[uretprobe/SSL_read] HTTP/2 Frame: type=0x%x, ", frameType)
+				fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
+				fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
+				glog.Infof(h.String())
 
 				switch frameType {
 				case FrameData:
@@ -976,14 +951,9 @@ func main() {
 				}
 			}
 
-			fmt.Fprintf(&line, "-> [uretprobe/SSL_read] idx=%v, comm=%s, buf=%s, tgid=%v, ret=%v",
-				event.ChunkIdx,
-				event.Comm,
-				readable(event.Buf[:], max(event.Bytes, 0)),
-				event.Tgid,
-				event.Bytes,
-			)
-
+			fmt.Fprintf(&line, "-> [uretprobe/SSL_read] idx=%v, comm=%s, ", event.ChunkIdx, event.Comm)
+			fmt.Fprintf(&line, "-> buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
+			fmt.Fprintf(&line, "-> tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())
 
 		default:
@@ -991,23 +961,4 @@ func main() {
 	}
 
 	wg.Wait()
-}
-
-func readable(s []byte, len int64) string {
-	var b strings.Builder
-	for i, c := range s {
-		if len > 0 && int64(i) >= len {
-			break // respect the length limit
-		}
-
-		if c == '\x00' {
-			b.WriteByte('.')
-			continue // replace null bytes with a dot
-		}
-
-		if (c >= 32 && c <= 126) || c == '\n' || c == '\r' || c == '\t' {
-			b.WriteByte(c)
-		}
-	}
-	return b.String()
 }
