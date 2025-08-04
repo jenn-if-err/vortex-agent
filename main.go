@@ -54,6 +54,7 @@ const (
 	TGID_ENABLE_ALL = 0xFFFFFFFF
 )
 
+// https://datatracker.ietf.org/doc/html/rfc7540#section-11.2
 const (
 	FrameData         uint8 = 0x0
 	FrameHeaders      uint8 = 0x1
@@ -923,21 +924,13 @@ func main() {
 			}
 
 		case TYPE_TP_SYS_ENTER_SENDTO:
-			// NOTE: Not used now.
-			// fmt.Fprintf(&line, "comm=%s, tgid=%v, ret=%v, fn=sys_enter_sendto",
-			// 	event.Comm,
-			// 	event.Tgid,
-			// 	event.Bytes,
-			// )
-
-			// glog.Info(line.String())
 
 		case TYPE_UPROBE_SSL_WRITE:
 			if event.Bytes < 0 {
 				continue
 			}
 
-			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uprobe/SSL_write",
+			fmt.Fprintf(&line, "[fn=uprobe/SSL_write] comm=%s, buf=%s, tgid=%v, ret=%v",
 				event.Comm,
 				readable(event.Buf[:], max(event.Bytes, 0)),
 				event.Tgid,
@@ -947,18 +940,6 @@ func main() {
 			glog.Info(line.String())
 
 		case TYPE_URETPROBE_SSL_WRITE:
-			if event.Bytes < 0 {
-				continue
-			}
-
-			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_write",
-				event.Comm,
-				readable(event.Buf[:], max(event.Bytes, 0)),
-				event.Tgid,
-				event.Bytes,
-			)
-
-			glog.Info(line.String())
 
 		case TYPE_UPROBE_SSL_READ:
 
@@ -967,16 +948,12 @@ func main() {
 				continue
 			}
 
-			if event.Bytes < 9 && event.ChunkIdx == 0 {
-				continue
-			}
-
-			if event.ChunkIdx == 0 {
+			if event.ChunkIdx == 0 && event.Bytes >= 9 {
 				buf := bytes.NewReader(event.Buf[:])
 				header := make([]byte, 9)
 				_, err = buf.Read(header)
 				if err != nil {
-					glog.Errorf("uretprobe/SSL_read: incomplete frame header: %v", err)
+					glog.Errorf("[uretprobe/SSL_read] incomplete frame header: %v", err)
 					continue
 				}
 
@@ -986,18 +963,20 @@ func main() {
 				flags := header[4]
 				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // Mask out the reserved bit
 
-				glog.Infof("HTTP/2 Frame: type=0x%x, length=%d, flags=0x%x, streamId=%d",
+				glog.Infof("[uretprobe/SSL_read] HTTP/2 Frame: type=0x%x, length=%d, flags=0x%x, streamId=%d",
 					frameType, length, flags, streamId)
 
 				switch frameType {
 				case FrameData:
 				case FrameHeaders:
 				default:
-					continue
+					if frameType >= FramePriority && frameType <= FrameContinuation {
+						continue
+					}
 				}
 			}
 
-			fmt.Fprintf(&line, "-> idx=%v, comm=%s, buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_read",
+			fmt.Fprintf(&line, "-> [uretprobe/SSL_read] idx=%v, comm=%s, buf=%s, tgid=%v, ret=%v",
 				event.ChunkIdx,
 				event.Comm,
 				readable(event.Buf[:], max(event.Bytes, 0)),
