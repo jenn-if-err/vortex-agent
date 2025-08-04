@@ -961,21 +961,13 @@ func main() {
 			glog.Info(line.String())
 
 		case TYPE_UPROBE_SSL_READ:
-			if event.Bytes < 0 {
+
+		case TYPE_URETPROBE_SSL_READ:
+			if event.ChunkIdx == CHUNK_END_IDX {
 				continue
 			}
 
-			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uprobe/SSL_read",
-				event.Comm,
-				readable(event.Buf[:], max(event.Bytes, 0)),
-				event.Tgid,
-				event.Bytes,
-			)
-
-			glog.Info(line.String())
-
-		case TYPE_URETPROBE_SSL_READ:
-			if event.Bytes < 9 || event.ChunkIdx == CHUNK_END_IDX {
+			if event.Bytes < 9 && event.ChunkIdx == 0 {
 				continue
 			}
 
@@ -994,21 +986,19 @@ func main() {
 				flags := header[4]
 				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // Mask out the reserved bit
 
-				glog.Infof("-> [idx=%v] HTTP/2 Frame: type=0x%x, length=%d, flags=0x%x, streamId=%d",
-					event.ChunkIdx, frameType, length, flags, streamId)
+				glog.Infof("HTTP/2 Frame: type=0x%x, length=%d, flags=0x%x, streamId=%d",
+					frameType, length, flags, streamId)
 
 				switch frameType {
 				case FrameData:
-					glog.Infof("  -> [DATA]: len=%v", length)
 				case FrameHeaders:
-					glog.Infof("  -> [HEADERS]: binary, HPACK compressed")
-					continue
 				default:
 					continue
 				}
 			}
 
-			fmt.Fprintf(&line, "comm=%s, buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_read",
+			fmt.Fprintf(&line, "-> idx=%v, comm=%s, buf=%s, tgid=%v, ret=%v, fn=uretprobe/SSL_read",
+				event.ChunkIdx,
 				event.Comm,
 				readable(event.Buf[:], max(event.Bytes, 0)),
 				event.Tgid,
