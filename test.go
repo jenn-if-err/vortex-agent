@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"container/list"
 	"fmt"
 	"os"
 	"strconv"
@@ -13,7 +14,26 @@ import (
 	"github.com/flowerinthenight/vortex-agent/internal/slog"
 )
 
+func testListAsStack() {
+	ll := list.New()
+	ll.PushBack(1)
+	ll.PushBack(2)
+	ll.PushBack(3)
+	v := ll.Remove(ll.Back())
+	slog.Info("Popped value from stack", "value", v)
+	v = ll.Remove(ll.Back())
+	slog.Info("Popped value from stack", "value", v)
+	v = ll.Remove(ll.Back())
+	slog.Info("Popped value from stack", "value", v)
+	slog.Info("Stack is empty now", "length", ll.Len())
+}
+
 func test() {
+	if true {
+		testListAsStack()
+		return
+	}
+
 	if true {
 		a := []int{}
 		defer func(l *[]int) {
