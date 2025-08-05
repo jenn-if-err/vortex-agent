@@ -452,6 +452,29 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
  */
 SEC("uprobe/SSL_read")
 int uprobe_SSL_read(struct pt_regs *ctx) {
+    int fd;
+    void *rbio = NULL;
+
+    static const int rbio_ssl_offset = 0x10;
+    static const int fd_rbio_offset_v3 = 0x38;
+    static const int fd_rbio_offset_v1_1_1 = 0x30;
+    static const int fd_rbio_offset_v1_1_0 = 0x28;
+
+    void *ssl = (void *)PT_REGS_PARM1(ctx);
+    int ret;
+
+    int ssl_version;
+    ret = bpf_probe_read_user(&ssl_version, sizeof(ssl_version), ssl + 0x00);
+    bpf_printk("SSL_read: ret=%d, ver=%llu", ret, ssl_version);
+
+    bpf_probe_read_user(&rbio, sizeof(rbio), ssl + rbio_ssl_offset);
+    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v3);
+    bpf_printk("SSL_read: v3: ret=%d, fd=%d", ret, fd);
+    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v1_1_1);
+    bpf_printk("SSL_read: v1_1_1: ret=%d, fd=%d", ret, fd);
+    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v1_1_0);
+    bpf_printk("SSL_read: v1_1_0: ret=%d, fd=%d", ret, fd);
+
     __u64 tgid = bpf_get_current_pid_tgid();
     __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &tgid);
     if (!enable)
@@ -461,6 +484,7 @@ int uprobe_SSL_read(struct pt_regs *ctx) {
     bpf_map_update_elem(&ssl_read_map, &tgid, &buf, BPF_ANY);
     return BPF_OK;
 }
+
 
 /*
  * uretprobe for SSL_read (called after decryption); can access return value.

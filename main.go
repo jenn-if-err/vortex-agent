@@ -238,7 +238,7 @@ func main() {
 				return
 			}
 
-			l, err := ex.Uretprobe("SSL_do_handshake", objs.UretprobeSSL_doHandshake, nil)
+			l, err = ex.Uretprobe("SSL_do_handshake", objs.UretprobeSSL_doHandshake, nil)
 			if err != nil {
 				glog.Errorf("uretprobe/SSL_do_handshake failed: %v", err)
 			} else {
