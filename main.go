@@ -905,15 +905,21 @@ func main() {
 			if event.ChunkLen < 0 {
 				continue
 			}
-
-			fmt.Fprintf(&line, "[uprobe/SSL_write] comm=%s, ", event.Comm)
+			// jen begin
+			// This event type covers both SSL_write and SSL_write_ex
+			fmt.Fprintf(&line, "[uprobe/SSL_write or SSL_write_ex] comm=%s, ", event.Comm)
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "[uprobe/SSL_write] tgid=%v, len=%v", event.Tgid, event.ChunkLen)
+			fmt.Fprintf(&line, "[uprobe/SSL_write or SSL_write_ex] tgid=%v, len=%v", event.Tgid, event.ChunkLen)
 			glog.Info(line.String())
-
+			// jen end
 		case TYPE_URETPROBE_SSL_WRITE:
 
 		case TYPE_UPROBE_SSL_READ:
+			// jen begin
+			// This event type covers both SSL_read and SSL_read_ex
+			fmt.Fprintf(&line, "[uprobe/SSL_read or SSL_read_ex] comm=%s, tgid=%v", event.Comm, event.Tgid)
+			glog.Info(line.String())
+			// jen end
 
 		case TYPE_URETPROBE_SSL_READ:
 			if event.ChunkIdx == CHUNK_END_IDX {
