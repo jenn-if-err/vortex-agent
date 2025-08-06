@@ -78,9 +78,13 @@ type BpfProgramSpecs struct {
 	UdpRecvmsgFexit          *ebpf.ProgramSpec `ebpf:"udp_recvmsg_fexit"`
 	UdpSendmsgFexit          *ebpf.ProgramSpec `ebpf:"udp_sendmsg_fexit"`
 	UprobeSSL_read           *ebpf.ProgramSpec `ebpf:"uprobe_SSL_read"`
+	UprobeSSL_readEx         *ebpf.ProgramSpec `ebpf:"uprobe_SSL_read_ex"`
 	UprobeSSL_write          *ebpf.ProgramSpec `ebpf:"uprobe_SSL_write"`
+	UprobeSSL_writeEx        *ebpf.ProgramSpec `ebpf:"uprobe_SSL_write_ex"`
+	UretprobeSSL_accept      *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_accept"`
 	UretprobeSSL_doHandshake *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_do_handshake"`
 	UretprobeSSL_read        *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_read"`
+	UretprobeSSL_readEx      *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_read_ex"`
 }
 
 // BpfMapSpecs contains maps before they are loaded into the kernel.
@@ -150,9 +154,13 @@ type BpfPrograms struct {
 	UdpRecvmsgFexit          *ebpf.Program `ebpf:"udp_recvmsg_fexit"`
 	UdpSendmsgFexit          *ebpf.Program `ebpf:"udp_sendmsg_fexit"`
 	UprobeSSL_read           *ebpf.Program `ebpf:"uprobe_SSL_read"`
+	UprobeSSL_readEx         *ebpf.Program `ebpf:"uprobe_SSL_read_ex"`
 	UprobeSSL_write          *ebpf.Program `ebpf:"uprobe_SSL_write"`
+	UprobeSSL_writeEx        *ebpf.Program `ebpf:"uprobe_SSL_write_ex"`
+	UretprobeSSL_accept      *ebpf.Program `ebpf:"uretprobe_SSL_accept"`
 	UretprobeSSL_doHandshake *ebpf.Program `ebpf:"uretprobe_SSL_do_handshake"`
 	UretprobeSSL_read        *ebpf.Program `ebpf:"uretprobe_SSL_read"`
+	UretprobeSSL_readEx      *ebpf.Program `ebpf:"uretprobe_SSL_read_ex"`
 }
 
 func (p *BpfPrograms) Close() error {
@@ -163,9 +171,13 @@ func (p *BpfPrograms) Close() error {
 		p.UdpRecvmsgFexit,
 		p.UdpSendmsgFexit,
 		p.UprobeSSL_read,
+		p.UprobeSSL_readEx,
 		p.UprobeSSL_write,
+		p.UprobeSSL_writeEx,
+		p.UretprobeSSL_accept,
 		p.UretprobeSSL_doHandshake,
 		p.UretprobeSSL_read,
+		p.UretprobeSSL_readEx,
 	)
 }
 
