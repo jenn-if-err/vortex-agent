@@ -256,7 +256,7 @@ func main() {
 
 			// jen begin
 			// Attach SSL_write_ex, SSL_read_ex, and uretprobe/SSL_read_ex
-			l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_write_ex, nil)
+			l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
 			if err != nil {
 				glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
 			} else {
@@ -264,7 +264,7 @@ func main() {
 				glog.Info("uprobe/SSL_write_ex attached")
 			}
 
-			l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_read_ex, nil)
+			l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
 			if err != nil {
 				glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
 			} else {
@@ -272,7 +272,7 @@ func main() {
 				glog.Info("uprobe/SSL_read_ex attached")
 			}
 
-			l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_read_ex, nil)
+			l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
 			if err != nil {
 				glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
 			} else {
