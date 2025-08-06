@@ -370,45 +370,6 @@ int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
     return 0;
 }
 
-/* jen
- * uretprobe for SSL_connect (called after handshake is done).
- * int SSL_connect(SSL *ssl);
- */
-SEC("uretprobe/SSL_connect")
-int uretprobe_SSL_connect(struct pt_regs *ctx) {
-    int ret = (int)PT_REGS_RC(ctx);
-    if (ret <= 0)
-        return 0;
-
-    __u8 enable = 1;
-    __u64 tgid = bpf_get_current_pid_tgid();
-    bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
-    return 0;
-}
-
-/* jen
- * uretprobe for SSL_accept (called after handshake is done).
- * int SSL_accept(SSL *ssl);
- */
-SEC("uretprobe/SSL_accept")
-int uretprobe_SSL_accept(struct pt_regs *ctx) {
-    int ret = (int)PT_REGS_RC(ctx);
-    if (ret <= 0)
-        return 0;
-
-    __u8 enable = 1;
-    __u64 tgid = bpf_get_current_pid_tgid();
-    bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
-    return 0;
-}
-
-// uprobe for SSL_write_ex
-SEC("uprobe/SSL_write_ex")
-int uprobe_SSL_write_ex(struct pt_regs *ctx) {
-    __u64 tgid = bpf_get_current_pid_tgid();
-    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &tgid);
-    if (!enable)
-        return 0;
 
     char *buf = (char *)PT_REGS_PARM2(ctx);
     size_t num = (size_t)PT_REGS_PARM3(ctx);
@@ -494,6 +455,47 @@ int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
 
     return 0;
 }
+
+
+/* jen
+ * uretprobe for SSL_connect (called after handshake is done).
+ * int SSL_connect(SSL *ssl);
+ */
+SEC("uretprobe/SSL_connect")
+int uretprobe_SSL_connect(struct pt_regs *ctx) {
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret <= 0)
+        return 0;
+
+    __u8 enable = 1;
+    __u64 tgid = bpf_get_current_pid_tgid();
+    bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
+    return 0;
+}
+
+/* jen
+ * uretprobe for SSL_accept (called after handshake is done).
+ * int SSL_accept(SSL *ssl);
+ */
+SEC("uretprobe/SSL_accept")
+int uretprobe_SSL_accept(struct pt_regs *ctx) {
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret <= 0)
+        return 0;
+
+    __u8 enable = 1;
+    __u64 tgid = bpf_get_current_pid_tgid();
+    bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
+    return 0;
+}
+
+// uprobe for SSL_write_ex
+SEC("uprobe/SSL_write_ex")
+int uprobe_SSL_write_ex(struct pt_regs *ctx) {
+    __u64 tgid = bpf_get_current_pid_tgid();
+    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &tgid);
+    if (!enable)
+        return 0;
 // jen end
 
 struct loop_data {
