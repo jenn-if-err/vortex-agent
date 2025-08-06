@@ -402,6 +402,100 @@ int uretprobe_SSL_accept(struct pt_regs *ctx) {
     return 0;
 }
 
+// uprobe for SSL_write_ex
+SEC("uprobe/SSL_write_ex")
+int uprobe_SSL_write_ex(struct pt_regs *ctx) {
+    __u64 tgid = bpf_get_current_pid_tgid();
+    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &tgid);
+    if (!enable)
+        return 0;
+
+    char *buf = (char *)PT_REGS_PARM2(ctx);
+    size_t num = (size_t)PT_REGS_PARM3(ctx);
+    size_t orig_num = num;
+
+    struct loop_data data = {
+        .type = TYPE_UPROBE_SSL_WRITE,
+        .buf = &buf,
+        .len = (int *)&num,
+        .orig_len = (int *)&orig_num,
+    };
+
+    bpf_loop(1000, do_SSL_loop, &data, 0);
+
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e)
+        return 0;
+
+    e->type = TYPE_UPROBE_SSL_WRITE;
+    set_proc_info(e);
+    e->total_len = orig_num;
+    e->chunk_len = -1;
+    e->chunk_idx = CHUNKED_END_IDX;
+    e->buf[0] = '\0';
+    bpf_ringbuf_submit(e, 0);
+
+    return 0;
+}
+
+// uprobe for SSL_read_ex
+SEC("uprobe/SSL_read_ex")
+int uprobe_SSL_read_ex(struct pt_regs *ctx) {
+    __u64 tgid = bpf_get_current_pid_tgid();
+    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &tgid);
+    if (!enable)
+        return 0;
+
+    char *buf = (char *)PT_REGS_PARM2(ctx);
+    bpf_map_update_elem(&ssl_read_map, &tgid, &buf, BPF_ANY);
+    return 0;
+}
+
+// uretprobe for SSL_read_ex
+SEC("uretprobe/SSL_read_ex")
+int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
+    __u64 tgid = bpf_get_current_pid_tgid();
+    size_t ret = (size_t)PT_REGS_RC(ctx);
+    if (ret <= 0) {
+        bpf_map_delete_elem(&ssl_read_map, &tgid);
+        return 0;
+    }
+
+    char **pbuf = bpf_map_lookup_elem(&ssl_read_map, &tgid);
+    if (!pbuf)
+        return 0;
+
+    char *buf = (char *)*pbuf;
+    size_t orig_len = ret;
+
+    struct loop_data data = {
+        .type = TYPE_URETPROBE_SSL_READ,
+        .buf = &buf,
+        .len = (int *)&ret,
+        .orig_len = (int *)&orig_len,
+    };
+
+    bpf_loop(1000, do_SSL_loop, &data, 0);
+    bpf_map_delete_elem(&ssl_read_map, &tgid);
+
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e)
+        return 0;
+
+    e->type = TYPE_URETPROBE_SSL_READ;
+    set_proc_info(e);
+    e->total_len = orig_len;
+    e->chunk_len = -1;
+    e->chunk_idx = CHUNKED_END_IDX;
+    e->buf[0] = '\0';
+    bpf_ringbuf_submit(e, 0);
+
+    return 0;
+}
+// jen end
+
 struct loop_data {
     __u32 type;
     char **buf;
