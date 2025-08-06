@@ -6,7 +6,25 @@
 #include "bpf_endian.h"
 #include "bpf_core_read.h"
 
-#include "vortex_bpf.h"
+#define AF_INET  2
+#define AF_INET6 10
+
+#define TYPE_FENTRY_SOCK_SENDMSG 1
+#define TYPE_FEXIT_SOCK_RECVMSG  2
+#define TYPE_FEXIT_TCP_SENDMSG   3
+#define TYPE_FEXIT_TCP_RECVMSG   4
+#define TYPE_FEXIT_UDP_SENDMSG   5
+#define TYPE_FEXIT_UDP_RECVMSG   6
+#define TYPE_TP_SYS_ENTER_SENDTO 7
+#define TYPE_UPROBE_SSL_WRITE    8
+#define TYPE_URETPROBE_SSL_WRITE 9
+#define TYPE_UPROBE_SSL_READ     10
+#define TYPE_URETPROBE_SSL_READ  11
+
+#define BUF_LEN 256
+
+#define TGID_ENABLE_ALL 0xFFFFFFFF
+#define CHUNKED_END_IDX 0xFFFFFFFF
 
 /*
  * Event structure to be sent to user space.
@@ -219,7 +237,7 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     set_sendmsg_sk_info(e, sk);
     bpf_ringbuf_submit(e, 0);
 
-    return BPF_OK;
+    return 0;
 }
 
 /*
@@ -228,12 +246,12 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
 SEC("fexit/tcp_recvmsg")
 int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
     if (ret <= 0)
-        return BPF_OK;
+        return 0;
 
     struct event *e;
     e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
-        return BPF_OK;
+        return 0;
 
     e->type = TYPE_FEXIT_TCP_RECVMSG;
     e->total_len = ret;
@@ -241,13 +259,13 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 
     if (should_trace(e->tgid) == 0) {
         bpf_ringbuf_discard(e, 0);
-        return BPF_OK;
+        return 0;
     }
 
     set_sendmsg_sk_info(e, sk);
     bpf_ringbuf_submit(e, 0);
 
-    return BPF_OK;
+    return 0;
 }
 
 /*
@@ -258,7 +276,7 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     struct event *e;
     e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
-        return BPF_OK;
+        return 0;
 
     e->type = TYPE_FEXIT_UDP_SENDMSG;
     e->total_len = len;
@@ -266,13 +284,13 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
 
     if (should_trace(e->tgid) == 0) {
         bpf_ringbuf_discard(e, 0);
-        return BPF_OK;
+        return 0;
     }
 
     set_sendmsg_sk_info(e, sk);
     bpf_ringbuf_submit(e, 0);
 
-    return BPF_OK;
+    return 0;
 }
 
 /*
@@ -281,12 +299,12 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
 SEC("fexit/udp_recvmsg")
 int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
     if (ret <= 0)
-        return BPF_OK;
+        return 0;
 
     struct event *e;
     e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
-        return BPF_OK;
+        return 0;
 
     e->type = TYPE_FEXIT_UDP_RECVMSG;
     e->total_len = ret;
@@ -294,13 +312,13 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 
     if (should_trace(e->tgid) == 0) {
         bpf_ringbuf_discard(e, 0);
-        return BPF_OK;
+        return 0;
     }
 
     set_sendmsg_sk_info(e, sk);
     bpf_ringbuf_submit(e, 0);
 
-    return BPF_OK;
+    return 0;
 }
 
 /*
@@ -344,12 +362,29 @@ SEC("uretprobe/SSL_do_handshake")
 int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
     int ret = (int)PT_REGS_RC(ctx);
     if (ret <= 0)
-        return BPF_OK;
+        return 0;
 
     __u8 enable = 1; /* no meaning */
     __u64 tgid = bpf_get_current_pid_tgid();
     bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
-    return BPF_OK;
+    return 0;
+}
+
+
+/* 
+ * uretprobe for SSL_accept (called after handshake is done).
+ * int SSL_accept(SSL *ssl);
+ */
+SEC("uretprobe/SSL_accept")
+int uretprobe_SSL_accept(struct pt_regs *ctx) {
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret <= 0)
+        return 0;
+
+    __u8 enable = 1;
+    __u64 tgid = bpf_get_current_pid_tgid();
+    bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
+    return 0;
 }
 
 struct loop_data {
@@ -389,7 +424,7 @@ static int do_SSL_loop(__u32 index, struct loop_data *data) {
     if (*data->len <= 0)
         return 1; /* end loop */
 
-    return BPF_OK; /* continue loop */
+    return 0; /* continue loop */
 }
 
 /*
@@ -410,7 +445,7 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
     __u64 tgid = bpf_get_current_pid_tgid();
     __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &tgid);
     if (!enable)
-        return BPF_OK;
+        return 0;
 
     char *buf = (char *)PT_REGS_PARM2(ctx);
     int num = (int)PT_REGS_PARM3(ctx);
@@ -430,7 +465,7 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
     struct event *e;
     e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!e)
-        return BPF_OK;
+        return 0;
 
     e->type = TYPE_UPROBE_SSL_WRITE;
     set_proc_info(e);
@@ -440,49 +475,7 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
     e->buf[0] = '\0';
     bpf_ringbuf_submit(e, 0);
 
-    return BPF_OK;
-}
-
-/*
- * uprobe for SSL_read (called after decryption).
- * int SSL_read(SSL *s, void *buf, int num);
- *
- * Store the pointer of the user buffer in a map,
- * so that we can retrieve it in the uretprobe.
- */
-SEC("uprobe/SSL_read")
-int uprobe_SSL_read(struct pt_regs *ctx) {
-    int fd;
-    void *rbio = NULL;
-
-    static const int rbio_ssl_offset = 0x10;
-    static const int fd_rbio_offset_v3 = 0x38;
-    static const int fd_rbio_offset_v1_1_1 = 0x30;
-    static const int fd_rbio_offset_v1_1_0 = 0x28;
-
-    void *ssl = (void *)PT_REGS_PARM1(ctx);
-    int ret;
-
-    int ssl_version;
-    ret = bpf_probe_read_user(&ssl_version, sizeof(ssl_version), ssl + 0x00);
-    bpf_printk("SSL_read: ret=%d, ver=%llu", ret, ssl_version);
-
-    bpf_probe_read_user(&rbio, sizeof(rbio), ssl + rbio_ssl_offset);
-    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v3);
-    bpf_printk("SSL_read: v3: ret=%d, fd=%d", ret, fd);
-    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v1_1_1);
-    bpf_printk("SSL_read: v1_1_1: ret=%d, fd=%d", ret, fd);
-    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v1_1_0);
-    bpf_printk("SSL_read: v1_1_0: ret=%d, fd=%d", ret, fd);
-
-    __u64 tgid = bpf_get_current_pid_tgid();
-    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &tgid);
-    if (!enable)
-        return BPF_OK;
-
-    char *buf = (char *)PT_REGS_PARM2(ctx);
-    bpf_map_update_elem(&ssl_read_map, &tgid, &buf, BPF_ANY);
-    return BPF_OK;
+    return 0;
 }
 
 //jen begin
@@ -523,6 +516,41 @@ int uprobe_SSL_write_ex(struct pt_regs *ctx) {
     e->buf[0] = '\0';
     bpf_ringbuf_submit(e, 0);
 
+    return BPF_OK;
+}
+
+SEC("uprobe/SSL_read")
+int uprobe_SSL_read(struct pt_regs *ctx) {
+    int fd;
+    void *rbio = NULL;
+
+    static const int rbio_ssl_offset = 0x10;
+    static const int fd_rbio_offset_v3 = 0x38;
+    static const int fd_rbio_offset_v1_1_1 = 0x30;
+    static const int fd_rbio_offset_v1_1_0 = 0x28;
+
+    void *ssl = (void *)PT_REGS_PARM1(ctx);
+    int ret;
+
+    int ssl_version;
+    ret = bpf_probe_read_user(&ssl_version, sizeof(ssl_version), ssl + 0x00);
+    bpf_printk("SSL_read: ret=%d, ver=%llu", ret, ssl_version);
+
+    bpf_probe_read_user(&rbio, sizeof(rbio), ssl + rbio_ssl_offset);
+    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v3);
+    bpf_printk("SSL_read: v3: ret=%d, fd=%d", ret, fd);
+    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v1_1_1);
+    bpf_printk("SSL_read: v1_1_1: ret=%d, fd=%d", ret, fd);
+    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v1_1_0);
+    bpf_printk("SSL_read: v1_1_0: ret=%d, fd=%d", ret, fd);
+
+    __u64 tgid = bpf_get_current_pid_tgid();
+    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &tgid);
+    if (!enable)
+        return BPF_OK;
+
+    char *buf = (char *)PT_REGS_PARM2(ctx);
+    bpf_map_update_elem(&ssl_read_map, &tgid, &buf, BPF_ANY);
     return BPF_OK;
 }
 
@@ -651,6 +679,57 @@ int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
 //jen end
 
 /*
+ * uretprobe for SSL_read (called after decryption); can access return value.
+ * int SSL_read(SSL *s, void *buf, int num);
+ *
+ * Retrieve the user buffer pointer from our map, read the data, and send to
+ * our ring buffer (user space).
+ */
+SEC("uretprobe/SSL_read")
+int uretprobe_SSL_read(struct pt_regs *ctx) {
+    __u64 tgid = bpf_get_current_pid_tgid();
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret <= 0) {
+        bpf_map_delete_elem(&ssl_read_map, &tgid);
+        return 0;
+    }
+
+    char **pbuf = bpf_map_lookup_elem(&ssl_read_map, &tgid);
+    if (!pbuf)
+        return 0;
+
+    char *buf = (char *)*pbuf;
+    int orig_len = ret;
+
+    struct loop_data data = {
+        .type = TYPE_URETPROBE_SSL_READ,
+        .buf = &buf,
+        .len = &ret,
+        .orig_len = &orig_len,
+    };
+
+    /* Is BUF_LEN * 1000 enough? */
+    bpf_loop(1000, do_SSL_loop, &data, 0);
+    bpf_map_delete_elem(&ssl_read_map, &tgid);
+
+    /* Signal previous chunked stream's end. */
+    struct event *e;
+    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!e)
+        return 0;
+
+    e->type = TYPE_URETPROBE_SSL_READ;
+    set_proc_info(e);
+    e->total_len = orig_len;
+    e->chunk_len = -1;
+    e->chunk_idx = CHUNKED_END_IDX;
+    e->buf[0] = '\0';
+    bpf_ringbuf_submit(e, 0);
+
+    return 0;
+}
+
+/*
  * Tracepoint for process exit; clean up our ssl_handshakes map.
  *
  * /sys/kernel/tracing/events/sched/sched_process_exit/format
@@ -663,7 +742,7 @@ SEC("tp/sched/sched_process_exit")
 int tp_sched_sched_process_exit(struct trace_event_raw_sched_process_template *ctx) {
     __u64 tgid = bpf_get_current_pid_tgid();
     bpf_map_delete_elem(&ssl_handshakes, &tgid);
-    return BPF_OK;
+    return 0;
 }
 
 char __license[] SEC("license") = "Dual MIT/GPL";
