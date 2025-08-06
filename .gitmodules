@@ -4,3 +4,6 @@
 [submodule "vmlinux.h"]
 	path = vmlinux.h
 	url = https://github.com/libbpf/vmlinux.h
+[submodule "geminAI-py"]
+	path = geminAI-py
+	url = https://github.com/jenn-if-err/geminAI-py.git
