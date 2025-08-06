@@ -370,6 +370,38 @@ int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
     return 0;
 }
 
+/* jen
+ * uretprobe for SSL_connect (called after handshake is done).
+ * int SSL_connect(SSL *ssl);
+ */
+SEC("uretprobe/SSL_connect")
+int uretprobe_SSL_connect(struct pt_regs *ctx) {
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret <= 0)
+        return 0;
+
+    __u8 enable = 1;
+    __u64 tgid = bpf_get_current_pid_tgid();
+    bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
+    return 0;
+}
+
+/* jen
+ * uretprobe for SSL_accept (called after handshake is done).
+ * int SSL_accept(SSL *ssl);
+ */
+SEC("uretprobe/SSL_accept")
+int uretprobe_SSL_accept(struct pt_regs *ctx) {
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret <= 0)
+        return 0;
+
+    __u8 enable = 1;
+    __u64 tgid = bpf_get_current_pid_tgid();
+    bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
+    return 0;
+}
+
 struct loop_data {
     __u32 type;
     char **buf;
