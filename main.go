@@ -254,10 +254,37 @@ func main() {
 				glog.Info("uprobe/SSL_write attached")
 			}
 
+			// jen begin
+			// Attach SSL_write_ex, SSL_read_ex, and uretprobe/SSL_read_ex
+			l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_write_ex, nil)
+			if err != nil {
+				glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uprobe/SSL_write_ex attached")
+			}
+
+			l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_read_ex, nil)
+			if err != nil {
+				glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uprobe/SSL_read_ex attached")
+			}
+
+			l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_read_ex, nil)
+			if err != nil {
+				glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uretprobe/SSL_read_ex attached")
+			}
+			// jen end
+
 			// urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
 			// if err != nil {
-			// 	glog.Errorf("uretprobe/SSL_write failed: %v", err)
-			// 	return
+			//     glog.Errorf("uretprobe/SSL_write failed: %v", err)
+			//     return
 			// }
 
 			// defer urpSSLWrite.Close()
