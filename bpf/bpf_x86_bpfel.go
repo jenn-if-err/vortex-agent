@@ -30,6 +30,13 @@ type BpfEvent struct {
 	_        [4]byte
 }
 
+type BpfSslCallstackCtx struct {
+	_   structs.HostLayout
+	Buf uint64
+	Len int32
+	_   [4]byte
+}
+
 // LoadBpf returns the embedded CollectionSpec for Bpf.
 func LoadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -81,16 +88,19 @@ type BpfProgramSpecs struct {
 	UprobeSSL_write          *ebpf.ProgramSpec `ebpf:"uprobe_SSL_write"`
 	UretprobeSSL_doHandshake *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_do_handshake"`
 	UretprobeSSL_read        *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_read"`
+	UretprobeSSL_write       *ebpf.ProgramSpec `ebpf:"uretprobe_SSL_write"`
 }
 
 // BpfMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type BpfMapSpecs struct {
-	Events        *ebpf.MapSpec `ebpf:"events"`
-	SslHandshakes *ebpf.MapSpec `ebpf:"ssl_handshakes"`
-	SslReadMap    *ebpf.MapSpec `ebpf:"ssl_read_map"`
-	TgidsToTrace  *ebpf.MapSpec `ebpf:"tgids_to_trace"`
+	Events            *ebpf.MapSpec `ebpf:"events"`
+	SslHandshakes     *ebpf.MapSpec `ebpf:"ssl_handshakes"`
+	SslReadCallstack  *ebpf.MapSpec `ebpf:"ssl_read_callstack"`
+	SslReadMap        *ebpf.MapSpec `ebpf:"ssl_read_map"`
+	SslWriteCallstack *ebpf.MapSpec `ebpf:"ssl_write_callstack"`
+	TgidsToTrace      *ebpf.MapSpec `ebpf:"tgids_to_trace"`
 }
 
 // BpfVariableSpecs contains global variables before they are loaded into the kernel.
@@ -119,17 +129,21 @@ func (o *BpfObjects) Close() error {
 //
 // It can be passed to LoadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type BpfMaps struct {
-	Events        *ebpf.Map `ebpf:"events"`
-	SslHandshakes *ebpf.Map `ebpf:"ssl_handshakes"`
-	SslReadMap    *ebpf.Map `ebpf:"ssl_read_map"`
-	TgidsToTrace  *ebpf.Map `ebpf:"tgids_to_trace"`
+	Events            *ebpf.Map `ebpf:"events"`
+	SslHandshakes     *ebpf.Map `ebpf:"ssl_handshakes"`
+	SslReadCallstack  *ebpf.Map `ebpf:"ssl_read_callstack"`
+	SslReadMap        *ebpf.Map `ebpf:"ssl_read_map"`
+	SslWriteCallstack *ebpf.Map `ebpf:"ssl_write_callstack"`
+	TgidsToTrace      *ebpf.Map `ebpf:"tgids_to_trace"`
 }
 
 func (m *BpfMaps) Close() error {
 	return _BpfClose(
 		m.Events,
 		m.SslHandshakes,
+		m.SslReadCallstack,
 		m.SslReadMap,
+		m.SslWriteCallstack,
 		m.TgidsToTrace,
 	)
 }
@@ -153,6 +167,7 @@ type BpfPrograms struct {
 	UprobeSSL_write          *ebpf.Program `ebpf:"uprobe_SSL_write"`
 	UretprobeSSL_doHandshake *ebpf.Program `ebpf:"uretprobe_SSL_do_handshake"`
 	UretprobeSSL_read        *ebpf.Program `ebpf:"uretprobe_SSL_read"`
+	UretprobeSSL_write       *ebpf.Program `ebpf:"uretprobe_SSL_write"`
 }
 
 func (p *BpfPrograms) Close() error {
@@ -166,6 +181,7 @@ func (p *BpfPrograms) Close() error {
 		p.UprobeSSL_write,
 		p.UretprobeSSL_doHandshake,
 		p.UretprobeSSL_read,
+		p.UretprobeSSL_write,
 	)
 }
 

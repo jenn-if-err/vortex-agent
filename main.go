@@ -48,6 +48,7 @@ const (
 	TYPE_URETPROBE_SSL_WRITE
 	TYPE_UPROBE_SSL_READ
 	TYPE_URETPROBE_SSL_READ
+	TYPE_ANY = 255
 )
 
 const (
@@ -254,14 +255,13 @@ func main() {
 				glog.Info("uprobe/SSL_write attached")
 			}
 
-			// urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
-			// if err != nil {
-			// 	glog.Errorf("uretprobe/SSL_write failed: %v", err)
-			// 	return
-			// }
-
-			// defer urpSSLWrite.Close()
-			// glog.Info("uretprobe/SSL_write attached")
+			l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+			if err != nil {
+				glog.Errorf("uretprobe/SSL_write failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uretprobe/SSL_write attached")
+			}
 
 			l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
 			if err != nil {
@@ -955,6 +955,9 @@ func main() {
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 			fmt.Fprintf(&line, "tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())
+
+		case TYPE_ANY:
+			glog.Infof("[TYPE_ANY] comm=%s", event.Comm)
 
 		default:
 		}
