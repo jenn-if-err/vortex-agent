@@ -8,6 +8,7 @@
 *.so
 *.dylib
 bin/
+bpf/bpf_x86_bpfel.o
 
 # BPF generated files
 bpf/*_bpfel.o
