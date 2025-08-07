@@ -316,13 +316,6 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     if (!evt)
         return BPF_OK;
 
-    /* See explanation on map. */
-    struct ssl_callstack_ctx *pctx;
-    pctx = bpf_map_lookup_elem(&ssl_read_callstack, &pid_tgid);
-    if (pctx)
-        if (bpf_probe_read_user(&evt->comm, TASK_COMM_LEN, (const char *)pctx->buf) == 0)
-            bpf_printk("fexit/tcp_recvmsg: SSL_read: pid_tgid=%llu, buf=%s", pid_tgid, evt->comm);
-
     evt->type = TYPE_FEXIT_TCP_RECVMSG;
     evt->total_len = ret;
     set_proc_info(evt);
