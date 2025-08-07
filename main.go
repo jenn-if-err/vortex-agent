@@ -46,8 +46,11 @@ const (
 	TYPE_TP_SYS_ENTER_SENDTO
 	TYPE_UPROBE_SSL_WRITE
 	TYPE_URETPROBE_SSL_WRITE
+	TYPE_REPORT_WRITE_SOCKET_INFO
 	TYPE_UPROBE_SSL_READ
 	TYPE_URETPROBE_SSL_READ
+	TYPE_REPORT_READ_SOCKET_INFO
+	TYPE_ANY = 255
 )
 
 const (
@@ -238,7 +241,7 @@ func main() {
 				return
 			}
 
-			l, err := ex.Uretprobe("SSL_do_handshake", objs.UretprobeSSL_doHandshake, nil)
+			l, err = ex.Uretprobe("SSL_do_handshake", objs.UretprobeSSL_doHandshake, nil)
 			if err != nil {
 				glog.Errorf("uretprobe/SSL_do_handshake failed: %v", err)
 			} else {
@@ -936,6 +939,12 @@ func main() {
 			fmt.Fprintf(&line, "[uprobe/SSL_write or SSL_write_ex] tgid=%v, len=%v", event.Tgid, event.ChunkLen)
 			glog.Info(line.String())
 		case TYPE_URETPROBE_SSL_WRITE:
+		case TYPE_REPORT_WRITE_SOCKET_INFO:
+			glog.Infof("[TYPE_REPORT_WRITE_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
+				event.Tgid,
+				internal.IntToIp(event.Saddr), event.Sport,
+				internal.IntToIp(event.Daddr), event.Dport,
+			)
 
 		case TYPE_UPROBE_SSL_READ:
 			// This event type covers both SSL_read and SSL_read_ex
@@ -978,10 +987,20 @@ func main() {
 				}
 			}
 
-			fmt.Fprintf(&line, "-> [uretprobe/SSL_read] idx=%v, comm=%s, ", event.ChunkIdx, event.Comm)
-			fmt.Fprintf(&line, "-> buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "-> tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
+			fmt.Fprintf(&line, "-> [uretprobe/SSL_read] idx=%v, ", event.ChunkIdx)
+			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
+			fmt.Fprintf(&line, "tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())
+
+		case TYPE_REPORT_READ_SOCKET_INFO:
+			glog.Infof("[TYPE_REPORT_READ_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
+				event.Tgid,
+				internal.IntToIp(event.Daddr), event.Dport,
+				internal.IntToIp(event.Saddr), event.Sport,
+			)
+
+		case TYPE_ANY:
+			glog.Infof("[TYPE_ANY] comm=%s", event.Comm)
 
 		default:
 		}
