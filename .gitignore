@@ -11,7 +11,6 @@ bin/
 
 # BPF generated files
 bpf/*_bpfel.o
-bpf/*_bpfel.go
 bpf/*_bpfeb.o
 bpf/*_bpfeb.go
 
