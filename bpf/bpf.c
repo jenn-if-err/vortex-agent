@@ -13,7 +13,7 @@
  */
 struct event {
     __u8 comm[TASK_COMM_LEN]; // bin; for debugging
-    __u8 buf[BUF_LEN];
+    __u8 buf[EVENT_BUF_LEN];
     __s64 total_len;
     __s64 chunk_len;
     __u32 chunk_idx;
@@ -69,11 +69,28 @@ struct {
     __type(value, __u8);
 } ssl_handshakes SEC(".maps");
 
+/*
+ * The following struct defs are for associating SSL_writes and SSL_reads to
+ * socket information. This makes it limited to apps that are "BIO-native",
+ * or those that use their TLS/SSL libraries to handle the networking
+ * alongside crypto.
+ *
+ * Unfortunately, this won't support "BIO-custom apps", or those that
+ * only use the TLS/SSL libraries for crypto, and handle networking by
+ * themselves (e.g., using sendmsg/recvmsg).
+ *
+ * Anyway, this is easier to implement than using offsets, which is very
+ * error-prone and requires a lot of maintenance. We might need to do
+ * offsets in the future, for those BIO-custom apps.
+ */
+
+/* Callstack context information. */
 struct ssl_callstack_ctx {
     uintptr_t buf; /* instead of (char *), which bpf2go doesn't support */
     int len;
 };
 
+/* Active on SSL_write entry, removed on SSL_write exit. */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
@@ -81,6 +98,7 @@ struct {
     __type(value, struct ssl_callstack_ctx);
 } ssl_write_callstack SEC(".maps");
 
+/* Active on SSL_read entry, removed on SSL_read exit. */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
@@ -228,15 +246,12 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     if (!evt)
         return 0;
 
-    /* Start: callstack-based instead of offset-based */
+    /* See explanation on map. */
     struct ssl_callstack_ctx *pctx;
     pctx = bpf_map_lookup_elem(&ssl_write_callstack, &pid_tgid);
-    if (pctx) {
-        if (bpf_probe_read_user(&evt->comm, TASK_COMM_LEN, (const char *)pctx->buf) == 0) {
+    if (pctx)
+        if (bpf_probe_read_user(&evt->comm, TASK_COMM_LEN, (const char *)pctx->buf) == 0)
             bpf_printk("fexit/tcp_sendmsg: SSL_write: pid_tgid=%llu, buf=%s", pid_tgid, evt->comm);
-        }
-    }
-    /* End: callstack-based instead of offset-based */
 
     evt->type = TYPE_FEXIT_TCP_SENDMSG;
     evt->total_len = size;
@@ -268,15 +283,12 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     if (!evt)
         return BPF_OK;
 
-    /* Start: callstack-based instead of offset-based */
+    /* See explanation on map. */
     struct ssl_callstack_ctx *pctx;
     pctx = bpf_map_lookup_elem(&ssl_read_callstack, &pid_tgid);
-    if (pctx) {
-        if (bpf_probe_read_user(&evt->comm, TASK_COMM_LEN, (const char *)pctx->buf) == 0) {
+    if (pctx)
+        if (bpf_probe_read_user(&evt->comm, TASK_COMM_LEN, (const char *)pctx->buf) == 0)
             bpf_printk("fexit/tcp_recvmsg: SSL_read: pid_tgid=%llu, buf=%s", pid_tgid, evt->comm);
-        }
-    }
-    /* End: callstack-based instead of offset-based */
 
     evt->type = TYPE_FEXIT_TCP_RECVMSG;
     evt->total_len = ret;
@@ -403,7 +415,7 @@ struct loop_data {
 };
 
 /*
- * bpf_loop callback: send data to user space in chunks of BUF_LEN bytes.
+ * bpf_loop callback: send data to user space in chunks of EVENT_BUF_LEN bytes.
  */
 static int do_SSL_loop(__u32 index, struct loop_data *data) {
     struct event *evt;
@@ -411,7 +423,7 @@ static int do_SSL_loop(__u32 index, struct loop_data *data) {
     if (!evt)
         return BPF_END_LOOP;
 
-    __u32 len = (__u32)*data->len > BUF_LEN ? BUF_LEN : (__u32)*data->len;
+    __u32 len = (__u32)*data->len > EVENT_BUF_LEN ? EVENT_BUF_LEN : (__u32)*data->len;
     set_proc_info(evt);
     evt->type = data->type;
     evt->total_len = *data->orig_len;
@@ -427,7 +439,7 @@ static int do_SSL_loop(__u32 index, struct loop_data *data) {
 
     *data->buf = *data->buf + len; /* forward buffer pointer */
 
-    int sub = *data->len <= BUF_LEN ? *data->len : BUF_LEN;
+    int sub = *data->len <= EVENT_BUF_LEN ? *data->len : EVENT_BUF_LEN;
     *data->len = *data->len - sub;
     if (*data->len <= 0)
         return BPF_END_LOOP;
@@ -455,12 +467,11 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
     if (!enable)
         return BPF_OK;
 
-    /* Start: callstack-based instead of offset-based */
+    /* See explanation on map. */
     struct ssl_callstack_ctx w_ctx;
     w_ctx.buf = (uintptr_t)PT_REGS_PARM2(ctx);
     w_ctx.len = (int)PT_REGS_PARM3(ctx);
     bpf_map_update_elem(&ssl_write_callstack, &pid_tgid, &w_ctx, BPF_ANY);
-    /* End: callstack-based instead of offset-based */
 
     char *buf = (char *)PT_REGS_PARM2(ctx);
     int num = (int)PT_REGS_PARM3(ctx);
@@ -473,7 +484,7 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
         .orig_len = &orig_num,
     };
 
-    /* Is BUF_LEN * 1000 enough? */
+    /* Is EVENT_BUF_LEN * 1000 enough? */
     bpf_loop(1000, do_SSL_loop, &data, 0);
 
     /* Signal previous chunked stream's end. */
@@ -499,11 +510,9 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
  */
 SEC("uretprobe/SSL_write")
 int uretprobe_SSL_write(struct pt_regs *ctx) {
-    /* Start: callstack-based instead of offset-based */
+    /* See explanation on map. */
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     bpf_map_delete_elem(&ssl_write_callstack, &pid_tgid);
-    /* End: callstack-based instead of offset-based */
-
     return BPF_OK;
 }
 
@@ -516,42 +525,15 @@ int uretprobe_SSL_write(struct pt_regs *ctx) {
  */
 SEC("uprobe/SSL_read")
 int uprobe_SSL_read(struct pt_regs *ctx) {
-    /*
-    int fd;
-    void *rbio = NULL;
-
-    static const int rbio_ssl_offset = 0x10;
-    static const int fd_rbio_offset_v3 = 0x38;
-    static const int fd_rbio_offset_v1_1_1 = 0x30;
-    static const int fd_rbio_offset_v1_1_0 = 0x28;
-
-    void *ssl = (void *)PT_REGS_PARM1(ctx);
-    int ret;
-
-    int ssl_version;
-    ret = bpf_probe_read_user(&ssl_version, sizeof(ssl_version), ssl + 0x00);
-    bpf_printk("SSL_read: ret=%d, ver=%llu", ret, ssl_version);
-
-    bpf_probe_read_user(&rbio, sizeof(rbio), ssl + rbio_ssl_offset);
-    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v3);
-    bpf_printk("SSL_read: v3: ret=%d, fd=%d", ret, fd);
-    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v1_1_1);
-    bpf_printk("SSL_read: v1_1_1: ret=%d, fd=%d", ret, fd);
-    ret = bpf_probe_read_user(&fd, sizeof(fd), rbio + fd_rbio_offset_v1_1_0);
-    bpf_printk("SSL_read: v1_1_0: ret=%d, fd=%d", ret, fd);
-    */
-
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-
-    /* Start: callstack-based instead of offset-based */
-    struct ssl_callstack_ctx r_ctx;
-    r_ctx.buf = (uintptr_t)PT_REGS_PARM2(ctx);
-    bpf_map_update_elem(&ssl_read_callstack, &pid_tgid, &r_ctx, BPF_ANY);
-    /* End: callstack-based instead of offset-based */
-
     __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &pid_tgid);
     if (!enable)
         return BPF_OK;
+
+    /* See explanation on map. */
+    struct ssl_callstack_ctx r_ctx;
+    r_ctx.buf = (uintptr_t)PT_REGS_PARM2(ctx);
+    bpf_map_update_elem(&ssl_read_callstack, &pid_tgid, &r_ctx, BPF_ANY);
 
     char *buf = (char *)PT_REGS_PARM2(ctx);
     bpf_map_update_elem(&ssl_read_map, &pid_tgid, &buf, BPF_ANY);
@@ -570,9 +552,8 @@ SEC("uretprobe/SSL_read")
 int uretprobe_SSL_read(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
 
-    /* Start: callstack-based instead of offset-based */
+    /* See explanation on map. */
     bpf_map_delete_elem(&ssl_read_callstack, &pid_tgid);
-    /* End: callstack-based instead of offset-based */
 
     int ret = (int)PT_REGS_RC(ctx);
     if (ret <= 0) {
@@ -594,7 +575,7 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
         .orig_len = &orig_len,
     };
 
-    /* Is BUF_LEN * 1000 enough? */
+    /* Is EVENT_BUF_LEN * 1000 enough? */
     bpf_loop(1000, do_SSL_loop, &data, 0);
     bpf_map_delete_elem(&ssl_read_map, &pid_tgid);
 
