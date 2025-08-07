@@ -512,6 +512,7 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
     };
 
     /* Is EVENT_BUF_LEN * 1000 enough? */
+
     bpf_loop(1000, do_SSL_loop, &data, 0);
 
     /* Signal previous chunked stream's end. */
@@ -605,6 +606,7 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
     };
 
     /* Is EVENT_BUF_LEN * 1000 enough? */
+
     bpf_loop(1000, do_SSL_loop, &data, 0);
     bpf_map_delete_elem(&ssl_read_map, &pid_tgid);
 
@@ -614,9 +616,10 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
     if (!evt)
         return BPF_OK;
 
-    evt->type = TYPE_URETPROBE_SSL_READ;
+    evt->type = TYPE_UPROBE_SSL_WRITE;
     set_proc_info(evt);
-    evt->total_len = orig_len;
+    evt->total_len = orig_num;
+
     evt->chunk_len = -1;
     evt->chunk_idx = CHUNKED_END_IDX;
     evt->buf[0] = '\0';
@@ -624,6 +627,7 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
 
     return BPF_OK;
 }
+
 
 /*
  * uprobe for SSL_write_ex (called before encryption).
@@ -662,6 +666,7 @@ int uprobe_SSL_write_ex(struct pt_regs *ctx) {
     e->buf[0] = '\0';
     bpf_ringbuf_submit(e, 0);
 
+
     return BPF_OK;
 }
 
@@ -672,6 +677,7 @@ int uprobe_SSL_write_ex(struct pt_regs *ctx) {
  * Store the pointer of the user buffer in a map,
  * so that we can retrieve it in the uretprobe.
  */
+
 SEC("uprobe/SSL_read_ex")
 int uprobe_SSL_read_ex(struct pt_regs *ctx) {
     __u64 tgid = bpf_get_current_pid_tgid();
@@ -690,10 +696,11 @@ int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
     size_t ret = (size_t)PT_REGS_RC(ctx);
     if (ret <= 0) {
         bpf_map_delete_elem(&ssl_read_map, &tgid);
+
         return BPF_OK;
     }
 
-    char **pbuf = bpf_map_lookup_elem(&ssl_read_map, &tgid);
+    char **pbuf = bpf_map_lookup_elem(&ssl_read_map, &pid_tgid);
     if (!pbuf)
         return BPF_OK;
 
@@ -708,21 +715,25 @@ int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
         .orig_len = &orig_len,
     };
 
-    bpf_loop(1000, do_SSL_loop, &data, 0);
-    bpf_map_delete_elem(&ssl_read_map, &tgid);
+    /* Is EVENT_BUF_LEN * 1000 enough? */
 
-    struct event *e;
-    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e)
+    bpf_loop(1000, do_SSL_loop, &data, 0);
+    bpf_map_delete_elem(&ssl_read_map, &pid_tgid);
+
+
+    /* Signal previous chunked stream's end. */
+    struct event *evt;
+    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!evt)
         return BPF_OK;
 
-    e->type = TYPE_URETPROBE_SSL_READ;
-    set_proc_info(e);
-    e->total_len = orig_len;
-    e->chunk_len = -1;
-    e->chunk_idx = CHUNKED_END_IDX;
-    e->buf[0] = '\0';
-    bpf_ringbuf_submit(e, 0);
+    evt->type = TYPE_URETPROBE_SSL_READ;
+    set_proc_info(evt);
+    evt->total_len = orig_len;
+    evt->chunk_len = -1;
+    evt->chunk_idx = CHUNKED_END_IDX;
+    evt->buf[0] = '\0';
+    bpf_ringbuf_submit(evt, 0);
 
     return BPF_OK;
 }
