@@ -235,9 +235,9 @@ static __always_inline void set_sendmsg_sk_info(struct event *event, struct sock
 }
 
 static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct sock *sk) {
-    struct ssl_callstack_ctx *pctx;
-    pctx = bpf_map_lookup_elem(&ssl_write_callstack, &pid_tgid);
-    if (!pctx)
+    struct ssl_callstack_ctx *ctx;
+    ctx = bpf_map_lookup_elem(&ssl_write_callstack, &pid_tgid);
+    if (!ctx)
         return;
 
     struct event *evt;
@@ -258,12 +258,13 @@ SEC("fexit/tcp_sendmsg")
 int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
 
+    /* Sends another ringbuf event. */
+    assoc_SSL_write_socket_info(pid_tgid, sk);
+
     struct event *evt;
     evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!evt)
         return 0;
-
-    assoc_SSL_write_socket_info(pid_tgid, sk);
 
     evt->type = TYPE_FEXIT_TCP_SENDMSG;
     evt->total_len = size;
