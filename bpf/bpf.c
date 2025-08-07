@@ -12,7 +12,7 @@
  * Event structure to be sent to user space.
  */
 struct event {
-    __u8 comm[TASK_COMM_LEN]; // bin; for debugging
+    __u8 comm[TASK_COMM_LEN]; /* for debugging only */
     __u8 buf[EVENT_BUF_LEN];
     __s64 total_len;
     __s64 chunk_len;
@@ -77,11 +77,11 @@ struct {
  *
  * Unfortunately, this won't support "BIO-custom apps", or those that
  * only use the TLS/SSL libraries for crypto, and handle networking by
- * themselves (e.g., using sendmsg/recvmsg).
+ * themselves.
  *
  * Anyway, this is easier to implement than using offsets, which is very
- * error-prone and requires a lot of maintenance. We might need to do
- * offsets in the future, for those BIO-custom apps.
+ * error-prone and requires a lot of maintenance. We might need to do offsets
+ * in the future, for those BIO-custom apps.
  */
 
 /* Callstack context information. */
@@ -234,6 +234,23 @@ static __always_inline void set_sendmsg_sk_info(struct event *event, struct sock
     event->dport = bpf_htons(dport);
 }
 
+static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct sock *sk) {
+    struct ssl_callstack_ctx *pctx;
+    pctx = bpf_map_lookup_elem(&ssl_write_callstack, &pid_tgid);
+    if (!pctx)
+        return;
+
+    struct event *evt;
+    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!evt)
+        return;
+
+    evt->type = TYPE_REPORT_WRITE_SOCKET_INFO;
+    set_proc_info(evt);
+    set_sendmsg_sk_info(evt, sk);
+    bpf_ringbuf_submit(evt, 0);
+}
+
 /*
  * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332
  */
@@ -246,12 +263,7 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     if (!evt)
         return 0;
 
-    /* See explanation on map. */
-    struct ssl_callstack_ctx *pctx;
-    pctx = bpf_map_lookup_elem(&ssl_write_callstack, &pid_tgid);
-    if (pctx)
-        if (bpf_probe_read_user(&evt->comm, TASK_COMM_LEN, (const char *)pctx->buf) == 0)
-            bpf_printk("fexit/tcp_sendmsg: SSL_write: pid_tgid=%llu, buf=%s", pid_tgid, evt->comm);
+    assoc_SSL_write_socket_info(pid_tgid, sk);
 
     evt->type = TYPE_FEXIT_TCP_SENDMSG;
     evt->total_len = size;

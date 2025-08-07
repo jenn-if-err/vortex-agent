@@ -46,8 +46,10 @@ const (
 	TYPE_TP_SYS_ENTER_SENDTO
 	TYPE_UPROBE_SSL_WRITE
 	TYPE_URETPROBE_SSL_WRITE
+	TYPE_REPORT_WRITE_SOCKET_INFO
 	TYPE_UPROBE_SSL_READ
 	TYPE_URETPROBE_SSL_READ
+	TYPE_REPORT_READ_SOCKET_INFO
 	TYPE_ANY = 255
 )
 
@@ -913,6 +915,13 @@ func main() {
 
 		case TYPE_URETPROBE_SSL_WRITE:
 
+		case TYPE_REPORT_WRITE_SOCKET_INFO:
+			glog.Infof("[TYPE_REPORT_WRITE_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
+				event.Tgid,
+				internal.IntToIp(event.Saddr), event.Sport,
+				internal.IntToIp(event.Daddr), event.Dport,
+			)
+
 		case TYPE_UPROBE_SSL_READ:
 
 		case TYPE_URETPROBE_SSL_READ:
@@ -955,6 +964,8 @@ func main() {
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 			fmt.Fprintf(&line, "tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())
+
+		case TYPE_REPORT_READ_SOCKET_INFO:
 
 		case TYPE_ANY:
 			glog.Infof("[TYPE_ANY] comm=%s", event.Comm)
