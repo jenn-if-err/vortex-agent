@@ -560,6 +560,7 @@ int uprobe_SSL_read(struct pt_regs *ctx) {
     /* See explanation on map. */
     struct ssl_callstack_ctx r_ctx;
     r_ctx.buf = (uintptr_t)PT_REGS_PARM2(ctx);
+    r_ctx.len = (int)PT_REGS_PARM3(ctx);
     bpf_map_update_elem(&ssl_read_callstack, &pid_tgid, &r_ctx, BPF_ANY);
 
     char *buf = (char *)PT_REGS_PARM2(ctx);
