@@ -281,15 +281,35 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     return BPF_OK;
 }
 
+static __always_inline void assoc_SSL_read_socket_info(__u64 pid_tgid, struct sock *sk) {
+    struct ssl_callstack_ctx *ctx;
+    ctx = bpf_map_lookup_elem(&ssl_read_callstack, &pid_tgid);
+    if (!ctx)
+        return;
+
+    struct event *evt;
+    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!evt)
+        return;
+
+    evt->type = TYPE_REPORT_READ_SOCKET_INFO;
+    set_proc_info(evt);
+    set_sendmsg_sk_info(evt, sk);
+    bpf_ringbuf_submit(evt, 0);
+}
+
 /*
  * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L425
  */
 SEC("fexit/tcp_recvmsg")
 int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-
     if (ret <= 0)
         return BPF_OK;
+
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+
+    /* Sends another ringbuf event. */
+    assoc_SSL_read_socket_info(pid_tgid, sk);
 
     struct event *evt;
     evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);

@@ -966,6 +966,11 @@ func main() {
 			glog.Info(line.String())
 
 		case TYPE_REPORT_READ_SOCKET_INFO:
+			glog.Infof("[TYPE_REPORT_READ_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
+				event.Tgid,
+				internal.IntToIp(event.Daddr), event.Dport,
+				internal.IntToIp(event.Saddr), event.Sport,
+			)
 
 		case TYPE_ANY:
 			glog.Infof("[TYPE_ANY] comm=%s", event.Comm)
