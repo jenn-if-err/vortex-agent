@@ -430,6 +430,7 @@ int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
     __u8 enable = 1; /* no meaning */
     __u64 tgid = bpf_get_current_pid_tgid();
     bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
+
     return BPF_OK;
 }
 
@@ -563,6 +564,7 @@ int uprobe_SSL_read(struct pt_regs *ctx) {
 
     char *buf = (char *)PT_REGS_PARM2(ctx);
     bpf_map_update_elem(&ssl_read_map, &pid_tgid, &buf, BPF_ANY);
+
     return BPF_OK;
 }
 
