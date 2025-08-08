@@ -65,9 +65,7 @@ int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) 
 }
 */
 
-/*
- * https://elixir.bootlin.com/linux/v6.1.146/source/include/linux/net.h#L262
- */
+/* https://elixir.bootlin.com/linux/v6.1.146/source/include/linux/net.h#L262 */
 /*
 SEC("fexit/sock_recvmsg")
 int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, int, flags, int, ret) {
@@ -128,9 +126,7 @@ static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct s
     bpf_ringbuf_submit(evt, 0);
 }
 
-/*
- * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332
- */
+/* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332 */
 SEC("fexit/tcp_sendmsg")
 int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -175,9 +171,7 @@ static __always_inline void assoc_SSL_read_socket_info(__u64 pid_tgid, struct so
     bpf_ringbuf_submit(evt, 0);
 }
 
-/*
- * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L425
- */
+/* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L425 */
 SEC("fexit/tcp_recvmsg")
 int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
     if (ret <= 0)
@@ -208,9 +202,7 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     return BPF_OK;
 }
 
-/*
- * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/udp.h#L271
- */
+/* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/udp.h#L271 */
 SEC("fexit/udp_sendmsg")
 int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, ret) {
     struct event *evt;
@@ -233,9 +225,7 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     return BPF_OK;
 }
 
-/*
- * https://elixir.bootlin.com/linux/v6.1.146/source/net/ipv4/udp_impl.h#L20
- */
+/* https://elixir.bootlin.com/linux/v6.1.146/source/net/ipv4/udp_impl.h#L20 */
 SEC("fexit/udp_recvmsg")
 int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
     if (ret <= 0)

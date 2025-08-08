@@ -64,8 +64,8 @@ static int do_SSL_loop(__u32 index, struct loop_data *data) {
     evt->total_len = *data->orig_len;
     evt->chunk_len = len;
     evt->chunk_idx = index;
+    __builtin_memset(evt->buf, 0, EVENT_BUF_LEN);
 
-    evt->buf[0] = '\0';
     char *buf = *data->buf;
     if (bpf_probe_read_user(&evt->buf, len, buf) == 0)
         bpf_ringbuf_submit(evt, 0);
