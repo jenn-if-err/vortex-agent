@@ -776,7 +776,7 @@ func main() {
 
 	eventState := make(map[string]*eventStateT)
 
-	// var count uint64
+	var count uint64
 	var line strings.Builder
 	var event bpf.BpfEvent
 
@@ -797,10 +797,10 @@ func main() {
 			continue
 		}
 
-		// count++
-		// if count%1000 == 0 {
-		// 	glog.Infof("processed %d events", count)
-		// }
+		count++
+		if count%1000 == 0 {
+			glog.Infof("processed %d events", count)
+		}
 
 		key := fmt.Sprintf("%v/%v", event.Tgid, event.Pid)
 		if _, ok := eventState[key]; !ok {
