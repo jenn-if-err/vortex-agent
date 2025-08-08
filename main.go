@@ -133,32 +133,6 @@ func main() {
 		}
 	}(&hostLinks)
 
-	// ssm, err := link.AttachTracing(link.TracingOptions{
-	// 	Program:    objs.SockSendmsgFentry,
-	// 	AttachType: ebpf.AttachTraceFEntry,
-	// })
-
-	// if err != nil {
-	// 	glog.Errorf("fentry/sock_sendmsg failed: %v", err)
-	// 	return
-	// }
-
-	// defer ssm.Close()
-	// glog.Info("fentry/sock_sendmsg attached successfully")
-
-	// srm, err := link.AttachTracing(link.TracingOptions{
-	// 	Program:    objs.SockRecvmsgFexit,
-	// 	AttachType: ebpf.AttachTraceFExit,
-	// })
-
-	// if err != nil {
-	// 	glog.Errorf("fexit/sock_recvmsg failed: %v", err)
-	// 	return
-	// }
-
-	// defer srm.Close()
-	// glog.Info("fexit/sock_recvmsg attached successfully")
-
 	l, err := link.AttachTracing(link.TracingOptions{
 		Program:    objs.TcpSendmsgFexit,
 		AttachType: ebpf.AttachTraceFExit,
