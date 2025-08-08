@@ -46,7 +46,6 @@ static int do_SSL_loop(u64 index, struct loop_data *data) {
 static int do_uprobe_SSL_write(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
 
-    /* See explanation on map. */
     struct ssl_callstack_ctx w_ctx;
     w_ctx.buf = (uintptr_t)PT_REGS_PARM2(ctx);
     w_ctx.len = (int)PT_REGS_PARM3(ctx);
@@ -84,7 +83,6 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
 }
 
 static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
-    /* See explanation on map. */
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     bpf_map_delete_elem(&ssl_write_callstack, &pid_tgid);
     return BPF_OK;
@@ -131,7 +129,6 @@ int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(
 static int do_uprobe_SSL_read(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
 
-    /* See explanation on map. */
     struct ssl_callstack_ctx r_ctx;
     r_ctx.buf = (uintptr_t)PT_REGS_PARM2(ctx);
     r_ctx.len = (int)PT_REGS_PARM3(ctx);
@@ -146,7 +143,6 @@ static int do_uprobe_SSL_read(struct pt_regs *ctx) {
 static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
 
-    /* See explanation on map. */
     bpf_map_delete_elem(&ssl_read_callstack, &pid_tgid);
 
     if (read <= 0) {

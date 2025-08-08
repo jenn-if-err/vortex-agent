@@ -919,13 +919,46 @@ func main() {
 		case TYPE_TP_SYS_ENTER_SENDTO:
 
 		case TYPE_UPROBE_SSL_WRITE:
-			if event.ChunkLen < 0 {
+			if event.ChunkIdx == CHUNK_END_IDX {
 				continue
 			}
 
-			fmt.Fprintf(&line, "[uprobe/SSL_write{_ex}] comm=%s, ", event.Comm)
+			if event.ChunkIdx == 0 && event.ChunkLen >= 9 {
+				buf := bytes.NewReader(event.Buf[:])
+				header := make([]byte, 9)
+				_, err = buf.Read(header)
+				if err != nil {
+					glog.Errorf("[uprobe/SSL_write] incomplete frame header: %v", err)
+					continue
+				}
+
+				// Parse header: length is 24 bits (3 bytes), big-endian.
+				length := uint32(header[0])<<16 | uint32(header[1])<<8 | uint32(header[2])
+				frameType := header[3]
+				flags := header[4]
+				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
+
+				switch frameType {
+				case FrameData:
+				case FrameHeaders:
+				default:
+					if frameType >= FramePriority && frameType <= FrameContinuation {
+						continue
+					}
+				}
+
+				if frameType <= FrameContinuation {
+					var h strings.Builder
+					fmt.Fprintf(&h, "[uprobe/SSL_write{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
+					fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
+					fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
+					glog.Infof(h.String())
+				}
+			}
+
+			fmt.Fprintf(&line, "[uprobe/SSL_write{_ex}] idx=%v, ", event.ChunkIdx)
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "tgid=%v, len=%v", event.Tgid, event.ChunkLen)
+			fmt.Fprintf(&line, "tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())
 
 		case TYPE_URETPROBE_SSL_WRITE:
@@ -959,12 +992,6 @@ func main() {
 				flags := header[4]
 				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
 
-				var h strings.Builder
-				fmt.Fprintf(&h, "[uretprobe/SSL_read{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
-				fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
-				fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
-				glog.Infof(h.String())
-
 				switch frameType {
 				case FrameData:
 				case FrameHeaders:
@@ -972,6 +999,14 @@ func main() {
 					if frameType >= FramePriority && frameType <= FrameContinuation {
 						continue
 					}
+				}
+
+				if frameType <= FrameContinuation {
+					var h strings.Builder
+					fmt.Fprintf(&h, "[uretprobe/SSL_read{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
+					fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
+					fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
+					glog.Infof(h.String())
 				}
 			}
 
