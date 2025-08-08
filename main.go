@@ -257,13 +257,44 @@ func main() {
 				glog.Info("uprobe/SSL_write attached")
 			}
 
-			// Attach SSL_write_ex, SSL_read_ex, and uretprobe/SSL_read_ex
+			l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+			if err != nil {
+				glog.Errorf("uretprobe/SSL_write failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uretprobe/SSL_write attached")
+			}
+
 			l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
 			if err != nil {
 				glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
 				glog.Info("uprobe/SSL_write_ex attached")
+			}
+
+			l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
+			if err != nil {
+				glog.Errorf("uretprobe/SSL_write_ex failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uretprobe/SSL_write_ex attached")
+			}
+
+			l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+			if err != nil {
+				glog.Errorf("uprobe/SSL_read failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uprobe/SSL_read attached")
+			}
+
+			l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
+			if err != nil {
+				glog.Errorf("uretprobe/SSL_read failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uretprobe/SSL_read attached")
 			}
 
 			l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
@@ -280,31 +311,6 @@ func main() {
 			} else {
 				hostLinks = append(hostLinks, l)
 				glog.Info("uretprobe/SSL_read_ex attached")
-			}
-
-			// urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
-			// if err != nil {
-			//     glog.Errorf("uretprobe/SSL_write failed: %v", err)
-			//     return
-			// }
-
-			// defer urpSSLWrite.Close()
-			// glog.Info("uretprobe/SSL_write attached")
-
-			l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
-			if err != nil {
-				glog.Errorf("uprobe/SSL_read failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-				glog.Info("uprobe/SSL_read attached")
-			}
-
-			l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_read failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_read attached")
 			}
 		}
 	}

@@ -474,21 +474,7 @@ static int do_SSL_loop(__u32 index, struct loop_data *data) {
     return BPF_CONTINUE_LOOP;
 }
 
-/*
- * Methods for accessing container-based file systems for u[ret]probes.
- *
- * 1) Check /proc/pid/root/. Symbolic link to pid's root directory.
- *
- * 2) Check /proc/pid/mountinfo. There will be a lowerdir, upperdir, and
- *    workdir mounts. Replace upperdir's ---/diff/ to ---/merged/.
- */
-
-/*
- * uprobe for SSL_write (called before encryption).
- * int SSL_write(SSL *s, const void *buf, int num);
- */
-SEC("uprobe/SSL_write")
-int uprobe_SSL_write(struct pt_regs *ctx) {
+static int do_uprobe_SSL_write(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &pid_tgid);
     if (!enable)
@@ -531,12 +517,7 @@ int uprobe_SSL_write(struct pt_regs *ctx) {
     return BPF_OK;
 }
 
-/*
- * uprobe for SSL_write (called before encryption).
- * int SSL_write(SSL *s, const void *buf, int num);
- */
-SEC("uretprobe/SSL_write")
-int uretprobe_SSL_write(struct pt_regs *ctx) {
+static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
     /* See explanation on map. */
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     bpf_map_delete_elem(&ssl_write_callstack, &pid_tgid);
@@ -544,44 +525,42 @@ int uretprobe_SSL_write(struct pt_regs *ctx) {
 }
 
 /*
+ * Methods for accessing container-based file systems for u[ret]probes.
+ *
+ * 1) Check /proc/pid/root/. Symbolic link to pid's root directory.
+ *    Recommended method.
+ *
+ * 2) Check /proc/pid/mountinfo. There will be a lowerdir, upperdir, and
+ *    workdir mounts. Replace upperdir's ---/diff/ to ---/merged/.
+ */
+
+/*
+ * uprobe for SSL_write (called before encryption).
+ * int SSL_write(SSL *s, const void *buf, int num);
+ */
+SEC("uprobe/SSL_write")
+int uprobe_SSL_write(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); }
+
+/*
+ * uretprobe for SSL_write (called before encryption).
+ * int SSL_write(SSL *s, const void *buf, int num);
+ */
+SEC("uretprobe/SSL_write")
+int uretprobe_SSL_write(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx); }
+
+/*
  * uprobe for SSL_write_ex (called before encryption).
  * int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written);
  */
 SEC("uprobe/SSL_write_ex")
-int uprobe_SSL_write_ex(struct pt_regs *ctx) {
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &pid_tgid);
-    if (!enable)
-        return BPF_OK;
+int uprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); }
 
-    char *buf = (char *)PT_REGS_PARM2(ctx);
-    size_t num = (size_t)PT_REGS_PARM3(ctx);
-    size_t orig_num = num;
-
-    struct loop_data data = {
-        .type = TYPE_UPROBE_SSL_WRITE,
-        .buf = &buf,
-        .len = (int *)&num,
-        .orig_len = (int *)&orig_num,
-    };
-
-    bpf_loop(1000, do_SSL_loop, &data, 0);
-
-    struct event *evt;
-    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!evt)
-        return BPF_OK;
-
-    evt->type = TYPE_UPROBE_SSL_WRITE;
-    set_proc_info(evt);
-    evt->total_len = orig_num;
-    evt->chunk_len = -1;
-    evt->chunk_idx = CHUNKED_END_IDX;
-    evt->buf[0] = '\0';
-    bpf_ringbuf_submit(evt, 0);
-
-    return BPF_OK;
-}
+/*
+ * uretprobe for SSL_write_ex (called before encryption).
+ * int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written);
+ */
+SEC("uretprobe/SSL_write_ex")
+int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx); }
 
 /*
  * uprobe for SSL_read (called after decryption).
