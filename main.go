@@ -80,7 +80,8 @@ const (
 )
 
 var (
-	testf = flag.Bool("test", false, "Run in test mode")
+	testf    = flag.Bool("test", false, "Run in test mode")
+	uprobesf = flag.String("uprobes", "", "Lib/bin files to attach uprobes to (comma-separated)")
 
 	cctx = func(p context.Context) context.Context {
 		return context.WithValue(p, struct{}{}, nil)
@@ -102,7 +103,7 @@ func main() {
 		return
 	}
 
-	sslTestOnly := true
+	sslTestOnly := false
 
 	ctx, cancel := context.WithCancel(context.Background())
 	stopper := make(chan os.Signal, 1)
@@ -190,15 +191,17 @@ func main() {
 	// defer kssm.Close()
 	// slog.Info("kprobe/sock_sendmsg attached")
 
-	l, err = link.Tracepoint("sched", "sched_process_exit", objs.TpSchedSchedProcessExit, nil)
-	if err != nil {
-		glog.Errorf("tracepoint/sched/sched_process_exit failed: %v", err)
-	} else {
-		hostLinks = append(hostLinks, l)
-		glog.Infof("tracepoint/sched/sched_process_exit attached")
-	}
+	// l, err = link.Tracepoint("sched", "sched_process_exit", objs.TpSchedSchedProcessExit, nil)
+	// if err != nil {
+	// 	glog.Errorf("tracepoint/sched/sched_process_exit failed: %v", err)
+	// } else {
+	// 	hostLinks = append(hostLinks, l)
+	// 	glog.Infof("tracepoint/sched/sched_process_exit attached")
+	// }
 
 	isk8s := internal.IsK8s()
+
+	uprobeFiles := strings.Split(*uprobesf, ",")
 
 	if !isk8s {
 		libsslPath, err := internal.FindLibSSL("")
@@ -208,20 +211,17 @@ func main() {
 		}
 
 		if libsslPath != "" {
-			glog.Infof("found libssl at [%s]", libsslPath)
-			ex, err := link.OpenExecutable(libsslPath)
+			uprobeFiles = append(uprobeFiles, libsslPath)
+		}
+
+		for _, uf := range uprobeFiles {
+			ex, err := link.OpenExecutable(uf)
 			if err != nil {
 				glog.Errorf("OpenExecutable failed: %v", err)
 				return
 			}
 
-			l, err = ex.Uretprobe("SSL_do_handshake", objs.UretprobeSSL_doHandshake, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_do_handshake failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_do_handshake attached")
-			}
+			glog.Infof("attaching uprobes to [%s]", uf)
 
 			l, err = ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
 			if err != nil {
@@ -838,9 +838,13 @@ func main() {
 			}
 
 			if !isk8s && !sslTestOnly {
+				if !strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "node") {
+					continue
+				}
+
 				fmt.Fprintf(&line, "[fexit/tcp_sendmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
-				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
-				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+				fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
 				fmt.Fprintf(&line, "len=%v", event.TotalLen)
 				glog.Info(line.String())
 				continue
@@ -882,30 +886,34 @@ func main() {
 
 		case TYPE_FEXIT_TCP_RECVMSG:
 			if !isk8s && !sslTestOnly {
+				if !strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "node") {
+					continue
+				}
+
 				fmt.Fprintf(&line, "[fexit/tcp_recvmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
-				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
+				fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
 				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
 				fmt.Fprintf(&line, "len=%v", event.TotalLen)
 				glog.Info(line.String())
 			}
 
 		case TYPE_FEXIT_UDP_SENDMSG:
-			if !isk8s && !sslTestOnly {
-				fmt.Fprintf(&line, "[fexit/udp_sendmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
-				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
-				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
-				fmt.Fprintf(&line, "len=%v", event.TotalLen)
-				glog.Info(line.String())
-			}
+			// if !isk8s && !sslTestOnly {
+			// 	fmt.Fprintf(&line, "[fexit/udp_sendmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
+			// 	fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+			// 	fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
+			// 	fmt.Fprintf(&line, "len=%v", event.TotalLen)
+			// 	glog.Info(line.String())
+			// }
 
 		case TYPE_FEXIT_UDP_RECVMSG:
-			if !isk8s && !sslTestOnly {
-				fmt.Fprintf(&line, "[fexit/udp_recvmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
-				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
-				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
-				fmt.Fprintf(&line, "len=%v", event.TotalLen)
-				glog.Info(line.String())
-			}
+			// if !isk8s && !sslTestOnly {
+			// 	fmt.Fprintf(&line, "[fexit/udp_recvmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
+			// 	fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
+			// 	fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+			// 	fmt.Fprintf(&line, "len=%v", event.TotalLen)
+			// 	glog.Info(line.String())
+			// }
 
 		case TYPE_TP_SYS_ENTER_SENDTO:
 

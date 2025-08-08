@@ -61,18 +61,6 @@ struct {
 } ssl_read_map SEC(".maps");
 
 /*
- * Map to track SSL handshakes. The key is the PID/TGID, and the value is a
- * simple byte (not used, just to indicate that the handshake is in progress).
- * This map is used to determine if we should trace SSL_write/SSL_read.
- */
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 1024);
-    __type(key, __u64);
-    __type(value, __u8);
-} ssl_handshakes SEC(".maps");
-
-/*
  * The following struct defs are for associating SSL_writes and SSL_reads to
  * socket information. This makes it limited to apps that are "BIO-native",
  * or those that use their TLS/SSL libraries to handle the networking

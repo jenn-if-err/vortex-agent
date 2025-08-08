@@ -5,43 +5,6 @@
 #ifndef __BPF_VORTEX_OPENSSL_C
 #define __BPF_VORTEX_OPENSSL_C
 
-/*
- * uretprobe for SSL_do_handshake (called after handshake is done).
- * Track SSL handshakes before tracing SSL_write/SSL_read.
- *
- * int SSL_do_handshake(SSL *ssl);
- */
-SEC("uretprobe/SSL_do_handshake")
-int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
-    int ret = (int)PT_REGS_RC(ctx);
-    if (ret <= 0)
-        return BPF_OK;
-
-    __u8 enable = 1; /* no meaning */
-    __u64 tgid = bpf_get_current_pid_tgid();
-    bpf_map_update_elem(&ssl_handshakes, &tgid, &enable, BPF_ANY);
-
-    return BPF_OK;
-}
-
-/*
- * Tracepoint for process exit; clean up our ssl_handshakes map.
- * Since this trace only cleans up the TGID and the main PID, there could still be
- * other PIDs in the same process that are in our map. Thus the LRU_HASH type.
- *
- * /sys/kernel/tracing/events/sched/sched_process_exit/format
- *
- *  char comm[16]
- *  pid_t pid
- *  int prio
- */
-SEC("tp/sched/sched_process_exit")
-int tp_sched_sched_process_exit(struct trace_event_raw_sched_process_template *ctx) {
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    bpf_map_delete_elem(&ssl_handshakes, &pid_tgid);
-    return BPF_OK;
-}
-
 struct loop_data {
     __u32 type;
     char **buf;
@@ -84,9 +47,6 @@ static int do_SSL_loop(__u32 index, struct loop_data *data) {
 
 static int do_uprobe_SSL_write(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &pid_tgid);
-    if (!enable)
-        return BPF_OK;
 
     /* See explanation on map. */
     struct ssl_callstack_ctx w_ctx;
@@ -172,9 +132,6 @@ int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(
 
 static int do_uprobe_SSL_read(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &pid_tgid);
-    if (!enable)
-        return BPF_OK;
 
     /* See explanation on map. */
     struct ssl_callstack_ctx r_ctx;
