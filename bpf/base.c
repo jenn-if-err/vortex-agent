@@ -58,7 +58,18 @@ struct {
     __uint(max_entries, 1024);
     __type(key, __u64);
     __type(value, char *);
-} ssl_read_map SEC(".maps");
+} ssl_read_buf SEC(".maps");
+
+/*
+ * Map to store the read pointer for SSL_read_ex. The key is the PID/TGID,
+ * and the value is a pointer to the "bytes written" value.
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key, __u64);
+    __type(value, __u64);
+} ssl_read_ex_p4 SEC(".maps");
 
 /*
  * The following struct defs are for associating SSL_writes and SSL_reads to

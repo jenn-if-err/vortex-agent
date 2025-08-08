@@ -140,41 +140,40 @@ static int do_uprobe_SSL_read(struct pt_regs *ctx) {
     bpf_map_update_elem(&ssl_read_callstack, &pid_tgid, &r_ctx, BPF_ANY);
 
     char *buf = (char *)PT_REGS_PARM2(ctx);
-    bpf_map_update_elem(&ssl_read_map, &pid_tgid, &buf, BPF_ANY);
+    bpf_map_update_elem(&ssl_read_buf, &pid_tgid, &buf, BPF_ANY);
 
     return BPF_OK;
 }
 
-static int do_uretprobe_SSL_read(struct pt_regs *ctx) {
+static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
 
     /* See explanation on map. */
     bpf_map_delete_elem(&ssl_read_callstack, &pid_tgid);
 
-    int ret = (int)PT_REGS_RC(ctx);
-    if (ret <= 0) {
-        bpf_map_delete_elem(&ssl_read_map, &pid_tgid);
+    if (read <= 0) {
+        bpf_map_delete_elem(&ssl_read_buf, &pid_tgid);
         return BPF_OK;
     }
 
-    char **pbuf = bpf_map_lookup_elem(&ssl_read_map, &pid_tgid);
+    char **pbuf = bpf_map_lookup_elem(&ssl_read_buf, &pid_tgid);
     if (!pbuf)
         return BPF_OK;
 
     char *buf = (char *)*pbuf;
-    int orig_len = ret;
+    int orig_len = read;
 
     struct loop_data data = {
         .type = TYPE_URETPROBE_SSL_READ,
         .buf = &buf,
-        .len = &ret,
+        .len = &read,
         .orig_len = &orig_len,
     };
 
     /* Is EVENT_BUF_LEN * 1000 enough? */
     bpf_loop(1000, do_SSL_loop, &data, 0);
 
-    bpf_map_delete_elem(&ssl_read_map, &pid_tgid);
+    bpf_map_delete_elem(&ssl_read_buf, &pid_tgid);
 
     /* Signal previous chunked stream's end. */
     struct event *evt;
@@ -211,7 +210,7 @@ int uprobe_SSL_read(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
  * our ring buffer (user space).
  */
 SEC("uretprobe/SSL_read")
-int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx); }
+int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx, (int)PT_REGS_RC(ctx)); }
 
 /*
  * uprobe for SSL_read_ex (called after decryption).
@@ -221,7 +220,12 @@ int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx);
  * so that we can retrieve it in the uretprobe.
  */
 SEC("uprobe/SSL_read_ex")
-int uprobe_SSL_read_ex(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
+int uprobe_SSL_read_ex(struct pt_regs *ctx) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u64 read = (__u64)PT_REGS_PARM4(ctx);
+    bpf_map_update_elem(&ssl_read_ex_p4, &pid_tgid, &read, BPF_ANY);
+    return do_uprobe_SSL_read(ctx);
+}
 
 /*
  * uretprobe for SSL_read_ex (called after decryption); can access return value.
@@ -231,6 +235,16 @@ int uprobe_SSL_read_ex(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
  * our ring buffer (user space).
  */
 SEC("uretprobe/SSL_read_ex")
-int uretprobe_SSL_read_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx); }
+int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u64 *read = bpf_map_lookup_elem(&ssl_read_ex_p4, &pid_tgid);
+    if (!read)
+        return BPF_OK;
+
+    size_t len = 0;
+    bpf_probe_read_user(&len, sizeof(len), (void *)*read);
+    bpf_map_delete_elem(&ssl_read_ex_p4, &pid_tgid);
+    return do_uretprobe_SSL_read(ctx, (int)len);
+}
 
 #endif /* __BPF_VORTEX_OPENSSL_C */

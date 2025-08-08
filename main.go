@@ -210,11 +210,12 @@ func main() {
 			return
 		}
 
-		if libsslPath != "" {
-			uprobeFiles = append(uprobeFiles, libsslPath)
-		}
-
+		uprobeFiles = append(uprobeFiles, libsslPath)
 		for _, uf := range uprobeFiles {
+			if uf == "" {
+				continue // skip empty entries
+			}
+
 			ex, err := link.OpenExecutable(uf)
 			if err != nil {
 				glog.Errorf("OpenExecutable failed: %v", err)
