@@ -257,7 +257,6 @@ func main() {
 				glog.Info("uprobe/SSL_write attached")
 			}
 
-
 			// Attach SSL_write_ex, SSL_read_ex, and uretprobe/SSL_read_ex
 			l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
 			if err != nil {
@@ -291,7 +290,6 @@ func main() {
 
 			// defer urpSSLWrite.Close()
 			// glog.Info("uretprobe/SSL_write attached")
-
 
 			l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
 			if err != nil {
@@ -941,12 +939,6 @@ func main() {
 			fmt.Fprintf(&line, "[uprobe/SSL_write or SSL_write_ex] tgid=%v, len=%v", event.Tgid, event.ChunkLen)
 			glog.Info(line.String())
 		case TYPE_URETPROBE_SSL_WRITE:
-		case TYPE_REPORT_WRITE_SOCKET_INFO:
-			glog.Infof("[TYPE_REPORT_WRITE_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
-				event.Tgid,
-				internal.IntToIp(event.Saddr), event.Sport,
-				internal.IntToIp(event.Daddr), event.Dport,
-			)
 
 		case TYPE_REPORT_WRITE_SOCKET_INFO:
 			glog.Infof("[TYPE_REPORT_WRITE_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
