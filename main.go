@@ -133,32 +133,6 @@ func main() {
 		}
 	}(&hostLinks)
 
-	// ssm, err := link.AttachTracing(link.TracingOptions{
-	// 	Program:    objs.SockSendmsgFentry,
-	// 	AttachType: ebpf.AttachTraceFEntry,
-	// })
-
-	// if err != nil {
-	// 	glog.Errorf("fentry/sock_sendmsg failed: %v", err)
-	// 	return
-	// }
-
-	// defer ssm.Close()
-	// glog.Info("fentry/sock_sendmsg attached successfully")
-
-	// srm, err := link.AttachTracing(link.TracingOptions{
-	// 	Program:    objs.SockRecvmsgFexit,
-	// 	AttachType: ebpf.AttachTraceFExit,
-	// })
-
-	// if err != nil {
-	// 	glog.Errorf("fexit/sock_recvmsg failed: %v", err)
-	// 	return
-	// }
-
-	// defer srm.Close()
-	// glog.Info("fexit/sock_recvmsg attached successfully")
-
 	l, err := link.AttachTracing(link.TracingOptions{
 		Program:    objs.TcpSendmsgFexit,
 		AttachType: ebpf.AttachTraceFExit,
@@ -265,6 +239,22 @@ func main() {
 				glog.Info("uretprobe/SSL_write attached")
 			}
 
+			l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
+			if err != nil {
+				glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uprobe/SSL_write_ex attached")
+			}
+
+			l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
+			if err != nil {
+				glog.Errorf("uretprobe/SSL_write_ex failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uretprobe/SSL_write_ex attached")
+			}
+
 			l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
 			if err != nil {
 				glog.Errorf("uprobe/SSL_read failed: %v", err)
@@ -279,6 +269,22 @@ func main() {
 			} else {
 				hostLinks = append(hostLinks, l)
 				glog.Info("uretprobe/SSL_read attached")
+			}
+
+			l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
+			if err != nil {
+				glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uprobe/SSL_read_ex attached")
+			}
+
+			l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
+			if err != nil {
+				glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uretprobe/SSL_read_ex attached")
 			}
 		}
 	}
@@ -908,7 +914,7 @@ func main() {
 				continue
 			}
 
-			fmt.Fprintf(&line, "[uprobe/SSL_write] ")
+			fmt.Fprintf(&line, "[uprobe/SSL_write{_ex}] comm=%s, ", event.Comm)
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 			fmt.Fprintf(&line, "tgid=%v, len=%v", event.Tgid, event.ChunkLen)
 			glog.Info(line.String())
@@ -945,7 +951,7 @@ func main() {
 				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
 
 				var h strings.Builder
-				fmt.Fprintf(&h, "[uretprobe/SSL_read] HTTP/2 Frame: type=0x%x, ", frameType)
+				fmt.Fprintf(&h, "[uretprobe/SSL_read{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
 				fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
 				fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
 				glog.Infof(h.String())
@@ -960,7 +966,7 @@ func main() {
 				}
 			}
 
-			fmt.Fprintf(&line, "-> [uretprobe/SSL_read] idx=%v, ", event.ChunkIdx)
+			fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v, ", event.ChunkIdx)
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 			fmt.Fprintf(&line, "tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())

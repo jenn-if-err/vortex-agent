@@ -1,6 +1,6 @@
 module github.com/flowerinthenight/vortex-agent
 
-go 1.24.5
+go 1.24
 
 require (
 	github.com/cilium/ebpf v0.19.0
