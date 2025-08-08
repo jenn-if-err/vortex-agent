@@ -30,7 +30,7 @@ struct event {
 /* Map to store events for userspace consumption. */
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 256 * 1024); /* 256 KB buffer */
+    __uint(max_entries, 256 * 1024); /* 256KB buffer */
     __type(value, struct event);
 } events SEC(".maps");
 

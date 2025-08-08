@@ -115,15 +115,15 @@ static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct s
     if (!ctx)
         return;
 
-    struct event *evt;
-    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!evt)
+    struct event *event;
+    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event)
         return;
 
-    evt->type = TYPE_REPORT_WRITE_SOCKET_INFO;
-    set_proc_info(evt);
-    set_send_recv_msg_sk_info(evt, sk);
-    bpf_ringbuf_submit(evt, 0);
+    event->type = TYPE_REPORT_WRITE_SOCKET_INFO;
+    set_proc_info(event);
+    set_send_recv_msg_sk_info(event, sk);
+    bpf_ringbuf_submit(event, 0);
 }
 
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332 */
@@ -134,22 +134,22 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     /* Sends another ringbuf event. */
     assoc_SSL_write_socket_info(pid_tgid, sk);
 
-    struct event *evt;
-    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!evt)
+    struct event *event;
+    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event)
         return 0;
 
-    set_proc_info(evt);
+    set_proc_info(event);
 
-    if (should_trace(evt->tgid) == VORTEX_NO_TRACE) {
-        bpf_ringbuf_discard(evt, 0);
+    if (should_trace(event->tgid) == VORTEX_NO_TRACE) {
+        bpf_ringbuf_discard(event, 0);
         return 0;
     }
 
-    evt->type = TYPE_FEXIT_TCP_SENDMSG;
-    evt->total_len = size;
-    set_send_recv_msg_sk_info(evt, sk);
-    bpf_ringbuf_submit(evt, 0);
+    event->type = TYPE_FEXIT_TCP_SENDMSG;
+    event->total_len = size;
+    set_send_recv_msg_sk_info(event, sk);
+    bpf_ringbuf_submit(event, 0);
 
     return BPF_OK;
 }
@@ -160,15 +160,15 @@ static __always_inline void assoc_SSL_read_socket_info(__u64 pid_tgid, struct so
     if (!ctx)
         return;
 
-    struct event *evt;
-    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!evt)
+    struct event *event;
+    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event)
         return;
 
-    evt->type = TYPE_REPORT_READ_SOCKET_INFO;
-    set_proc_info(evt);
-    set_send_recv_msg_sk_info(evt, sk);
-    bpf_ringbuf_submit(evt, 0);
+    event->type = TYPE_REPORT_READ_SOCKET_INFO;
+    set_proc_info(event);
+    set_send_recv_msg_sk_info(event, sk);
+    bpf_ringbuf_submit(event, 0);
 }
 
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L425 */
@@ -182,22 +182,22 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     /* Sends another ringbuf event. */
     assoc_SSL_read_socket_info(pid_tgid, sk);
 
-    struct event *evt;
-    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!evt)
+    struct event *event;
+    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event)
         return BPF_OK;
 
-    set_proc_info(evt);
+    set_proc_info(event);
 
-    if (should_trace(evt->tgid) == VORTEX_NO_TRACE) {
-        bpf_ringbuf_discard(evt, 0);
+    if (should_trace(event->tgid) == VORTEX_NO_TRACE) {
+        bpf_ringbuf_discard(event, 0);
         return BPF_OK;
     }
 
-    evt->type = TYPE_FEXIT_TCP_RECVMSG;
-    evt->total_len = ret;
-    set_send_recv_msg_sk_info(evt, sk);
-    bpf_ringbuf_submit(evt, 0);
+    event->type = TYPE_FEXIT_TCP_RECVMSG;
+    event->total_len = ret;
+    set_send_recv_msg_sk_info(event, sk);
+    bpf_ringbuf_submit(event, 0);
 
     return BPF_OK;
 }
@@ -205,22 +205,22 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/udp.h#L271 */
 SEC("fexit/udp_sendmsg")
 int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, ret) {
-    struct event *evt;
-    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!evt)
+    struct event *event;
+    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event)
         return BPF_OK;
 
-    set_proc_info(evt);
+    set_proc_info(event);
 
-    if (should_trace(evt->tgid) == VORTEX_NO_TRACE) {
-        bpf_ringbuf_discard(evt, 0);
+    if (should_trace(event->tgid) == VORTEX_NO_TRACE) {
+        bpf_ringbuf_discard(event, 0);
         return BPF_OK;
     }
 
-    evt->type = TYPE_FEXIT_UDP_SENDMSG;
-    evt->total_len = len;
-    set_send_recv_msg_sk_info(evt, sk);
-    bpf_ringbuf_submit(evt, 0);
+    event->type = TYPE_FEXIT_UDP_SENDMSG;
+    event->total_len = len;
+    set_send_recv_msg_sk_info(event, sk);
+    bpf_ringbuf_submit(event, 0);
 
     return BPF_OK;
 }
@@ -231,22 +231,22 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     if (ret <= 0)
         return BPF_OK;
 
-    struct event *evt;
-    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!evt)
+    struct event *event;
+    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event)
         return BPF_OK;
 
-    evt->type = TYPE_FEXIT_UDP_RECVMSG;
-    evt->total_len = ret;
-    set_proc_info(evt);
+    event->type = TYPE_FEXIT_UDP_RECVMSG;
+    event->total_len = ret;
+    set_proc_info(event);
 
-    if (should_trace(evt->tgid) == VORTEX_NO_TRACE) {
-        bpf_ringbuf_discard(evt, 0);
+    if (should_trace(event->tgid) == VORTEX_NO_TRACE) {
+        bpf_ringbuf_discard(event, 0);
         return BPF_OK;
     }
 
-    set_send_recv_msg_sk_info(evt, sk);
-    bpf_ringbuf_submit(evt, 0);
+    set_send_recv_msg_sk_info(event, sk);
+    bpf_ringbuf_submit(event, 0);
 
     return BPF_OK;
 }

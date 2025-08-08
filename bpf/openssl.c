@@ -7,33 +7,33 @@
 
 struct loop_data {
     u32 type;
-    char **buf;
+    char **buf_ptr;
     int *len;
     int *orig_len;
 };
 
 /* bpf_loop callback: send data to userspace in chunks of EVENT_BUF_LEN bytes. */
 static int do_SSL_loop(u64 index, struct loop_data *data) {
-    struct event *evt;
-    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!evt)
+    struct event *event;
+    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event)
         return BPF_END_LOOP;
 
     u32 len = (u32)*data->len > EVENT_BUF_LEN ? EVENT_BUF_LEN : (u32)*data->len;
-    set_proc_info(evt);
-    evt->type = data->type;
-    evt->total_len = *data->orig_len;
-    evt->chunk_len = len;
-    evt->chunk_idx = index;
-    __builtin_memset(evt->buf, 0, EVENT_BUF_LEN);
+    set_proc_info(event);
+    event->type = data->type;
+    event->total_len = *data->orig_len;
+    event->chunk_len = len;
+    event->chunk_idx = index;
+    __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
 
-    char *buf = *data->buf;
-    if (bpf_probe_read_user(&evt->buf, len, buf) == 0)
-        bpf_ringbuf_submit(evt, 0);
+    char *buf = *data->buf_ptr;
+    if (bpf_probe_read_user(&event->buf, len, buf) == 0)
+        bpf_ringbuf_submit(event, 0);
     else
-        bpf_ringbuf_discard(evt, 0); /* discard but still adjust values? */
+        bpf_ringbuf_discard(event, 0); /* discard but still adjust values? */
 
-    *data->buf = *data->buf + len; /* forward buffer pointer */
+    *data->buf_ptr = *data->buf_ptr + len; /* forward buffer pointer */
 
     int sub = *data->len <= EVENT_BUF_LEN ? *data->len : EVENT_BUF_LEN;
     *data->len = *data->len - sub;
@@ -58,7 +58,7 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
 
     struct loop_data data = {
         .type = TYPE_UPROBE_SSL_WRITE,
-        .buf = &buf,
+        .buf_ptr = &buf,
         .len = &num,
         .orig_len = &orig_num,
     };
@@ -67,18 +67,18 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
     bpf_loop(1000, do_SSL_loop, &data, 0);
 
     /* Signal previous chunked stream's end. */
-    struct event *evt;
-    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!evt)
+    struct event *event;
+    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event)
         return BPF_OK;
 
-    evt->type = TYPE_UPROBE_SSL_WRITE;
-    set_proc_info(evt);
-    evt->total_len = orig_num;
-    evt->chunk_len = -1;
-    evt->chunk_idx = CHUNKED_END_IDX;
-    __builtin_memset(evt->buf, 0, EVENT_BUF_LEN);
-    bpf_ringbuf_submit(evt, 0);
+    event->type = TYPE_UPROBE_SSL_WRITE;
+    set_proc_info(event);
+    event->total_len = orig_num;
+    event->chunk_len = -1;
+    event->chunk_idx = CHUNKED_END_IDX;
+    __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
+    bpf_ringbuf_submit(event, 0);
 
     return BPF_OK;
 }
@@ -154,16 +154,16 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
         return BPF_OK;
     }
 
-    char **pbuf = bpf_map_lookup_elem(&ssl_read_buf, &pid_tgid);
-    if (!pbuf)
+    char **buf_ptr = bpf_map_lookup_elem(&ssl_read_buf, &pid_tgid);
+    if (!buf_ptr)
         return BPF_OK;
 
-    char *buf = (char *)*pbuf;
+    char *buf = (char *)*buf_ptr;
     int orig_len = read;
 
     struct loop_data data = {
         .type = TYPE_URETPROBE_SSL_READ,
-        .buf = &buf,
+        .buf_ptr = &buf,
         .len = &read,
         .orig_len = &orig_len,
     };
@@ -174,18 +174,18 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     bpf_map_delete_elem(&ssl_read_buf, &pid_tgid);
 
     /* Signal previous chunked stream's end. */
-    struct event *evt;
-    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!evt)
+    struct event *event;
+    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!event)
         return BPF_OK;
 
-    evt->type = TYPE_UPROBE_SSL_WRITE;
-    set_proc_info(evt);
-    evt->total_len = orig_len;
-    evt->chunk_len = -1;
-    evt->chunk_idx = CHUNKED_END_IDX;
-    __builtin_memset(evt->buf, 0, EVENT_BUF_LEN);
-    bpf_ringbuf_submit(evt, 0);
+    event->type = TYPE_UPROBE_SSL_WRITE;
+    set_proc_info(event);
+    event->total_len = orig_len;
+    event->chunk_len = -1;
+    event->chunk_idx = CHUNKED_END_IDX;
+    __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
+    bpf_ringbuf_submit(event, 0);
 
     return BPF_OK;
 }
