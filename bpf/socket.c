@@ -2,7 +2,6 @@
 
 #include "common.c"
 #include "maps.c"
-#include "openssl.c"
 
 #ifndef __BPF_VORTEX_SOCKET_C
 #define __BPF_VORTEX_SOCKET_C
