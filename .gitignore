@@ -10,6 +10,12 @@
 bin/
 bpf/bpf_x86_bpfel.o
 
+# BPF generated files
+bpf/*_bpfel.o
+bpf/*_bpfeb.o
+bpf/*_bpfel.go
+bpf/*_bpfeb.go
+
 # Test binary, built with `go test -c`
 *.test
 

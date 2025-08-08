@@ -257,13 +257,41 @@ func main() {
 				glog.Info("uprobe/SSL_write attached")
 			}
 
-			l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+
+			// Attach SSL_write_ex, SSL_read_ex, and uretprobe/SSL_read_ex
+			l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
 			if err != nil {
-				glog.Errorf("uretprobe/SSL_write failed: %v", err)
+				glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_write attached")
+				glog.Info("uprobe/SSL_write_ex attached")
 			}
+
+			l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
+			if err != nil {
+				glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uprobe/SSL_read_ex attached")
+			}
+
+			l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
+			if err != nil {
+				glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
+			} else {
+				hostLinks = append(hostLinks, l)
+				glog.Info("uretprobe/SSL_read_ex attached")
+			}
+
+			// urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+			// if err != nil {
+			//     glog.Errorf("uretprobe/SSL_write failed: %v", err)
+			//     return
+			// }
+
+			// defer urpSSLWrite.Close()
+			// glog.Info("uretprobe/SSL_write attached")
+
 
 			l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
 			if err != nil {
@@ -907,13 +935,18 @@ func main() {
 			if event.ChunkLen < 0 {
 				continue
 			}
-
-			fmt.Fprintf(&line, "[uprobe/SSL_write] ")
+			// This event type covers both SSL_write and SSL_write_ex
+			fmt.Fprintf(&line, "[uprobe/SSL_write or SSL_write_ex] comm=%s, ", event.Comm)
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "tgid=%v, len=%v", event.Tgid, event.ChunkLen)
+			fmt.Fprintf(&line, "[uprobe/SSL_write or SSL_write_ex] tgid=%v, len=%v", event.Tgid, event.ChunkLen)
 			glog.Info(line.String())
-
 		case TYPE_URETPROBE_SSL_WRITE:
+		case TYPE_REPORT_WRITE_SOCKET_INFO:
+			glog.Infof("[TYPE_REPORT_WRITE_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
+				event.Tgid,
+				internal.IntToIp(event.Saddr), event.Sport,
+				internal.IntToIp(event.Daddr), event.Dport,
+			)
 
 		case TYPE_REPORT_WRITE_SOCKET_INFO:
 			glog.Infof("[TYPE_REPORT_WRITE_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
@@ -923,6 +956,9 @@ func main() {
 			)
 
 		case TYPE_UPROBE_SSL_READ:
+			// This event type covers both SSL_read and SSL_read_ex
+			fmt.Fprintf(&line, "[uprobe/SSL_read or SSL_read_ex] comm=%s, tgid=%v", event.Comm, event.Tgid)
+			glog.Info(line.String())
 
 		case TYPE_URETPROBE_SSL_READ:
 			if event.ChunkIdx == CHUNK_END_IDX {
