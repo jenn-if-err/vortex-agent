@@ -45,6 +45,13 @@ struct {
     __type(value, __u8);
 } tgids_to_trace SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1);
+    __type(key, u8);
+    __type(value, char[TASK_COMM_LEN]);
+} trace_comm_sock SEC(".maps");
+
 /*
  * Map to store the user buffer pointer for SSL_read. The key is the PID/TGID,
  * and the value is a pointer to the user buffer.
@@ -120,6 +127,20 @@ static __always_inline int should_trace(__u32 tgid) {
             return VORTEX_NO_TRACE;
 
     return VORTEX_TRACE;
+}
+
+static __always_inline int should_trace_comm() {
+    u8 key = 1;
+    char *comm_tr = bpf_map_lookup_elem(&trace_comm_sock, &key);
+    if (!comm_tr)
+        return VORTEX_TRACE;
+
+    char comm[TASK_COMM_LEN];
+    __builtin_memset(comm, 0, TASK_COMM_LEN);
+    bpf_get_current_comm(comm, sizeof(comm));
+    int cmp = __builtin_memcmp(comm_tr, comm, TASK_COMM_LEN);
+
+    return cmp == 0 ? VORTEX_TRACE : VORTEX_NO_TRACE;
 }
 
 #endif /* __BPF_VORTEX_COMMON_C */

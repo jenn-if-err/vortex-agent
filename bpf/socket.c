@@ -129,6 +129,9 @@ static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct s
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332 */
 SEC("fexit/tcp_sendmsg")
 int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
+    if (should_trace_comm() == VORTEX_NO_TRACE)
+        return BPF_OK;
+
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     assoc_SSL_write_socket_info(pid_tgid, sk);
 
@@ -175,6 +178,9 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     if (ret <= 0)
         return BPF_OK;
 
+    if (should_trace_comm() == VORTEX_NO_TRACE)
+        return BPF_OK;
+
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     assoc_SSL_read_socket_info(pid_tgid, sk);
 
@@ -201,6 +207,9 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/udp.h#L271 */
 SEC("fexit/udp_sendmsg")
 int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, ret) {
+    if (should_trace_comm() == VORTEX_NO_TRACE)
+        return BPF_OK;
+
     struct event *event;
     event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!event)
@@ -225,6 +234,9 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
 SEC("fexit/udp_recvmsg")
 int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
     if (ret <= 0)
+        return BPF_OK;
+
+    if (should_trace_comm() == VORTEX_NO_TRACE)
         return BPF_OK;
 
     struct event *event;

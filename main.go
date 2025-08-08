@@ -82,6 +82,7 @@ const (
 var (
 	testf    = flag.Bool("test", false, "Run in test mode")
 	uprobesf = flag.String("uprobes", "", "Lib/bin files to attach uprobes to (comma-separated)")
+	commf    = flag.String("comm", "", "Process name to trace, max 16 bytes, default all")
 
 	cctx = func(p context.Context) context.Context {
 		return context.WithValue(p, struct{}{}, nil)
@@ -129,6 +130,17 @@ func main() {
 
 	defer objs.Close()
 	glog.Info("BPF objects loaded")
+
+	if *commf != "" {
+		var comm [16]byte
+		copy(comm[:], *commf)
+		err := objs.TraceCommSock.Put(uint8(1), comm)
+		if err != nil {
+			glog.Errorf("objs.TraceCommSock.Put failed: %v", err)
+		} else {
+			glog.Infof("tracing only for [%s]", *commf)
+		}
+	}
 
 	hostLinks := []link.Link{}
 	defer func(list *[]link.Link) {
