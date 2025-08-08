@@ -939,11 +939,12 @@ func main() {
 			if event.ChunkLen < 0 {
 				continue
 			}
-			// This event type covers both SSL_write and SSL_write_ex
-			fmt.Fprintf(&line, "[uprobe/SSL_write or SSL_write_ex] comm=%s, ", event.Comm)
+
+			fmt.Fprintf(&line, "[uprobe/SSL_write{_ex}] comm=%s, ", event.Comm)
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "[uprobe/SSL_write or SSL_write_ex] tgid=%v, len=%v", event.Tgid, event.ChunkLen)
+			fmt.Fprintf(&line, "tgid=%v, len=%v", event.Tgid, event.ChunkLen)
 			glog.Info(line.String())
+
 		case TYPE_URETPROBE_SSL_WRITE:
 
 		case TYPE_REPORT_WRITE_SOCKET_INFO:
@@ -954,9 +955,6 @@ func main() {
 			)
 
 		case TYPE_UPROBE_SSL_READ:
-			// This event type covers both SSL_read and SSL_read_ex
-			fmt.Fprintf(&line, "[uprobe/SSL_read or SSL_read_ex] comm=%s, tgid=%v", event.Comm, event.Tgid)
-			glog.Info(line.String())
 
 		case TYPE_URETPROBE_SSL_READ:
 			if event.ChunkIdx == CHUNK_END_IDX {
@@ -979,7 +977,7 @@ func main() {
 				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
 
 				var h strings.Builder
-				fmt.Fprintf(&h, "[uretprobe/SSL_read] HTTP/2 Frame: type=0x%x, ", frameType)
+				fmt.Fprintf(&h, "[uretprobe/SSL_read{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
 				fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
 				fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
 				glog.Infof(h.String())
@@ -994,7 +992,7 @@ func main() {
 				}
 			}
 
-			fmt.Fprintf(&line, "-> [uretprobe/SSL_read] idx=%v, ", event.ChunkIdx)
+			fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v, ", event.ChunkIdx)
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 			fmt.Fprintf(&line, "tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())

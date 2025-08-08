@@ -275,6 +275,4 @@ int uprobe_SSL_read_ex(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
 SEC("uretprobe/SSL_read_ex")
 int uretprobe_SSL_read_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx); }
 
-
-
 #endif /* __BPF_VORTEX_OPENSSL_C */
