@@ -130,8 +130,6 @@ static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct s
 SEC("fexit/tcp_sendmsg")
 int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-
-    /* Sends another ringbuf event. */
     assoc_SSL_write_socket_info(pid_tgid, sk);
 
     struct event *event;
@@ -178,8 +176,6 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-
-    /* Sends another ringbuf event. */
     assoc_SSL_read_socket_info(pid_tgid, sk);
 
     struct event *event;
