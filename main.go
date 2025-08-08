@@ -484,6 +484,14 @@ func main() {
 				return
 			}
 
+			// Methods for accessing container-based file systems for u[ret]probes.
+			//
+			// 1) Check /proc/pid/root/. Symbolic link to pid's root directory.
+			//    Recommended method.
+			//
+			// 2) Check /proc/pid/mountinfo. There will be a lowerdir, upperdir, and
+			//    workdir mounts. Replace upperdir's ---/diff/ to ---/merged/.
+
 			for _, f := range files {
 				pid, err := strconv.Atoi(f.Name())
 				if err != nil {
