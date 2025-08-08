@@ -25,6 +25,22 @@ int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
     return BPF_OK;
 }
 
+/*
+ * Tracepoint for process exit; clean up our ssl_handshakes map.
+ *
+ * /sys/kernel/tracing/events/sched/sched_process_exit/format
+ *
+ *  char comm[16]
+ *  pid_t pid
+ *  int prio
+ */
+SEC("tp/sched/sched_process_exit")
+int tp_sched_sched_process_exit(struct trace_event_raw_sched_process_template *ctx) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    bpf_map_delete_elem(&ssl_handshakes, &pid_tgid);
+    return BPF_OK;
+}
+
 struct loop_data {
     __u32 type;
     char **buf;
@@ -259,20 +275,6 @@ int uprobe_SSL_read_ex(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
 SEC("uretprobe/SSL_read_ex")
 int uretprobe_SSL_read_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx); }
 
-/*
- * Tracepoint for process exit; clean up our ssl_handshakes map.
- *
- * /sys/kernel/tracing/events/sched/sched_process_exit/format
- *
- *  char comm[16]
- *  pid_t pid
- *  int prio
- */
-SEC("tp/sched/sched_process_exit")
-int tp_sched_sched_process_exit(struct trace_event_raw_sched_process_template *ctx) {
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    bpf_map_delete_elem(&ssl_handshakes, &pid_tgid);
-    return BPF_OK;
-}
+
 
 #endif /* __BPF_VORTEX_OPENSSL_C */
