@@ -94,6 +94,11 @@ type trafficInfo struct {
 	Egress    uint64 // bytes sent
 }
 
+type eventStateT struct {
+	count uint64
+	http2 bool
+}
+
 func main() {
 	flag.Parse()
 	defer glog.Flush()
@@ -769,6 +774,8 @@ func main() {
 		}
 	}()
 
+	eventState := make(map[string]*eventStateT)
+
 	// var count uint64
 	var line strings.Builder
 	var event bpf.BpfEvent
@@ -795,6 +802,12 @@ func main() {
 		// 	glog.Infof("processed %d events", count)
 		// }
 
+		key := fmt.Sprintf("%v/%v", event.Tgid, event.Pid)
+		if _, ok := eventState[key]; !ok {
+			eventState[key] = &eventStateT{}
+		}
+
+		eventState[key].count++
 		line.Reset()
 
 		switch event.Type {
@@ -839,7 +852,7 @@ func main() {
 					continue
 				}
 
-				fmt.Fprintf(&line, "[fexit/tcp_sendmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
+				fmt.Fprintf(&line, "[fexit/tcp_sendmsg] comm=%s, key=%v, ", event.Comm, key)
 				fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
 				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
 				fmt.Fprintf(&line, "len=%v", event.TotalLen)
@@ -887,7 +900,7 @@ func main() {
 					continue
 				}
 
-				fmt.Fprintf(&line, "[fexit/tcp_recvmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
+				fmt.Fprintf(&line, "[fexit/tcp_recvmsg] comm=%s, key=%v, ", event.Comm, key)
 				fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
 				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
 				fmt.Fprintf(&line, "len=%v", event.TotalLen)
@@ -919,7 +932,11 @@ func main() {
 				continue
 			}
 
-			if event.ChunkIdx == 0 && event.ChunkLen >= 9 {
+			if strings.HasPrefix(internal.Readable(event.Buf[:15], 15), "PRI * HTTP/2.0") {
+				eventState[key].http2 = true
+			}
+
+			if eventState[key].http2 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
 				buf := bytes.NewReader(event.Buf[:])
 				header := make([]byte, 9)
 				_, err = buf.Read(header)
@@ -954,14 +971,14 @@ func main() {
 
 			fmt.Fprintf(&line, "[uprobe/SSL_write{_ex}] idx=%v, ", event.ChunkIdx)
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
+			fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())
 
 		case TYPE_URETPROBE_SSL_WRITE:
 
 		case TYPE_REPORT_WRITE_SOCKET_INFO:
-			glog.Infof("[TYPE_REPORT_WRITE_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
-				event.Tgid,
+			glog.Infof("[TYPE_REPORT_WRITE_SOCKET_INFO] key=%v, src=%v:%v, dst=%v:%v",
+				key,
 				internal.IntToIp(event.Saddr), event.Sport,
 				internal.IntToIp(event.Daddr), event.Dport,
 			)
@@ -973,7 +990,7 @@ func main() {
 				continue
 			}
 
-			if event.ChunkIdx == 0 && event.ChunkLen >= 9 {
+			if eventState[key].http2 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
 				buf := bytes.NewReader(event.Buf[:])
 				header := make([]byte, 9)
 				_, err = buf.Read(header)
@@ -1008,18 +1025,18 @@ func main() {
 
 			fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v, ", event.ChunkIdx)
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
+			fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())
 
 		case TYPE_REPORT_READ_SOCKET_INFO:
-			glog.Infof("[TYPE_REPORT_READ_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
-				event.Tgid,
+			glog.Infof("[TYPE_REPORT_READ_SOCKET_INFO] key=%v, src=%v:%v, dst=%v:%v",
+				key,
 				internal.IntToIp(event.Daddr), event.Dport,
 				internal.IntToIp(event.Saddr), event.Sport,
 			)
 
 		case TYPE_ANY:
-			glog.Infof("[TYPE_ANY] comm=%s", event.Comm)
+			glog.Infof("[TYPE_ANY] buf=%s", event.Buf)
 
 		default:
 		}
