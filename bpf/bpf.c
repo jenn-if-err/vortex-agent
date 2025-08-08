@@ -225,7 +225,7 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, i
  * Set the socket information in the event structure for sendmsg/recvmsg.
  * This is used for both TCP and UDP send/recv messages.
  */
-static __always_inline void set_sendmsg_sk_info(struct event *event, struct sock *sk) {
+static __always_inline void set_send_recv_msg_sk_info(struct event *event, struct sock *sk) {
     BPF_CORE_READ_INTO(&event->saddr, sk, __sk_common.skc_rcv_saddr);
     BPF_CORE_READ_INTO(&event->sport, sk, __sk_common.skc_num);
     BPF_CORE_READ_INTO(&event->daddr, sk, __sk_common.skc_daddr);
@@ -247,7 +247,7 @@ static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct s
 
     evt->type = TYPE_REPORT_WRITE_SOCKET_INFO;
     set_proc_info(evt);
-    set_sendmsg_sk_info(evt, sk);
+    set_send_recv_msg_sk_info(evt, sk);
     bpf_ringbuf_submit(evt, 0);
 }
 
@@ -266,8 +266,6 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     if (!evt)
         return 0;
 
-    evt->type = TYPE_FEXIT_TCP_SENDMSG;
-    evt->total_len = size;
     set_proc_info(evt);
 
     if (should_trace(evt->tgid) == 0) {
@@ -275,7 +273,9 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
         return 0;
     }
 
-    set_sendmsg_sk_info(evt, sk);
+    evt->type = TYPE_FEXIT_TCP_SENDMSG;
+    evt->total_len = size;
+    set_send_recv_msg_sk_info(evt, sk);
     bpf_ringbuf_submit(evt, 0);
 
     return BPF_OK;
@@ -294,7 +294,7 @@ static __always_inline void assoc_SSL_read_socket_info(__u64 pid_tgid, struct so
 
     evt->type = TYPE_REPORT_READ_SOCKET_INFO;
     set_proc_info(evt);
-    set_sendmsg_sk_info(evt, sk);
+    set_send_recv_msg_sk_info(evt, sk);
     bpf_ringbuf_submit(evt, 0);
 }
 
@@ -316,8 +316,6 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     if (!evt)
         return BPF_OK;
 
-    evt->type = TYPE_FEXIT_TCP_RECVMSG;
-    evt->total_len = ret;
     set_proc_info(evt);
 
     if (should_trace(evt->tgid) == 0) {
@@ -325,7 +323,9 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return BPF_OK;
     }
 
-    set_sendmsg_sk_info(evt, sk);
+    evt->type = TYPE_FEXIT_TCP_RECVMSG;
+    evt->total_len = ret;
+    set_send_recv_msg_sk_info(evt, sk);
     bpf_ringbuf_submit(evt, 0);
 
     return BPF_OK;
@@ -341,8 +341,6 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     if (!evt)
         return BPF_OK;
 
-    evt->type = TYPE_FEXIT_UDP_SENDMSG;
-    evt->total_len = len;
     set_proc_info(evt);
 
     if (should_trace(evt->tgid) == 0) {
@@ -350,7 +348,9 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
         return BPF_OK;
     }
 
-    set_sendmsg_sk_info(evt, sk);
+    evt->type = TYPE_FEXIT_UDP_SENDMSG;
+    evt->total_len = len;
+    set_send_recv_msg_sk_info(evt, sk);
     bpf_ringbuf_submit(evt, 0);
 
     return BPF_OK;
@@ -378,7 +378,7 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return BPF_OK;
     }
 
-    set_sendmsg_sk_info(evt, sk);
+    set_send_recv_msg_sk_info(evt, sk);
     bpf_ringbuf_submit(evt, 0);
 
     return BPF_OK;
