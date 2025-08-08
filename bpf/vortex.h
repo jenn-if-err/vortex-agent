@@ -18,7 +18,7 @@ enum {
     TYPE_UPROBE_SSL_READ = 11,
     TYPE_URETPROBE_SSL_READ = 12,
     TYPE_REPORT_READ_SOCKET_INFO = 13,
-    TYPE_ANY = 255
+    TYPE_ANY = 255,
 };
 
 #define EVENT_BUF_LEN 256
@@ -26,7 +26,14 @@ enum {
 #define TGID_ENABLE_ALL 0xFFFFFFFF
 #define CHUNKED_END_IDX 0xFFFFFFFF
 
-#define BPF_CONTINUE_LOOP 0
-#define BPF_END_LOOP 1
+enum {
+    VORTEX_NO_TRACE,
+    VORTEX_TRACE,
+};
+
+enum {
+    BPF_CONTINUE_LOOP,
+    BPF_END_LOOP,
+};
 
 #endif /* __VORTEX_BPF_H */

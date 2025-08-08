@@ -155,7 +155,7 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
 
     set_proc_info(evt);
 
-    if (should_trace(evt->tgid) == 0) {
+    if (should_trace(evt->tgid) == VORTEX_NO_TRACE) {
         bpf_ringbuf_discard(evt, 0);
         return 0;
     }
@@ -205,7 +205,7 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 
     set_proc_info(evt);
 
-    if (should_trace(evt->tgid) == 0) {
+    if (should_trace(evt->tgid) == VORTEX_NO_TRACE) {
         bpf_ringbuf_discard(evt, 0);
         return BPF_OK;
     }
@@ -230,7 +230,7 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
 
     set_proc_info(evt);
 
-    if (should_trace(evt->tgid) == 0) {
+    if (should_trace(evt->tgid) == VORTEX_NO_TRACE) {
         bpf_ringbuf_discard(evt, 0);
         return BPF_OK;
     }
@@ -260,7 +260,7 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     evt->total_len = ret;
     set_proc_info(evt);
 
-    if (should_trace(evt->tgid) == 0) {
+    if (should_trace(evt->tgid) == VORTEX_NO_TRACE) {
         bpf_ringbuf_discard(evt, 0);
         return BPF_OK;
     }

@@ -48,9 +48,9 @@ static __always_inline int should_trace(__u32 tgid) {
     __u32 all = TGID_ENABLE_ALL;
     if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL)
         if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL)
-            return 0;
+            return VORTEX_NO_TRACE;
 
-    return 1;
+    return VORTEX_TRACE;
 }
 
 #endif /* __BPF_VORTEX_COMMON_C */
