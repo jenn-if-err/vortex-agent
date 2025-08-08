@@ -8,7 +8,7 @@ bpf2go \
     -type event \
     -output-dir bpf/ \
     -go-package bpf \
-    Bpf ./bpf/bpf.c \
+    Bpf ./bpf/vortex.c \
     -- \
     -I./libbpf/src \
     -I./vmlinux.h/include/x86_64
