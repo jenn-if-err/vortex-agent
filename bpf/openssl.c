@@ -13,7 +13,7 @@ struct loop_data {
 };
 
 /*
- * bpf_loop callback: send data to user space in chunks of EVENT_BUF_LEN bytes.
+ * bpf_loop callback: send data to userspace in chunks of EVENT_BUF_LEN bytes.
  */
 static int do_SSL_loop(__u32 index, struct loop_data *data) {
     struct event *evt;
@@ -207,7 +207,7 @@ int uprobe_SSL_read(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
  * int SSL_read(SSL *s, void *buf, int num);
  *
  * Retrieve the user buffer pointer from our map, read the data, and send to
- * our ring buffer (user space).
+ * our ring buffer (userspace).
  */
 SEC("uretprobe/SSL_read")
 int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx, (int)PT_REGS_RC(ctx)); }
@@ -232,7 +232,7 @@ int uprobe_SSL_read_ex(struct pt_regs *ctx) {
  * int SSL_read_ex(SSL *s, void *buf, size_t num, size_t *read);
  *
  * Retrieve the user buffer pointer from our map, read the data, and send to
- * our ring buffer (user space).
+ * our ring buffer (userspace).
  */
 SEC("uretprobe/SSL_read_ex")
 int uretprobe_SSL_read_ex(struct pt_regs *ctx) {

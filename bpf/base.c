@@ -12,7 +12,7 @@
 #define __BPF_VORTEX_COMMON_C
 
 /*
- * Event structure to be sent to user space.
+ * Event structure to be sent to userspace.
  */
 struct event {
     __u8 comm[TASK_COMM_LEN]; /* for debugging only */
@@ -30,7 +30,7 @@ struct event {
 };
 
 /*
- * Map to store events for user space consumption.
+ * Map to store events for userspace consumption.
  */
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
