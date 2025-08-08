@@ -1,5 +1,5 @@
-#ifndef __VORTEX_BPF_H
-#define __VORTEX_BPF_H
+#ifndef __VORTEX_H
+#define __VORTEX_H
 
 #define AF_INET 2
 #define AF_INET6 10
@@ -36,4 +36,4 @@ enum {
     BPF_END_LOOP,
 };
 
-#endif /* __VORTEX_BPF_H */
+#endif /* __VORTEX_H */
