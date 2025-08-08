@@ -98,31 +98,19 @@ static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
  *    workdir mounts. Replace upperdir's ---/diff/ to ---/merged/.
  */
 
-/*
- * uprobe for SSL_write (called before encryption).
- * int SSL_write(SSL *s, const void *buf, int num);
- */
+/* int SSL_write(SSL *s, const void *buf, int num); */
 SEC("uprobe/SSL_write")
 int uprobe_SSL_write(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); }
 
-/*
- * uretprobe for SSL_write (called before encryption).
- * int SSL_write(SSL *s, const void *buf, int num);
- */
+/* int SSL_write(SSL *s, const void *buf, int num); */
 SEC("uretprobe/SSL_write")
 int uretprobe_SSL_write(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx); }
 
-/*
- * uprobe for SSL_write_ex (called before encryption).
- * int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written);
- */
+/* int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written); */
 SEC("uprobe/SSL_write_ex")
 int uprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); }
 
-/*
- * uretprobe for SSL_write_ex (called before encryption).
- * int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written);
- */
+/* int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written); */
 SEC("uretprobe/SSL_write_ex")
 int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx); }
 
@@ -187,17 +175,15 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
 }
 
 /*
- * uprobe for SSL_read (called after decryption).
  * int SSL_read(SSL *s, void *buf, int num);
  *
  * Store the pointer of the user buffer in a map,
- * so that we can retrieve it in the uretprobe.
+ * so that we can retrieve it in its uretprobe pair.
  */
 SEC("uprobe/SSL_read")
 int uprobe_SSL_read(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
 
 /*
- * uretprobe for SSL_read (called after decryption); can access return value.
  * int SSL_read(SSL *s, void *buf, int num);
  *
  * Retrieve the user buffer pointer from our map, read the data, and send to
@@ -207,11 +193,10 @@ SEC("uretprobe/SSL_read")
 int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx, (int)PT_REGS_RC(ctx)); }
 
 /*
- * uprobe for SSL_read_ex (called after decryption).
  * int SSL_read_ex(SSL *s, void *buf, size_t num, size_t *read);
  *
- * Store the pointer of the user buffer in a map,
- * so that we can retrieve it in the uretprobe.
+ * Store the pointer of the user buffer in a map so that we can
+ * retrieve it in its uretprobe pair.
  */
 SEC("uprobe/SSL_read_ex")
 int uprobe_SSL_read_ex(struct pt_regs *ctx) {
@@ -222,11 +207,10 @@ int uprobe_SSL_read_ex(struct pt_regs *ctx) {
 }
 
 /*
- * uretprobe for SSL_read_ex (called after decryption); can access return value.
  * int SSL_read_ex(SSL *s, void *buf, size_t num, size_t *read);
  *
- * Retrieve the user buffer pointer from our map, read the data, and send to
- * our ring buffer (userspace).
+ * Retrieve the user buffer pointer from our map, read the data,
+ * and send to our ring buffer (userspace).
  */
 SEC("uretprobe/SSL_read_ex")
 int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
