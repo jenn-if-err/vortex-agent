@@ -66,7 +66,7 @@ struct {
  * This map is used to determine if we should trace SSL_write/SSL_read.
  */
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1024);
     __type(key, __u64);
     __type(value, __u8);

@@ -26,6 +26,8 @@ int uretprobe_SSL_do_handshake(struct pt_regs *ctx) {
 
 /*
  * Tracepoint for process exit; clean up our ssl_handshakes map.
+ * Since this trace only cleans up the TGID and the main PID, there could still be
+ * other PIDs in the same process that are in our map. Thus the LRU_HASH type.
  *
  * /sys/kernel/tracing/events/sched/sched_process_exit/format
  *
