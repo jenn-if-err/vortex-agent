@@ -12,9 +12,7 @@ struct loop_data {
     int *orig_len;
 };
 
-/*
- * bpf_loop callback: send data to userspace in chunks of EVENT_BUF_LEN bytes.
- */
+/* bpf_loop callback: send data to userspace in chunks of EVENT_BUF_LEN bytes. */
 static int do_SSL_loop(__u32 index, struct loop_data *data) {
     struct event *evt;
     evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
