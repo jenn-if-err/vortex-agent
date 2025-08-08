@@ -143,7 +143,6 @@ func main() {
 		glog.Errorf("fexit/tcp_sendmsg failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
-		glog.Info("fexit/tcp_sendmsg attached")
 	}
 
 	l, err = link.AttachTracing(link.TracingOptions{
@@ -155,7 +154,6 @@ func main() {
 		glog.Errorf("fexit/tcp_recvmsg failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
-		glog.Info("fexit/tcp_recvmsg attached")
 	}
 
 	l, err = link.AttachTracing(link.TracingOptions{
@@ -167,7 +165,6 @@ func main() {
 		glog.Errorf("fexit/udp_sendmsg failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
-		glog.Info("fexit/udp_sendmsg attached")
 	}
 
 	l, err = link.AttachTracing(link.TracingOptions{
@@ -179,7 +176,6 @@ func main() {
 		glog.Errorf("fexit/udp_recvmsg failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
-		glog.Info("fexit/udp_recvmsg attached")
 	}
 
 	// kssm, err := link.Kprobe("sock_sendmsg", objs.SockSendmsgEntry, nil)
@@ -229,7 +225,6 @@ func main() {
 				glog.Errorf("uprobe/SSL_write failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uprobe/SSL_write attached")
 			}
 
 			l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
@@ -237,7 +232,6 @@ func main() {
 				glog.Errorf("uretprobe/SSL_write failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_write attached")
 			}
 
 			l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
@@ -245,7 +239,6 @@ func main() {
 				glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uprobe/SSL_write_ex attached")
 			}
 
 			l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
@@ -253,7 +246,6 @@ func main() {
 				glog.Errorf("uretprobe/SSL_write_ex failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_write_ex attached")
 			}
 
 			l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
@@ -261,7 +253,6 @@ func main() {
 				glog.Errorf("uprobe/SSL_read failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uprobe/SSL_read attached")
 			}
 
 			l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
@@ -269,7 +260,6 @@ func main() {
 				glog.Errorf("uretprobe/SSL_read failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_read attached")
 			}
 
 			l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
@@ -277,7 +267,6 @@ func main() {
 				glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uprobe/SSL_read_ex attached")
 			}
 
 			l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
@@ -285,7 +274,6 @@ func main() {
 				glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_read_ex attached")
 			}
 		}
 	}
