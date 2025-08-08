@@ -511,7 +511,7 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
     evt->total_len = orig_num;
     evt->chunk_len = -1;
     evt->chunk_idx = CHUNKED_END_IDX;
-    evt->buf[0] = '\0';
+    __builtin_memset(evt->buf, 0, EVENT_BUF_LEN);
     bpf_ringbuf_submit(evt, 0);
 
     return BPF_OK;
@@ -622,7 +622,7 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx) {
     evt->total_len = orig_len;
     evt->chunk_len = -1;
     evt->chunk_idx = CHUNKED_END_IDX;
-    evt->buf[0] = '\0';
+    __builtin_memset(evt->buf, 0, EVENT_BUF_LEN);
     bpf_ringbuf_submit(evt, 0);
 
     return BPF_OK;
