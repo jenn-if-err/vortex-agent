@@ -6,20 +6,20 @@
 #define __BPF_VORTEX_OPENSSL_C
 
 struct loop_data {
-    __u32 type;
+    u32 type;
     char **buf;
     int *len;
     int *orig_len;
 };
 
 /* bpf_loop callback: send data to userspace in chunks of EVENT_BUF_LEN bytes. */
-static int do_SSL_loop(__u32 index, struct loop_data *data) {
+static int do_SSL_loop(u64 index, struct loop_data *data) {
     struct event *evt;
     evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (!evt)
         return BPF_END_LOOP;
 
-    __u32 len = (__u32)*data->len > EVENT_BUF_LEN ? EVENT_BUF_LEN : (__u32)*data->len;
+    u32 len = (u32)*data->len > EVENT_BUF_LEN ? EVENT_BUF_LEN : (u32)*data->len;
     set_proc_info(evt);
     evt->type = data->type;
     evt->total_len = *data->orig_len;
@@ -220,7 +220,7 @@ int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx, 
 SEC("uprobe/SSL_read_ex")
 int uprobe_SSL_read_ex(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u64 read = (__u64)PT_REGS_PARM4(ctx);
+    u64 read = (u64)PT_REGS_PARM4(ctx);
     bpf_map_update_elem(&ssl_read_ex_p4, &pid_tgid, &read, BPF_ANY);
     return do_uprobe_SSL_read(ctx);
 }
@@ -235,7 +235,7 @@ int uprobe_SSL_read_ex(struct pt_regs *ctx) {
 SEC("uretprobe/SSL_read_ex")
 int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u64 *read = bpf_map_lookup_elem(&ssl_read_ex_p4, &pid_tgid);
+    u64 *read = bpf_map_lookup_elem(&ssl_read_ex_p4, &pid_tgid);
     if (!read)
         return BPF_OK;
 

@@ -64,7 +64,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
     __type(key, __u64);
-    __type(value, __u64);
+    __type(value, u64);
 } ssl_read_ex_p4 SEC(".maps");
 
 /*
