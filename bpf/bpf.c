@@ -562,15 +562,7 @@ int uprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); 
 SEC("uretprobe/SSL_write_ex")
 int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx); }
 
-/*
- * uprobe for SSL_read (called after decryption).
- * int SSL_read(SSL *s, void *buf, int num);
- *
- * Store the pointer of the user buffer in a map,
- * so that we can retrieve it in the uretprobe.
- */
-SEC("uprobe/SSL_read")
-int uprobe_SSL_read(struct pt_regs *ctx) {
+static int do_uprobe_SSL_read(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &pid_tgid);
     if (!enable)
@@ -588,15 +580,7 @@ int uprobe_SSL_read(struct pt_regs *ctx) {
     return BPF_OK;
 }
 
-/*
- * uretprobe for SSL_read (called after decryption); can access return value.
- * int SSL_read(SSL *s, void *buf, int num);
- *
- * Retrieve the user buffer pointer from our map, read the data, and send to
- * our ring buffer (user space).
- */
-SEC("uretprobe/SSL_read")
-int uretprobe_SSL_read(struct pt_regs *ctx) {
+static int do_uretprobe_SSL_read(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
 
     /* See explanation on map. */
@@ -645,6 +629,26 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
 }
 
 /*
+ * uprobe for SSL_read (called after decryption).
+ * int SSL_read(SSL *s, void *buf, int num);
+ *
+ * Store the pointer of the user buffer in a map,
+ * so that we can retrieve it in the uretprobe.
+ */
+SEC("uprobe/SSL_read")
+int uprobe_SSL_read(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
+
+/*
+ * uretprobe for SSL_read (called after decryption); can access return value.
+ * int SSL_read(SSL *s, void *buf, int num);
+ *
+ * Retrieve the user buffer pointer from our map, read the data, and send to
+ * our ring buffer (user space).
+ */
+SEC("uretprobe/SSL_read")
+int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx); }
+
+/*
  * uprobe for SSL_read_ex (called after decryption).
  * int SSL_read_ex(SSL *s, void *buf, size_t num, size_t *read);
  *
@@ -652,62 +656,17 @@ int uretprobe_SSL_read(struct pt_regs *ctx) {
  * so that we can retrieve it in the uretprobe.
  */
 SEC("uprobe/SSL_read_ex")
-int uprobe_SSL_read_ex(struct pt_regs *ctx) {
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u8 *enable = bpf_map_lookup_elem(&ssl_handshakes, &pid_tgid);
-    if (!enable)
-        return BPF_OK;
+int uprobe_SSL_read_ex(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
 
-    char *buf = (char *)PT_REGS_PARM2(ctx);
-    bpf_map_update_elem(&ssl_read_map, &pid_tgid, &buf, BPF_ANY);
-    return BPF_OK;
-}
-
+/*
+ * uretprobe for SSL_read_ex (called after decryption); can access return value.
+ * int SSL_read_ex(SSL *s, void *buf, size_t num, size_t *read);
+ *
+ * Retrieve the user buffer pointer from our map, read the data, and send to
+ * our ring buffer (user space).
+ */
 SEC("uretprobe/SSL_read_ex")
-int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    size_t ret = (size_t)PT_REGS_RC(ctx);
-    if (ret <= 0) {
-        bpf_map_delete_elem(&ssl_read_map, &pid_tgid);
-        return BPF_OK;
-    }
-
-    char **pbuf = bpf_map_lookup_elem(&ssl_read_map, &pid_tgid);
-    if (!pbuf)
-        return BPF_OK;
-
-    char *buf = (char *)*pbuf;
-    int orig_len = (int)ret;
-    int len = (int)ret;
-
-    struct loop_data data = {
-        .type = TYPE_URETPROBE_SSL_READ,
-        .buf = &buf,
-        .len = &len,
-        .orig_len = &orig_len,
-    };
-
-    /* Is EVENT_BUF_LEN * 1000 enough? */
-    bpf_loop(1000, do_SSL_loop, &data, 0);
-
-    bpf_map_delete_elem(&ssl_read_map, &pid_tgid);
-
-    /* Signal previous chunked stream's end. */
-    struct event *evt;
-    evt = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!evt)
-        return BPF_OK;
-
-    evt->type = TYPE_URETPROBE_SSL_READ;
-    set_proc_info(evt);
-    evt->total_len = orig_len;
-    evt->chunk_len = -1;
-    evt->chunk_idx = CHUNKED_END_IDX;
-    evt->buf[0] = '\0';
-    bpf_ringbuf_submit(evt, 0);
-
-    return BPF_OK;
-}
+int uretprobe_SSL_read_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx); }
 
 /*
  * Tracepoint for process exit; clean up our ssl_handshakes map.
