@@ -116,14 +116,14 @@ static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct s
         return;
 
     struct event *event;
-    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    event = rb_events_reserve_with_stats();
     if (!event)
         return;
 
     event->type = TYPE_REPORT_WRITE_SOCKET_INFO;
     set_proc_info(event);
     set_send_recv_msg_sk_info(event, sk);
-    bpf_ringbuf_submit(event, 0);
+    rb_events_submit_with_stats(event, 0);
 }
 
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332 */
@@ -136,7 +136,7 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     assoc_SSL_write_socket_info(pid_tgid, sk);
 
     struct event *event;
-    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    event = rb_events_reserve_with_stats();
     if (!event)
         return 0;
 
@@ -150,7 +150,7 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     event->type = TYPE_FEXIT_TCP_SENDMSG;
     event->total_len = size;
     set_send_recv_msg_sk_info(event, sk);
-    bpf_ringbuf_submit(event, 0);
+    rb_events_submit_with_stats(event, 0);
 
     return BPF_OK;
 }
@@ -162,14 +162,14 @@ static __always_inline void assoc_SSL_read_socket_info(__u64 pid_tgid, struct so
         return;
 
     struct event *event;
-    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    event = rb_events_reserve_with_stats();
     if (!event)
         return;
 
     event->type = TYPE_REPORT_READ_SOCKET_INFO;
     set_proc_info(event);
     set_send_recv_msg_sk_info(event, sk);
-    bpf_ringbuf_submit(event, 0);
+    rb_events_submit_with_stats(event, 0);
 }
 
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L425 */
@@ -185,7 +185,7 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     assoc_SSL_read_socket_info(pid_tgid, sk);
 
     struct event *event;
-    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    event = rb_events_reserve_with_stats();
     if (!event)
         return BPF_OK;
 
@@ -199,7 +199,7 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     event->type = TYPE_FEXIT_TCP_RECVMSG;
     event->total_len = ret;
     set_send_recv_msg_sk_info(event, sk);
-    bpf_ringbuf_submit(event, 0);
+    rb_events_submit_with_stats(event, 0);
 
     return BPF_OK;
 }
@@ -211,7 +211,7 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
         return BPF_OK;
 
     struct event *event;
-    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    event = rb_events_reserve_with_stats();
     if (!event)
         return BPF_OK;
 
@@ -225,7 +225,7 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     event->type = TYPE_FEXIT_UDP_SENDMSG;
     event->total_len = len;
     set_send_recv_msg_sk_info(event, sk);
-    bpf_ringbuf_submit(event, 0);
+    rb_events_submit_with_stats(event, 0);
 
     return BPF_OK;
 }
@@ -240,7 +240,7 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return BPF_OK;
 
     struct event *event;
-    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    event = rb_events_reserve_with_stats();
     if (!event)
         return BPF_OK;
 
@@ -254,7 +254,7 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     }
 
     set_send_recv_msg_sk_info(event, sk);
-    bpf_ringbuf_submit(event, 0);
+    rb_events_submit_with_stats(event, 0);
 
     return BPF_OK;
 }

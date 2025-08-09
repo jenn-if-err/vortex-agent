@@ -134,7 +134,7 @@ func main() {
 	if *commf != "" {
 		var comm [16]byte
 		copy(comm[:], *commf)
-		err := objs.TraceCommSock.Put(uint32(0), comm)
+		err := objs.TraceComm.Put(uint32(0), comm)
 		if err != nil {
 			glog.Errorf("objs.TraceCommSock.Put failed: %v", err)
 		} else {
@@ -791,9 +791,10 @@ func main() {
 	var count uint64
 	var line strings.Builder
 	var event bpf.BpfEvent
+	var record ringbuf.Record
 
 	for {
-		record, err := rd.Read()
+		err = rd.ReadInto(&record)
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				glog.Info("received signal, exiting...")

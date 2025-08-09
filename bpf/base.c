@@ -34,6 +34,18 @@ struct {
     __type(value, struct event);
 } events SEC(".maps");
 
+struct events_stats_t {
+    u64 sent;
+    u64 lost;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, struct events_stats_t);
+} events_stats SEC(".maps");
+
 /*
  * Map to control which TGIDs are traced. A key of TGID_ENABLE_ALL means all
  * TGIDs are traced. Otherwise, only trace whatever's in the map.
@@ -51,7 +63,7 @@ struct {
     __uint(max_entries, 1);
     __type(key, u32);
     __type(value, char[TASK_COMM_LEN]);
-} trace_comm_sock SEC(".maps");
+} trace_comm SEC(".maps");
 
 /* should_trace_comm()'s buffer for getting comm instead of stack. */
 struct {
@@ -140,7 +152,7 @@ static __always_inline int should_trace(__u32 tgid) {
 
 static __always_inline int should_trace_comm() {
     u32 key = 0;
-    char *comm_tr = bpf_map_lookup_elem(&trace_comm_sock, &key);
+    char *comm_tr = bpf_map_lookup_elem(&trace_comm, &key);
     if (!comm_tr)
         return VORTEX_TRACE;
 
@@ -153,6 +165,49 @@ static __always_inline int should_trace_comm() {
     int cmp = __builtin_memcmp(comm_tr, comm, TASK_COMM_LEN);
 
     return cmp == 0 ? VORTEX_TRACE : VORTEX_NO_TRACE;
+}
+
+static __always_inline void *rb_events_reserve_with_stats() {
+    void *rb = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    if (!rb) {
+        u32 key = 0;
+        struct events_stats_t *stats;
+        stats = bpf_map_lookup_elem(&events_stats, &key);
+        if (!stats) {
+            struct events_stats_t n_stats = {.sent = 0, .lost = 1};
+            bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
+        } else {
+            struct events_stats_t n_stats = {
+                .sent = stats->sent,
+                .lost = stats->lost + 1,
+            };
+
+            bpf_printk("rb_events_reserve_with_stats: lost=%llu", n_stats.lost);
+            bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
+        }
+    }
+
+    return rb;
+}
+
+static __always_inline void rb_events_submit_with_stats(void *event, __u64 flags) {
+    bpf_ringbuf_submit(event, flags);
+
+    u32 key = 0;
+    struct events_stats_t *stats;
+    stats = bpf_map_lookup_elem(&events_stats, &key);
+    if (!stats) {
+        struct events_stats_t n_stats = {.sent = 1, .lost = 0};
+        bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
+    } else {
+        struct events_stats_t n_stats = {
+            .sent = stats->sent + 1,
+            .lost = stats->lost,
+        };
+
+        /* bpf_printk("rb_events_submit_with_stats: sent=%llu", n_stats.sent); */
+        bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
+    }
 }
 
 #endif /* __BPF_VORTEX_COMMON_C */

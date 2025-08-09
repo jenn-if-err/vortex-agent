@@ -15,7 +15,7 @@ struct loop_data {
 /* bpf_loop callback: send data to userspace in chunks of EVENT_BUF_LEN bytes. */
 static int do_SSL_loop(u64 index, struct loop_data *data) {
     struct event *event;
-    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    event = rb_events_reserve_with_stats();
     if (!event)
         return BPF_END_LOOP;
 
@@ -29,7 +29,7 @@ static int do_SSL_loop(u64 index, struct loop_data *data) {
 
     char *buf = *data->buf_ptr;
     if (bpf_probe_read_user(&event->buf, len, buf) == 0)
-        bpf_ringbuf_submit(event, 0);
+        rb_events_submit_with_stats(event, 0);
     else
         bpf_ringbuf_discard(event, 0); /* discard but still adjust values? */
 
@@ -66,7 +66,7 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
 
     /* Signal previous chunked stream's end. */
     struct event *event;
-    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    event = rb_events_reserve_with_stats();
     if (!event)
         return BPF_OK;
 
@@ -76,7 +76,7 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
     event->chunk_len = -1;
     event->chunk_idx = CHUNKED_END_IDX;
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
-    bpf_ringbuf_submit(event, 0);
+    rb_events_submit_with_stats(event, 0);
 
     return BPF_OK;
 }
@@ -158,7 +158,7 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
 
     /* Signal previous chunked stream's end. */
     struct event *event;
-    event = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
+    event = rb_events_reserve_with_stats();
     if (!event)
         return BPF_OK;
 
@@ -168,7 +168,7 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     event->chunk_len = -1;
     event->chunk_idx = CHUNKED_END_IDX;
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
-    bpf_ringbuf_submit(event, 0);
+    rb_events_submit_with_stats(event, 0);
 
     return BPF_OK;
 }
