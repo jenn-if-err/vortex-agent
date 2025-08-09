@@ -141,7 +141,7 @@ static __always_inline void set_proc_info(struct event *event) {
 }
 
 /* Are we tracing this TGID? */
-static __always_inline int should_trace(__u32 tgid) {
+static __always_inline int should_trace_tgid(__u32 tgid) {
     __u32 all = TGID_ENABLE_ALL;
     if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL)
         if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL)

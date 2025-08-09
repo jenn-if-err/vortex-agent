@@ -142,7 +142,7 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
 
     set_proc_info(event);
 
-    if (should_trace(event->tgid) == VORTEX_NO_TRACE) {
+    if (should_trace_tgid(event->tgid) == VORTEX_NO_TRACE) {
         bpf_ringbuf_discard(event, 0);
         return 0;
     }
@@ -191,7 +191,7 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 
     set_proc_info(event);
 
-    if (should_trace(event->tgid) == VORTEX_NO_TRACE) {
+    if (should_trace_tgid(event->tgid) == VORTEX_NO_TRACE) {
         bpf_ringbuf_discard(event, 0);
         return BPF_OK;
     }
@@ -217,7 +217,7 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
 
     set_proc_info(event);
 
-    if (should_trace(event->tgid) == VORTEX_NO_TRACE) {
+    if (should_trace_tgid(event->tgid) == VORTEX_NO_TRACE) {
         bpf_ringbuf_discard(event, 0);
         return BPF_OK;
     }
@@ -248,7 +248,7 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     event->total_len = ret;
     set_proc_info(event);
 
-    if (should_trace(event->tgid) == VORTEX_NO_TRACE) {
+    if (should_trace_tgid(event->tgid) == VORTEX_NO_TRACE) {
         bpf_ringbuf_discard(event, 0);
         return BPF_OK;
     }
