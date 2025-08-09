@@ -45,12 +45,21 @@ struct {
     __type(value, __u8);
 } tgids_to_trace SEC(".maps");
 
+/* Optional comm (single) to trace (when provided from userspace). */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1);
-    __type(key, u8);
+    __type(key, u32);
     __type(value, char[TASK_COMM_LEN]);
 } trace_comm_sock SEC(".maps");
+
+/* should_trace_comm()'s buffer for getting comm instead of stack. */
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, u32);
+    __type(value, char[TASK_COMM_LEN]);
+    __uint(max_entries, 1);
+} buf_comm SEC(".maps");
 
 /*
  * Map to store the user buffer pointer for SSL_read. The key is the PID/TGID,
@@ -130,12 +139,15 @@ static __always_inline int should_trace(__u32 tgid) {
 }
 
 static __always_inline int should_trace_comm() {
-    u8 key = 1;
+    u32 key = 0;
     char *comm_tr = bpf_map_lookup_elem(&trace_comm_sock, &key);
     if (!comm_tr)
         return VORTEX_TRACE;
 
-    char comm[TASK_COMM_LEN];
+    char *comm = bpf_map_lookup_elem(&buf_comm, &key);
+    if (!comm)
+        return VORTEX_TRACE;
+
     __builtin_memset(comm, 0, TASK_COMM_LEN);
     bpf_get_current_comm(comm, sizeof(comm));
     int cmp = __builtin_memcmp(comm_tr, comm, TASK_COMM_LEN);

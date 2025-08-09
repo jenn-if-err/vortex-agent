@@ -134,7 +134,7 @@ func main() {
 	if *commf != "" {
 		var comm [16]byte
 		copy(comm[:], *commf)
-		err := objs.TraceCommSock.Put(uint8(1), comm)
+		err := objs.TraceCommSock.Put(uint32(0), comm)
 		if err != nil {
 			glog.Errorf("objs.TraceCommSock.Put failed: %v", err)
 		} else {
