@@ -34,11 +34,13 @@ struct {
     __type(value, struct event);
 } events SEC(".maps");
 
+/* Basic stats data. */
 struct events_stats_t {
     u64 sent;
     u64 lost;
 };
 
+/* Map for basic stats. */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1);
