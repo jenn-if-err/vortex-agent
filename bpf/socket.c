@@ -123,6 +123,25 @@ static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct s
     event->type = TYPE_REPORT_WRITE_SOCKET_INFO;
     set_proc_info(event);
     set_send_recv_msg_sk_info(event, sk);
+
+    struct ssl_assoc_sock_key key = {
+        .pid_tgid = pid_tgid,
+        .rw_flag = 1, /* write */
+        .saddr = event->saddr,
+        .daddr = event->daddr,
+        .sport = event->sport,
+        .dport = event->dport,
+    };
+
+    char *ptr = bpf_map_lookup_elem(&ssl_assoc_sock, &key);
+    if (ptr) {
+        bpf_ringbuf_discard(event, 0);
+        return;
+    }
+
+    u8 one = 1;
+    bpf_map_update_elem(&ssl_assoc_sock, &key, &one, BPF_ANY);
+
     rb_events_submit_with_stats(event, 0);
 }
 
@@ -169,6 +188,25 @@ static __always_inline void assoc_SSL_read_socket_info(__u64 pid_tgid, struct so
     event->type = TYPE_REPORT_READ_SOCKET_INFO;
     set_proc_info(event);
     set_send_recv_msg_sk_info(event, sk);
+
+    struct ssl_assoc_sock_key key = {
+        .pid_tgid = pid_tgid,
+        .rw_flag = 0, /* read */
+        .saddr = event->saddr,
+        .daddr = event->daddr,
+        .sport = event->sport,
+        .dport = event->dport,
+    };
+
+    char *ptr = bpf_map_lookup_elem(&ssl_assoc_sock, &key);
+    if (ptr) {
+        bpf_ringbuf_discard(event, 0);
+        return;
+    }
+
+    u8 one = 1;
+    bpf_map_update_elem(&ssl_assoc_sock, &key, &one, BPF_ANY);
+
     rb_events_submit_with_stats(event, 0);
 }
 

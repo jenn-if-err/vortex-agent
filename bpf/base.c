@@ -134,6 +134,22 @@ struct {
     __type(value, struct ssl_callstack_ctx);
 } ssl_read_callstack SEC(".maps");
 
+struct ssl_assoc_sock_key {
+    __u64 pid_tgid;
+    __u32 rw_flag; /* 0 for read, 1 for write */
+    __be32 saddr;
+    __be32 daddr;
+    __u16 sport;
+    __be16 dport;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 1024);
+    __type(key, struct ssl_assoc_sock_key);
+    __type(value, u8);
+} ssl_assoc_sock SEC(".maps");
+
 /* Set process information in the event structure. */
 static __always_inline void set_proc_info(struct event *event) {
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
