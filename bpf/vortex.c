@@ -1,8 +1,7 @@
 //go:build ignore
 
-/* Merge all; bpf2go only supports one input file. */
-#include "common.c"
-#include "maps.c"
+/* Merge, bpf2go only supports one input file. */
+#include "base.c"
 #include "openssl.c"
 #include "socket.c"
 

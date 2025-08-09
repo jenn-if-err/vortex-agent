@@ -1,8 +1,10 @@
 #ifndef __VORTEX_H
 #define __VORTEX_H
 
-#define AF_INET 2
-#define AF_INET6 10
+enum {
+    AF_INET = 2,
+    AF_INET6 = 10,
+};
 
 enum {
     TYPE_FENTRY_SOCK_SENDMSG = 1,

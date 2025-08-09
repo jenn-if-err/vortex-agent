@@ -80,7 +80,9 @@ const (
 )
 
 var (
-	testf = flag.Bool("test", false, "Run in test mode")
+	testf    = flag.Bool("test", false, "Run in test mode")
+	uprobesf = flag.String("uprobes", "", "Lib/bin files to attach uprobes to (comma-separated)")
+	commf    = flag.String("comm", "", "Process name to trace, max 16 bytes, default all")
 
 	cctx = func(p context.Context) context.Context {
 		return context.WithValue(p, struct{}{}, nil)
@@ -93,6 +95,11 @@ type trafficInfo struct {
 	Egress    uint64 // bytes sent
 }
 
+type eventStateT struct {
+	count uint64
+	http2 bool
+}
+
 func main() {
 	flag.Parse()
 	defer glog.Flush()
@@ -102,7 +109,7 @@ func main() {
 		return
 	}
 
-	sslTestOnly := true
+	sslTestOnly := false
 
 	ctx, cancel := context.WithCancel(context.Background())
 	stopper := make(chan os.Signal, 1)
@@ -124,6 +131,17 @@ func main() {
 	defer objs.Close()
 	glog.Info("BPF objects loaded")
 
+	if *commf != "" {
+		var comm [16]byte
+		copy(comm[:], *commf)
+		err := objs.TraceCommSock.Put(uint8(1), comm)
+		if err != nil {
+			glog.Errorf("objs.TraceCommSock.Put failed: %v", err)
+		} else {
+			glog.Infof("tracing only for [%s]", *commf)
+		}
+	}
+
 	hostLinks := []link.Link{}
 	defer func(list *[]link.Link) {
 		for _, l := range *list {
@@ -142,7 +160,6 @@ func main() {
 		glog.Errorf("fexit/tcp_sendmsg failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
-		glog.Info("fexit/tcp_sendmsg attached")
 	}
 
 	l, err = link.AttachTracing(link.TracingOptions{
@@ -154,7 +171,6 @@ func main() {
 		glog.Errorf("fexit/tcp_recvmsg failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
-		glog.Info("fexit/tcp_recvmsg attached")
 	}
 
 	l, err = link.AttachTracing(link.TracingOptions{
@@ -166,7 +182,6 @@ func main() {
 		glog.Errorf("fexit/udp_sendmsg failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
-		glog.Info("fexit/udp_sendmsg attached")
 	}
 
 	l, err = link.AttachTracing(link.TracingOptions{
@@ -178,7 +193,6 @@ func main() {
 		glog.Errorf("fexit/udp_recvmsg failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
-		glog.Info("fexit/udp_recvmsg attached")
 	}
 
 	// kssm, err := link.Kprobe("sock_sendmsg", objs.SockSendmsgEntry, nil)
@@ -190,15 +204,17 @@ func main() {
 	// defer kssm.Close()
 	// slog.Info("kprobe/sock_sendmsg attached")
 
-	l, err = link.Tracepoint("sched", "sched_process_exit", objs.TpSchedSchedProcessExit, nil)
-	if err != nil {
-		glog.Errorf("tracepoint/sched/sched_process_exit failed: %v", err)
-	} else {
-		hostLinks = append(hostLinks, l)
-		glog.Infof("tracepoint/sched/sched_process_exit attached")
-	}
+	// l, err = link.Tracepoint("sched", "sched_process_exit", objs.TpSchedSchedProcessExit, nil)
+	// if err != nil {
+	// 	glog.Errorf("tracepoint/sched/sched_process_exit failed: %v", err)
+	// } else {
+	// 	hostLinks = append(hostLinks, l)
+	// 	glog.Infof("tracepoint/sched/sched_process_exit attached")
+	// }
 
 	isk8s := internal.IsK8s()
+
+	uprobeFiles := strings.Split(*uprobesf, ",")
 
 	if !isk8s {
 		libsslPath, err := internal.FindLibSSL("")
@@ -207,28 +223,25 @@ func main() {
 			return
 		}
 
-		if libsslPath != "" {
-			glog.Infof("found libssl at [%s]", libsslPath)
-			ex, err := link.OpenExecutable(libsslPath)
+		uprobeFiles = append(uprobeFiles, libsslPath)
+		for _, uf := range uprobeFiles {
+			if uf == "" {
+				continue // skip empty entries
+			}
+
+			ex, err := link.OpenExecutable(uf)
 			if err != nil {
 				glog.Errorf("OpenExecutable failed: %v", err)
 				return
 			}
 
-			l, err = ex.Uretprobe("SSL_do_handshake", objs.UretprobeSSL_doHandshake, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_do_handshake failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_do_handshake attached")
-			}
+			glog.Infof("attaching uprobes to [%s]", uf)
 
 			l, err = ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
 			if err != nil {
 				glog.Errorf("uprobe/SSL_write failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uprobe/SSL_write attached")
 			}
 
 			l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
@@ -236,7 +249,6 @@ func main() {
 				glog.Errorf("uretprobe/SSL_write failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_write attached")
 			}
 
 			l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
@@ -244,7 +256,6 @@ func main() {
 				glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uprobe/SSL_write_ex attached")
 			}
 
 			l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
@@ -252,7 +263,6 @@ func main() {
 				glog.Errorf("uretprobe/SSL_write_ex failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_write_ex attached")
 			}
 
 			l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
@@ -260,7 +270,6 @@ func main() {
 				glog.Errorf("uprobe/SSL_read failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uprobe/SSL_read attached")
 			}
 
 			l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
@@ -268,7 +277,6 @@ func main() {
 				glog.Errorf("uretprobe/SSL_read failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_read attached")
 			}
 
 			l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
@@ -276,7 +284,6 @@ func main() {
 				glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uprobe/SSL_read_ex attached")
 			}
 
 			l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
@@ -284,7 +291,6 @@ func main() {
 				glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
 			} else {
 				hostLinks = append(hostLinks, l)
-				glog.Info("uretprobe/SSL_read_ex attached")
 			}
 		}
 	}
@@ -482,6 +488,14 @@ func main() {
 				glog.Errorf("ReadDir /proc failed: %v", err)
 				return
 			}
+
+			// Methods for accessing container-based file systems for u[ret]probes.
+			//
+			// 1) Check /proc/pid/root/. Symbolic link to pid's root directory.
+			//    Recommended method.
+			//
+			// 2) Check /proc/pid/mountinfo. There will be a lowerdir, upperdir, and
+			//    workdir mounts. Replace upperdir's ---/diff/ to ---/merged/.
 
 			for _, f := range files {
 				pid, err := strconv.Atoi(f.Name())
@@ -772,7 +786,9 @@ func main() {
 		}
 	}()
 
-	// var count uint64
+	eventState := make(map[string]*eventStateT)
+
+	var count uint64
 	var line strings.Builder
 	var event bpf.BpfEvent
 
@@ -793,11 +809,17 @@ func main() {
 			continue
 		}
 
-		// count++
-		// if count%1000 == 0 {
-		// 	glog.Infof("processed %d events", count)
-		// }
+		count++
+		if count%1000 == 0 {
+			glog.Infof("processed %d events", count)
+		}
 
+		key := fmt.Sprintf("%v/%v", event.Tgid, event.Pid)
+		if _, ok := eventState[key]; !ok {
+			eventState[key] = &eventStateT{}
+		}
+
+		eventState[key].count++
 		line.Reset()
 
 		switch event.Type {
@@ -838,9 +860,13 @@ func main() {
 			}
 
 			if !isk8s && !sslTestOnly {
-				fmt.Fprintf(&line, "[fexit/tcp_sendmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
-				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
-				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+				if !strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "node") {
+					continue
+				}
+
+				fmt.Fprintf(&line, "[fexit/tcp_sendmsg] comm=%s, key=%v, ", event.Comm, key)
+				fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
 				fmt.Fprintf(&line, "len=%v", event.TotalLen)
 				glog.Info(line.String())
 				continue
@@ -882,48 +908,89 @@ func main() {
 
 		case TYPE_FEXIT_TCP_RECVMSG:
 			if !isk8s && !sslTestOnly {
-				fmt.Fprintf(&line, "[fexit/tcp_recvmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
-				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
+				if !strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "node") {
+					continue
+				}
+
+				fmt.Fprintf(&line, "[fexit/tcp_recvmsg] comm=%s, key=%v, ", event.Comm, key)
+				fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
 				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
 				fmt.Fprintf(&line, "len=%v", event.TotalLen)
 				glog.Info(line.String())
 			}
 
 		case TYPE_FEXIT_UDP_SENDMSG:
-			if !isk8s && !sslTestOnly {
-				fmt.Fprintf(&line, "[fexit/udp_sendmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
-				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
-				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
-				fmt.Fprintf(&line, "len=%v", event.TotalLen)
-				glog.Info(line.String())
-			}
+			// if !isk8s && !sslTestOnly {
+			// 	fmt.Fprintf(&line, "[fexit/udp_sendmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
+			// 	fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+			// 	fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
+			// 	fmt.Fprintf(&line, "len=%v", event.TotalLen)
+			// 	glog.Info(line.String())
+			// }
 
 		case TYPE_FEXIT_UDP_RECVMSG:
-			if !isk8s && !sslTestOnly {
-				fmt.Fprintf(&line, "[fexit/udp_recvmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
-				fmt.Fprintf(&line, "src=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
-				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
-				fmt.Fprintf(&line, "len=%v", event.TotalLen)
-				glog.Info(line.String())
-			}
+			// if !isk8s && !sslTestOnly {
+			// 	fmt.Fprintf(&line, "[fexit/udp_recvmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
+			// 	fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
+			// 	fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+			// 	fmt.Fprintf(&line, "len=%v", event.TotalLen)
+			// 	glog.Info(line.String())
+			// }
 
 		case TYPE_TP_SYS_ENTER_SENDTO:
 
 		case TYPE_UPROBE_SSL_WRITE:
-			if event.ChunkLen < 0 {
+			if event.ChunkIdx == CHUNK_END_IDX {
 				continue
 			}
 
-			fmt.Fprintf(&line, "[uprobe/SSL_write{_ex}] comm=%s, ", event.Comm)
+			if strings.HasPrefix(internal.Readable(event.Buf[:15], 15), "PRI * HTTP/2.0") {
+				eventState[key].http2 = true
+			}
+
+			if eventState[key].http2 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
+				buf := bytes.NewReader(event.Buf[:])
+				header := make([]byte, 9)
+				_, err = buf.Read(header)
+				if err != nil {
+					glog.Errorf("[uprobe/SSL_write] incomplete frame header: %v", err)
+					continue
+				}
+
+				// Parse header: length is 24 bits (3 bytes), big-endian.
+				length := uint32(header[0])<<16 | uint32(header[1])<<8 | uint32(header[2])
+				frameType := header[3]
+				flags := header[4]
+				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
+
+				switch frameType {
+				case FrameData:
+				case FrameHeaders:
+				default:
+					if frameType >= FramePriority && frameType <= FrameContinuation {
+						continue
+					}
+				}
+
+				if frameType <= FrameContinuation {
+					var h strings.Builder
+					fmt.Fprintf(&h, "[uprobe/SSL_write{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
+					fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
+					fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
+					glog.Infof(h.String())
+				}
+			}
+
+			fmt.Fprintf(&line, "[uprobe/SSL_write{_ex}] idx=%v, ", event.ChunkIdx)
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "tgid=%v, len=%v", event.Tgid, event.ChunkLen)
+			fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())
 
 		case TYPE_URETPROBE_SSL_WRITE:
 
 		case TYPE_REPORT_WRITE_SOCKET_INFO:
-			glog.Infof("[TYPE_REPORT_WRITE_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
-				event.Tgid,
+			glog.Infof("[TYPE_REPORT_WRITE_SOCKET_INFO] key=%v, src=%v:%v, dst=%v:%v",
+				key,
 				internal.IntToIp(event.Saddr), event.Sport,
 				internal.IntToIp(event.Daddr), event.Dport,
 			)
@@ -935,7 +1002,7 @@ func main() {
 				continue
 			}
 
-			if event.ChunkIdx == 0 && event.ChunkLen >= 9 {
+			if eventState[key].http2 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
 				buf := bytes.NewReader(event.Buf[:])
 				header := make([]byte, 9)
 				_, err = buf.Read(header)
@@ -950,12 +1017,6 @@ func main() {
 				flags := header[4]
 				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
 
-				var h strings.Builder
-				fmt.Fprintf(&h, "[uretprobe/SSL_read{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
-				fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
-				fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
-				glog.Infof(h.String())
-
 				switch frameType {
 				case FrameData:
 				case FrameHeaders:
@@ -964,22 +1025,30 @@ func main() {
 						continue
 					}
 				}
+
+				if frameType <= FrameContinuation {
+					var h strings.Builder
+					fmt.Fprintf(&h, "[uretprobe/SSL_read{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
+					fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
+					fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
+					glog.Infof(h.String())
+				}
 			}
 
 			fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v, ", event.ChunkIdx)
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "tgid=%v, totalLen=%v, chunkLen=%v", event.Tgid, event.TotalLen, event.ChunkLen)
+			fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())
 
 		case TYPE_REPORT_READ_SOCKET_INFO:
-			glog.Infof("[TYPE_REPORT_READ_SOCKET_INFO] tgid=%v, src=%v:%v, dst=%v:%v",
-				event.Tgid,
+			glog.Infof("[TYPE_REPORT_READ_SOCKET_INFO] key=%v, src=%v:%v, dst=%v:%v",
+				key,
 				internal.IntToIp(event.Daddr), event.Dport,
 				internal.IntToIp(event.Saddr), event.Sport,
 			)
 
 		case TYPE_ANY:
-			glog.Infof("[TYPE_ANY] comm=%s", event.Comm)
+			glog.Infof("[TYPE_ANY] buf=%s", event.Buf)
 
 		default:
 		}

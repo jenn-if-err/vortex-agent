@@ -8,15 +8,29 @@
 
 #include "vortex.h"
 
-#ifndef __BPF_VORTEX_MAPS_C
-#define __BPF_VORTEX_MAPS_C
+#ifndef __BPF_VORTEX_COMMON_C
+#define __BPF_VORTEX_COMMON_C
 
-/*
- * Map to store events for user space consumption.
- */
+/* Event structure to be sent to userspace. */
+struct event {
+    __u8 comm[TASK_COMM_LEN]; /* for debugging only */
+    __u8 buf[EVENT_BUF_LEN];
+    __s64 total_len;
+    __s64 chunk_len;
+    __u32 chunk_idx;
+    __u32 type;
+    __u32 tgid;
+    __u32 pid;
+    __be32 saddr;
+    __be32 daddr;
+    __u16 sport;
+    __be16 dport;
+};
+
+/* Map to store events for userspace consumption. */
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 256 * 1024); /* 256 KB buffer */
+    __uint(max_entries, 256 * 4096);
     __type(value, struct event);
 } events SEC(".maps");
 
@@ -31,6 +45,13 @@ struct {
     __type(value, __u8);
 } tgids_to_trace SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1);
+    __type(key, u8);
+    __type(value, char[TASK_COMM_LEN]);
+} trace_comm_sock SEC(".maps");
+
 /*
  * Map to store the user buffer pointer for SSL_read. The key is the PID/TGID,
  * and the value is a pointer to the user buffer.
@@ -40,19 +61,18 @@ struct {
     __uint(max_entries, 1024);
     __type(key, __u64);
     __type(value, char *);
-} ssl_read_map SEC(".maps");
+} ssl_read_buf SEC(".maps");
 
 /*
- * Map to track SSL handshakes. The key is the PID/TGID, and the value is a
- * simple byte (not used, just to indicate that the handshake is in progress).
- * This map is used to determine if we should trace SSL_write/SSL_read.
+ * Map to store the read pointer for SSL_read_ex. The key is the PID/TGID,
+ * and the value is a pointer to the "bytes written" value.
  */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
     __type(key, __u64);
-    __type(value, __u8);
-} ssl_handshakes SEC(".maps");
+    __type(value, u64);
+} ssl_read_ex_p4 SEC(".maps");
 
 /*
  * The following struct defs are for associating SSL_writes and SSL_reads to
@@ -91,4 +111,36 @@ struct {
     __type(value, struct ssl_callstack_ctx);
 } ssl_read_callstack SEC(".maps");
 
-#endif /* __BPF_VORTEX_MAPS_C */
+/* Set process information in the event structure. */
+static __always_inline void set_proc_info(struct event *event) {
+    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    event->pid = pid_tgid & 0xFFFFFFFF;
+    event->tgid = pid_tgid >> 32;
+}
+
+/* Are we tracing this TGID? */
+static __always_inline int should_trace(__u32 tgid) {
+    __u32 all = TGID_ENABLE_ALL;
+    if (bpf_map_lookup_elem(&tgids_to_trace, &all) == NULL)
+        if (bpf_map_lookup_elem(&tgids_to_trace, &tgid) == NULL)
+            return VORTEX_NO_TRACE;
+
+    return VORTEX_TRACE;
+}
+
+static __always_inline int should_trace_comm() {
+    u8 key = 1;
+    char *comm_tr = bpf_map_lookup_elem(&trace_comm_sock, &key);
+    if (!comm_tr)
+        return VORTEX_TRACE;
+
+    char comm[TASK_COMM_LEN];
+    __builtin_memset(comm, 0, TASK_COMM_LEN);
+    bpf_get_current_comm(comm, sizeof(comm));
+    int cmp = __builtin_memcmp(comm_tr, comm, TASK_COMM_LEN);
+
+    return cmp == 0 ? VORTEX_TRACE : VORTEX_NO_TRACE;
+}
+
+#endif /* __BPF_VORTEX_COMMON_C */
