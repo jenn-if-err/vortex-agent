@@ -325,24 +325,27 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
     int usr_addrlen = (int)ctx->args[2];
     if (usr_addrlen >= sizeof(struct sockaddr_in)) {
         struct sockaddr_in sa_in;
-        if (bpf_probe_read_user(&sa_in, sizeof(sa_in), usr_addr) == 0) {
-            if (sa_in.sin_family == AF_INET) {
-                struct event *event;
-                event = rb_events_reserve_with_stats();
-                if (!event)
-                    return BPF_OK;
+        if (bpf_probe_read_user(&sa_in, sizeof(sa_in), usr_addr) < 0)
+            return BPF_OK;
 
-                event->type = TYPE_REPORT_WRITE_SOCKET_INFO;
-                set_proc_info(event);
-                event->saddr = 0;
-                event->sport = 0;
-                event->daddr = sa_in.sin_addr.s_addr;
-                event->dport = sa_in.sin_port;
+        if (sa_in.sin_family != AF_INET)
+            return BPF_OK;
 
-                rb_events_submit_with_stats(event, 0);
-                bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d, ipv4", pid_tgid, fd);
-            }
-        }
+        /* Similar to assoc_SSL_write_socket_info(). */
+        struct event *event;
+        event = rb_events_reserve_with_stats();
+        if (!event)
+            return BPF_OK;
+
+        event->type = TYPE_REPORT_WRITE_SOCKET_INFO;
+        set_proc_info(event);
+        event->saddr = 0;
+        event->sport = 0;
+        event->daddr = sa_in.sin_addr.s_addr;
+        event->dport = sa_in.sin_port;
+
+        rb_events_submit_with_stats(event, 0);
+        bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d, ipv4", pid_tgid, fd);
     } else if (usr_addrlen >= sizeof(struct sockaddr_in6)) {
         /* TODO */
         bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d, ipv6", pid_tgid, fd);
