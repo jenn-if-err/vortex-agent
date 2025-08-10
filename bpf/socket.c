@@ -420,19 +420,6 @@ const char *tcp_state_to_string(int state) {
  * { 10, "TCP_LISTEN" }
  * { 11, "TCP_CLOSING" }
  * { 12, "TCP_NEW_SYN_RECV" }
- *
- * { 1, "TCP_ESTABLISHED" }
- * { 2, "TCP_SYN_SENT" }
- * { 3, "TCP_SYN_RECV" }
- * { 4, "TCP_FIN_WAIT1" }
- * { 5, "TCP_FIN_WAIT2" }
- * { 6, "TCP_TIME_WAIT" }
- * { 7, "TCP_CLOSE" }
- * { 8, "TCP_CLOSE_WAIT" }
- * { 9, "TCP_LAST_ACK" }
- * { 10, "TCP_LISTEN" }
- * { 11, "TCP_CLOSING" }
- * { 12, "TCP_NEW_SYN_RECV" }
  */
 SEC("tp/sock/inet_sock_set_state")
 int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
