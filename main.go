@@ -211,16 +211,16 @@ func main() {
 		hostLinks = append(hostLinks, l)
 	}
 
-	l, err = link.Tracepoint("syscalls", "sys_enter_write", objs.SysEnterWrite, nil)
+	l, err = link.Tracepoint("sock", "inet_sock_set_state", objs.InetSockSetState, nil)
 	if err != nil {
-		glog.Errorf("tp/syscalls/sys_enter_write failed: %v", err)
+		glog.Errorf("tp/sock/inet_sock_set_state failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
 	}
 
-	l, err = link.Tracepoint("sock", "inet_sock_set_state", objs.InetSockSetState, nil)
+	l, err = link.Tracepoint("syscalls", "sys_enter_write", objs.SysEnterWrite, nil)
 	if err != nil {
-		glog.Errorf("tp/sock/inet_sock_set_state failed: %v", err)
+		glog.Errorf("tp/syscalls/sys_enter_write failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
 	}

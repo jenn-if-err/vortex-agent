@@ -354,29 +354,6 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
     return BPF_OK;
 }
 
-/*
- * /sys/kernel/tracing/events/syscalls/sys_enter_write/format
- *
- * uint fd
- * const char *buf
- * size_t count
- */
-SEC("tp/syscalls/sys_enter_write")
-int sys_enter_write(struct trace_event_raw_sys_enter *ctx) {
-    int trace_all = 0;
-    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
-        return BPF_OK;
-
-    if (trace_all == 1)
-        return BPF_OK;
-
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 fd = BPF_CORE_READ(ctx, args[0]);
-    bpf_printk("sys_enter_write: pid_tgid=%llu, fd=%u", pid_tgid, fd);
-
-    return BPF_OK;
-}
-
 const char *tcp_state_to_string(int state) {
     switch (state) {
     case TCP_ESTABLISHED:
@@ -436,6 +413,29 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     bpf_printk("inet_sock_set_state: pid_tgid=%llu, old=%s, new=%s", pid_tgid, tcp_state_to_string(ctx->oldstate),
                tcp_state_to_string(ctx->newstate));
+
+    return BPF_OK;
+}
+
+/*
+ * /sys/kernel/tracing/events/syscalls/sys_enter_write/format
+ *
+ * uint fd
+ * const char *buf
+ * size_t count
+ */
+SEC("tp/syscalls/sys_enter_write")
+int sys_enter_write(struct trace_event_raw_sys_enter *ctx) {
+    int trace_all = 0;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
+        return BPF_OK;
+
+    if (trace_all == 1)
+        return BPF_OK;
+
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 fd = BPF_CORE_READ(ctx, args[0]);
+    bpf_printk("sys_enter_write: pid_tgid=%llu, fd=%u", pid_tgid, fd);
 
     return BPF_OK;
 }
