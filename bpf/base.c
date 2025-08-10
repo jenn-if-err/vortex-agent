@@ -190,22 +190,23 @@ static __always_inline int should_trace_comm(int *all) {
 
 static __always_inline void *rb_events_reserve_with_stats() {
     void *rb = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!rb) {
-        u32 key = 0;
-        struct events_stats_t *stats;
-        stats = bpf_map_lookup_elem(&events_stats, &key);
-        if (!stats) {
-            struct events_stats_t n_stats = {.sent = 0, .lost = 1};
-            bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
-        } else {
-            struct events_stats_t n_stats = {
-                .sent = stats->sent,
-                .lost = stats->lost + 1,
-            };
+    if (rb)
+        return rb;
 
-            bpf_printk("rb_events_reserve_with_stats: lost=%llu", n_stats.lost);
-            bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
-        }
+    u32 key = 0;
+    struct events_stats_t *stats;
+    stats = bpf_map_lookup_elem(&events_stats, &key);
+    if (!stats) {
+        struct events_stats_t n_stats = {.sent = 0, .lost = 1};
+        bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
+    } else {
+        struct events_stats_t n_stats = {
+            .sent = stats->sent,
+            .lost = stats->lost + 1,
+        };
+
+        bpf_printk("rb_events_reserve_with_stats: lost=%llu", n_stats.lost);
+        bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
     }
 
     return rb;
