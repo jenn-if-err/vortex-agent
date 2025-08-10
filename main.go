@@ -204,16 +204,28 @@ func main() {
 	// defer kssm.Close()
 	// slog.Info("kprobe/sock_sendmsg attached")
 
-	// l, err = link.Tracepoint("sched", "sched_process_exit", objs.TpSchedSchedProcessExit, nil)
-	// if err != nil {
-	// 	glog.Errorf("tracepoint/sched/sched_process_exit failed: %v", err)
-	// } else {
-	// 	hostLinks = append(hostLinks, l)
-	// 	glog.Infof("tracepoint/sched/sched_process_exit attached")
-	// }
+	l, err = link.Tracepoint("syscalls", "sys_enter_connect", objs.SysEnterConnect, nil)
+	if err != nil {
+		glog.Errorf("tp/syscalls/sys_enter_connect failed: %v", err)
+	} else {
+		hostLinks = append(hostLinks, l)
+	}
+
+	l, err = link.Tracepoint("syscalls", "sys_enter_write", objs.SysEnterWrite, nil)
+	if err != nil {
+		glog.Errorf("tp/syscalls/sys_enter_write failed: %v", err)
+	} else {
+		hostLinks = append(hostLinks, l)
+	}
+
+	l, err = link.Tracepoint("sock", "inet_sock_set_state", objs.InetSockSetState, nil)
+	if err != nil {
+		glog.Errorf("tp/sock/inet_sock_set_state failed: %v", err)
+	} else {
+		hostLinks = append(hostLinks, l)
+	}
 
 	isk8s := internal.IsK8s()
-
 	uprobeFiles := strings.Split(*uprobesf, ",")
 
 	if !isk8s {

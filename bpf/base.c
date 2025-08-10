@@ -168,11 +168,14 @@ static __always_inline int should_trace_tgid(__u32 tgid) {
     return VORTEX_TRACE;
 }
 
-static __always_inline int should_trace_comm() {
+static __always_inline int should_trace_comm(int *all) {
+    *all = 0;
     u32 key = 0;
     char *comm_tr = bpf_map_lookup_elem(&trace_comm, &key);
-    if (!comm_tr)
+    if (!comm_tr) {
+        *all = 1;
         return VORTEX_TRACE;
+    }
 
     char *comm = bpf_map_lookup_elem(&buf_comm, &key);
     if (!comm)

@@ -61,6 +61,7 @@ int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) 
     }
 
     bpf_ringbuf_submit(e, 0);
+
     return 0;
 }
 */
@@ -148,7 +149,8 @@ static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct s
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332 */
 SEC("fexit/tcp_sendmsg")
 int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
-    if (should_trace_comm() == VORTEX_NO_TRACE)
+    int trace_all = 0;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -216,7 +218,8 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     if (ret <= 0)
         return BPF_OK;
 
-    if (should_trace_comm() == VORTEX_NO_TRACE)
+    int trace_all = 0;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -245,7 +248,8 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/udp.h#L271 */
 SEC("fexit/udp_sendmsg")
 int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, ret) {
-    if (should_trace_comm() == VORTEX_NO_TRACE)
+    int trace_all = 0;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
     struct event *event;
@@ -274,7 +278,8 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     if (ret <= 0)
         return BPF_OK;
 
-    if (should_trace_comm() == VORTEX_NO_TRACE)
+    int trace_all = 0;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
     struct event *event;
@@ -298,34 +303,151 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 }
 
 /*
- * /sys/kernel/tracing/events/syscalls/sys_enter_sendto/format
+ * /sys/kernel/tracing/events/syscalls/sys_enter_connect/format
  *
- *  int fd
- *  void *buff
- *  size_t len
- *  unsigned int flags
- *  struct sockaddr *addr
- *  int addr_len
+ * int fd
+ * struct sockaddr __user *uaddr
+ * int addrlen
  */
-/*
-SEC("tp/syscalls/sys_enter_sendto")
-int handle_enter_sendto(struct trace_event_raw_sys_enter *ctx) {
-    size_t len = BPF_CORE_READ(ctx, args[2]);
-    if (len == 0)
-        return 0;
+SEC("tp/syscalls/sys_enter_connect")
+int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
+    int trace_all = 0;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
+        return BPF_OK;
 
-    struct event *e;
-    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e)
-        return 0;
+    if (trace_all == 1)
+        return BPF_OK;
 
-    e->type = TYPE_TP_SYS_ENTER_SENDTO;
-    e->bytes = len;
-    set_proc_info(e);
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    int fd = BPF_CORE_READ(ctx, args[0]);
 
-    bpf_ringbuf_submit(e, 0);
-    return 0;
+    void *usr_addr = (void *)ctx->args[1];
+    int usr_addrlen = (int)ctx->args[2];
+    if (usr_addrlen >= sizeof(struct sockaddr_in)) {
+        struct sockaddr_in sa_in;
+        if (bpf_probe_read_user(&sa_in, sizeof(sa_in), usr_addr) == 0) {
+            if (sa_in.sin_family == AF_INET) {
+                struct event *event;
+                event = rb_events_reserve_with_stats();
+                if (!event)
+                    return BPF_OK;
+
+                event->type = TYPE_REPORT_WRITE_SOCKET_INFO;
+                set_proc_info(event);
+                event->saddr = 0;
+                event->sport = 0;
+                event->daddr = sa_in.sin_addr.s_addr;
+                event->dport = sa_in.sin_port;
+
+                rb_events_submit_with_stats(event, 0);
+                bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d, ipv4", pid_tgid, fd);
+            }
+        }
+    } else if (usr_addrlen >= sizeof(struct sockaddr_in6)) {
+        /* TODO */
+        bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d, ipv6", pid_tgid, fd);
+    }
+
+    return BPF_OK;
 }
-*/
+
+/*
+ * /sys/kernel/tracing/events/syscalls/sys_enter_write/format
+ *
+ * uint fd
+ * const char *buf
+ * size_t count
+ */
+SEC("tp/syscalls/sys_enter_write")
+int sys_enter_write(struct trace_event_raw_sys_enter *ctx) {
+    int trace_all = 0;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
+        return BPF_OK;
+
+    if (trace_all == 1)
+        return BPF_OK;
+
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 fd = BPF_CORE_READ(ctx, args[0]);
+    bpf_printk("sys_enter_write: pid_tgid=%llu, fd=%u", pid_tgid, fd);
+
+    return BPF_OK;
+}
+
+const char *tcp_state_to_string(int state) {
+    switch (state) {
+    case TCP_ESTABLISHED:
+        return "ESTABLISHED";
+    case TCP_SYN_SENT:
+        return "SYN_SENT";
+    case TCP_SYN_RECV:
+        return "SYN_RECV";
+    case TCP_FIN_WAIT1:
+        return "FIN_WAIT1";
+    case TCP_FIN_WAIT2:
+        return "FIN_WAIT2";
+    case TCP_TIME_WAIT:
+        return "TIME_WAIT";
+    case TCP_CLOSE:
+        return "CLOSE";
+    case TCP_CLOSE_WAIT:
+        return "CLOSE_WAIT";
+    case TCP_LAST_ACK:
+        return "LAST_ACK";
+    case TCP_LISTEN:
+        return "LISTEN";
+    case TCP_CLOSING:
+        return "CLOSING";
+    case TCP_NEW_SYN_RECV:
+        return "TCP_NEW_SYN_RECV";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+/*
+ * /sys/kernel/tracing/events/sock/inet_sock_set_state/format
+ *
+ * { 1, "TCP_ESTABLISHED" }
+ * { 2, "TCP_SYN_SENT" }
+ * { 3, "TCP_SYN_RECV" }
+ * { 4, "TCP_FIN_WAIT1" }
+ * { 5, "TCP_FIN_WAIT2" }
+ * { 6, "TCP_TIME_WAIT" }
+ * { 7, "TCP_CLOSE" }
+ * { 8, "TCP_CLOSE_WAIT" }
+ * { 9, "TCP_LAST_ACK" }
+ * { 10, "TCP_LISTEN" }
+ * { 11, "TCP_CLOSING" }
+ * { 12, "TCP_NEW_SYN_RECV" }
+ *
+ * { 1, "TCP_ESTABLISHED" }
+ * { 2, "TCP_SYN_SENT" }
+ * { 3, "TCP_SYN_RECV" }
+ * { 4, "TCP_FIN_WAIT1" }
+ * { 5, "TCP_FIN_WAIT2" }
+ * { 6, "TCP_TIME_WAIT" }
+ * { 7, "TCP_CLOSE" }
+ * { 8, "TCP_CLOSE_WAIT" }
+ * { 9, "TCP_LAST_ACK" }
+ * { 10, "TCP_LISTEN" }
+ * { 11, "TCP_CLOSING" }
+ * { 12, "TCP_NEW_SYN_RECV" }
+ */
+SEC("tp/sock/inet_sock_set_state")
+int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
+    int trace_all = 0;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
+        return BPF_OK;
+
+    if (trace_all == 1)
+        return BPF_OK;
+
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    bpf_printk("inet_sock_set_state: pid_tgid=%llu, old=%s, new=%s", pid_tgid, tcp_state_to_string(ctx->oldstate),
+               tcp_state_to_string(ctx->newstate));
+
+    return BPF_OK;
+}
 
 #endif /* __BPF_VORTEX_SOCKET_C */
