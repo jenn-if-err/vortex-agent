@@ -14,7 +14,7 @@ $ go generate
 $ make
 
 # Run:
-$ [sudo] ./bin/vortex-agent -logtostderr
+$ [sudo] ./bin/vortex-agent run --logtostderr
 
 # To be able to list pods:
 $ kubectl create clusterrolebinding default-view \
