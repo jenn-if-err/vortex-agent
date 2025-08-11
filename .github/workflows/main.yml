@@ -23,7 +23,7 @@ jobs:
       with:
         go-version: '1.24'
 
-    - name: 'Setup llvm and clang'
+    - name: 'Setup LLVM and Clang'
       uses: KyleMayes/install-llvm-action@v2
       with:
         version: "20.1.4"
@@ -47,7 +47,6 @@ jobs:
         cd ebpf/cmd/bpf2go/ && go build -v
         mkdir -p $HOME/.local/bin/ && cp bpf2go $HOME/.local/bin/
         cd $ROOT_DIR/ && go generate && make
-        ls -laF bin/
         tar czvf vortex-agent-${GITHUB_REF_NAME}-x86_64-linux.tar.gz bin/
         gh release create ${GITHUB_REF_NAME} ./*.tar.gz --generate-notes
 
