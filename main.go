@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"cloud.google.com/go/spanner"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -83,8 +84,8 @@ var (
 	testf    = flag.Bool("test", false, "Run in test mode")
 	uprobesf = flag.String("uprobes", "", "Lib/bin files to attach uprobes to (comma-separated)")
 	commf    = flag.String("comm", "", "Process name to trace, max 16 bytes, default all")
-
-	cctx = func(p context.Context) context.Context {
+	saveDb   = flag.Bool("savedb", false, "If true save data to DB(spanner), default to false")
+	cctx     = func(p context.Context) context.Context {
 		return context.WithValue(p, struct{}{}, nil)
 	}
 )
@@ -223,6 +224,17 @@ func main() {
 		glog.Errorf("tp/syscalls/sys_enter_write failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
+	}
+
+	var client *spanner.Client
+	if *saveDb {
+		// Spanner client creation
+		client, err = internal.NewSpannerClient(ctx, "projects/alphaus-dashboard/instances/vortex-main/databases/main")
+		if err != nil {
+			glog.Errorf("Failed to create Spanner client: %v", err)
+			return
+		}
+		defer client.Close()
 	}
 
 	isk8s := internal.IsK8s()
@@ -998,6 +1010,16 @@ func main() {
 			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 			fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
 			glog.Info(line.String())
+
+			if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") && *saveDb {
+				cols := []string{"id", "idx", "comm", "content", "created_at"}
+				vals := []any{key, fmt.Sprintf("%v", event.ChunkIdx), fmt.Sprintf("%s", event.Comm), internal.Readable(event.Buf[:], max(event.ChunkLen, 0)), spanner.CommitTimestamp}
+				mut := spanner.InsertOrUpdate("llm_prompts", cols, vals)
+				_, err := client.Apply(ctx, []*spanner.Mutation{mut})
+				if err != nil {
+					glog.Errorf("client.Apply failed: %v", err)
+				}
+			}
 
 		case TYPE_URETPROBE_SSL_WRITE:
 
