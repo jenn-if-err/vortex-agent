@@ -1,0 +1,64 @@
+---
+name: main
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: ['*']
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    name: Build
+    if: "!contains(github.event.commits[0].message, 'ci skip')"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: 'Setup Go'
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.24'
+
+    - name: 'Build binary'
+      if: startsWith(github.event.ref, 'refs/heads/')
+      run: |
+        go generate
+        make
+
+    # - name: 'Release from tags'
+    #   if: startsWith(github.event.ref, 'refs/tags/v')
+    #   env:
+    #     GH_TOKEN: ${{ secrets.GH_TOKEN }}
+    #   run: |
+    #     make
+    #     cp -v prism-gh-key.pem bin/
+    #     cp -v prism-gws-dwd-svcacct.json bin/
+    #     cp -v config.yaml bin/
+    #     cp -v update-agent.sh bin/
+    #     tar czvf prism-agent-${GITHUB_REF_NAME}-x86_64-linux.tar.gz bin/
+    #     gh release create ${GITHUB_REF_NAME} ./*.tar.gz --generate-notes
+
+    # - name: 'Setup gcloud for release'
+    #   if: startsWith(github.event.ref, 'refs/tags/v')
+    #   uses: 'google-github-actions/setup-gcloud@v2'
+
+    # - name: 'Update prism-agent from latest tag'
+    #   if: startsWith(github.event.ref, 'refs/tags/v')
+    #   env:
+    #     PRISM_MAIN_PROD_SA_JSON: ${{ secrets.PRISM_MAIN_PROD_SA_JSON }}
+    #     SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+    #   run: |
+    #     SVC_ACCT_JSON=/tmp/prism-main-sa.json
+    #     echo "$PRISM_MAIN_PROD_SA_JSON" > $SVC_ACCT_JSON
+    #     gcloud auth activate-service-account --key-file $SVC_ACCT_JSON
+    #     export GOOGLE_APPLICATION_CREDENTIALS=$SVC_ACCT_JSON
+    #     git clone https://github.com/flowerinthenight/g-ssh-cmd/ && cd g-ssh-cmd/ && go build -v
+    #     $PWD/g-ssh-cmd mig prism-agent-mig '/etc/prism/update-agent.sh' --project mobingi-main
+    #     export GOOGLE_APPLICATION_CREDENTIALS=''
+    #     rm $SVC_ACCT_JSON
+    #     rm $HOME/.ssh/google_compute_engine
+    #     rm $HOME/.ssh/google_compute_engine.pub
+    #     SLACK_PAYLOAD=`printf '{"text":"Build: prism-agent updated to %s"}' "$GITHUB_REF"`
+    #     curl -X POST -H 'Content-type: application/json; charset=utf-8' -d "${SLACK_PAYLOAD}" $SLACK_WEBHOOK
