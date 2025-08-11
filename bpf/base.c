@@ -103,9 +103,8 @@ struct {
  * or those that use their TLS/SSL libraries to handle the networking
  * alongside crypto.
  *
- * Unfortunately, this won't support "BIO-custom apps", or those that
- * only use the TLS/SSL libraries for crypto, and handle networking by
- * themselves.
+ * Unfortunately, this won't support "BIO-custom apps", or those that only
+ * use the TLS/SSL libraries for crypto, and handle networking by themselves.
  *
  * Anyway, this is easier to implement than using offsets, which is very
  * error-prone and requires a lot of maintenance. We might need to do offsets
@@ -137,7 +136,7 @@ struct {
 /* Key for the ssl_assoc_sock map. */
 struct ssl_assoc_sock_key {
     __u64 pid_tgid;
-    __u32 rw_flag; /* 0 for read, 1 for write */
+    __u32 rw_flag; /* 0 = read, 1 = write */
     __be32 saddr;
     __be32 daddr;
     __u16 sport;
