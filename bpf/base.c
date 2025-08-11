@@ -123,7 +123,7 @@ struct ssl_callstack_v {
     int len;
 };
 
-/* Active on SSL_write|read entry, removed on SSL_write|read exit. */
+/* Active on SSL_{write|read} entry, removed on SSL_{write|read} exit. */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
