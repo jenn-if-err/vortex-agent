@@ -248,6 +248,8 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/udp.h#L271 */
 SEC("fexit/udp_sendmsg")
 int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, ret) {
+    return BPF_OK; /* NOTE: disable for now */
+
     int trace_all = 0;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
@@ -275,6 +277,8 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
 /* https://elixir.bootlin.com/linux/v6.1.146/source/net/ipv4/udp_impl.h#L20 */
 SEC("fexit/udp_recvmsg")
 int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
+    return BPF_OK; /* NOTE: disable for now */
+
     if (ret <= 0)
         return BPF_OK;
 
