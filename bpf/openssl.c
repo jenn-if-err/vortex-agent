@@ -44,11 +44,13 @@ static int do_SSL_loop(u64 index, struct loop_data *data) {
 }
 
 static int do_uprobe_SSL_write(struct pt_regs *ctx) {
-    struct ssl_callstack_ctx w_ctx;
+    struct ssl_callstack_v w_ctx;
     w_ctx.buf = (uintptr_t)PT_REGS_PARM2(ctx);
     w_ctx.len = (int)PT_REGS_PARM3(ctx);
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    bpf_map_update_elem(&ssl_write_callstack, &pid_tgid, &w_ctx, BPF_ANY);
+
+    struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
+    bpf_map_update_elem(&ssl_callstack, &cs_key, &w_ctx, BPF_ANY);
 
     char *buf = (char *)PT_REGS_PARM2(ctx);
     int num = (int)PT_REGS_PARM3(ctx);
@@ -83,7 +85,8 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
 
 static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    bpf_map_delete_elem(&ssl_write_callstack, &pid_tgid);
+    struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
+    bpf_map_delete_elem(&ssl_callstack, &cs_key);
     return BPF_OK;
 }
 
@@ -116,11 +119,12 @@ SEC("uretprobe/SSL_write_ex")
 int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx); }
 
 static int do_uprobe_SSL_read(struct pt_regs *ctx) {
-    struct ssl_callstack_ctx r_ctx;
+    struct ssl_callstack_v r_ctx;
     r_ctx.buf = (uintptr_t)PT_REGS_PARM2(ctx);
     r_ctx.len = (int)PT_REGS_PARM3(ctx);
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    bpf_map_update_elem(&ssl_read_callstack, &pid_tgid, &r_ctx, BPF_ANY);
+    struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
+    bpf_map_update_elem(&ssl_callstack, &cs_key, &r_ctx, BPF_ANY);
 
     char *buf = (char *)PT_REGS_PARM2(ctx);
     bpf_map_update_elem(&ssl_read_buf, &pid_tgid, &buf, BPF_ANY);
@@ -130,7 +134,8 @@ static int do_uprobe_SSL_read(struct pt_regs *ctx) {
 
 static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    bpf_map_delete_elem(&ssl_read_callstack, &pid_tgid);
+    struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
+    bpf_map_delete_elem(&ssl_callstack, &cs_key);
 
     if (read <= 0) {
         bpf_map_delete_elem(&ssl_read_buf, &pid_tgid);

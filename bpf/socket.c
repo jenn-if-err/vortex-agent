@@ -110,9 +110,10 @@ static __always_inline void set_send_recv_msg_sk_info(struct event *event, struc
     event->dport = bpf_htons(dport);
 }
 
-static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct sock *sk) {
-    struct ssl_callstack_ctx *ctx;
-    ctx = bpf_map_lookup_elem(&ssl_write_callstack, &pid_tgid);
+static __always_inline void assoc_SSL_rw_socket_info(__u64 pid_tgid, __u32 rw_flag, struct sock *sk) {
+    struct ssl_callstack_v *ctx;
+    struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = rw_flag};
+    ctx = bpf_map_lookup_elem(&ssl_callstack, &cs_key);
     if (!ctx)
         return;
 
@@ -121,13 +122,13 @@ static __always_inline void assoc_SSL_write_socket_info(__u64 pid_tgid, struct s
     if (!event)
         return;
 
-    event->type = TYPE_REPORT_WRITE_SOCKET_INFO;
+    event->type = rw_flag == F_WRITE ? TYPE_REPORT_WRITE_SOCKET_INFO : TYPE_REPORT_READ_SOCKET_INFO;
     set_proc_info(event);
     set_send_recv_msg_sk_info(event, sk);
 
     struct ssl_assoc_sock_key key = {
         .pid_tgid = pid_tgid,
-        .rw_flag = 1, /* write */
+        .rw_flag = rw_flag,
         .saddr = event->saddr,
         .daddr = event->daddr,
         .sport = event->sport,
@@ -154,7 +155,7 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    assoc_SSL_write_socket_info(pid_tgid, sk);
+    assoc_SSL_rw_socket_info(pid_tgid, F_WRITE, sk);
 
     struct event *event;
     event = rb_events_reserve_with_stats();
@@ -176,42 +177,6 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     return BPF_OK;
 }
 
-static __always_inline void assoc_SSL_read_socket_info(__u64 pid_tgid, struct sock *sk) {
-    struct ssl_callstack_ctx *ctx;
-    ctx = bpf_map_lookup_elem(&ssl_read_callstack, &pid_tgid);
-    if (!ctx)
-        return;
-
-    struct event *event;
-    event = rb_events_reserve_with_stats();
-    if (!event)
-        return;
-
-    event->type = TYPE_REPORT_READ_SOCKET_INFO;
-    set_proc_info(event);
-    set_send_recv_msg_sk_info(event, sk);
-
-    struct ssl_assoc_sock_key key = {
-        .pid_tgid = pid_tgid,
-        .rw_flag = 0, /* read */
-        .saddr = event->saddr,
-        .daddr = event->daddr,
-        .sport = event->sport,
-        .dport = event->dport,
-    };
-
-    char *ptr = bpf_map_lookup_elem(&ssl_assoc_sock, &key);
-    if (ptr) {
-        bpf_ringbuf_discard(event, 0);
-        return;
-    }
-
-    u8 one = 1;
-    bpf_map_update_elem(&ssl_assoc_sock, &key, &one, BPF_ANY);
-
-    rb_events_submit_with_stats(event, 0);
-}
-
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L425 */
 SEC("fexit/tcp_recvmsg")
 int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
@@ -223,7 +188,7 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    assoc_SSL_read_socket_info(pid_tgid, sk);
+    assoc_SSL_rw_socket_info(pid_tgid, F_READ, sk);
 
     struct event *event;
     event = rb_events_reserve_with_stats();
@@ -344,10 +309,8 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
         };
 
         bpf_map_update_elem(&fd_connect, &key, &val, BPF_ANY);
-        bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d, ipv4", pid_tgid, fd);
     } else if (usr_addrlen >= sizeof(struct sockaddr_in6)) {
-        /* TODO */
-        bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d, ipv6", pid_tgid, fd);
+        /* TODO: IPv6 */
     }
 
     return BPF_OK;
@@ -416,6 +379,44 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
     return BPF_OK;
 }
 
+static __always_inline void assoc_rw_socket_info(__u64 pid_tgid, __u32 rw_flag, __u32 fd) {
+    struct fd_connect_k fdc_key = {.pid_tgid = pid_tgid, .fd = fd};
+    struct fd_connect_v *fdc_val;
+    fdc_val = bpf_map_lookup_elem(&fd_connect, &fdc_key);
+    if (!fdc_val)
+        return;
+
+    struct ssl_assoc_sock_key assoc_key = {
+        .pid_tgid = pid_tgid,
+        .rw_flag = rw_flag,
+        .saddr = 0,
+        .sport = 0,
+        .daddr = fdc_val->daddr,
+        .dport = fdc_val->dport,
+    };
+
+    char *ptr = bpf_map_lookup_elem(&ssl_assoc_sock, &assoc_key);
+    if (ptr)
+        return;
+
+    u8 one = 1;
+    bpf_map_update_elem(&ssl_assoc_sock, &assoc_key, &one, BPF_ANY);
+
+    /* Similar to assoc_SSL_rw_socket_info(). */
+    struct event *event;
+    event = rb_events_reserve_with_stats();
+    if (!event)
+        return;
+
+    event->type = rw_flag == F_WRITE ? TYPE_REPORT_WRITE_SOCKET_INFO : TYPE_REPORT_READ_SOCKET_INFO;
+    set_proc_info(event);
+    event->saddr = 0;
+    event->sport = 0;
+    event->daddr = fdc_val->daddr;
+    event->dport = bpf_htons(fdc_val->dport);
+    rb_events_submit_with_stats(event, 0);
+}
+
 /*
  * /sys/kernel/tracing/events/syscalls/sys_enter_write/format
  *
@@ -434,43 +435,30 @@ int sys_enter_write(struct trace_event_raw_sys_enter *ctx) {
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 fd = BPF_CORE_READ(ctx, args[0]);
-    bpf_printk("sys_enter_write: pid_tgid=%llu, fd=%u", pid_tgid, fd);
+    assoc_rw_socket_info(pid_tgid, F_WRITE, fd);
 
-    struct fd_connect_k fdc_key = {.pid_tgid = pid_tgid, .fd = fd};
-    struct fd_connect_v *fdc_val;
-    fdc_val = bpf_map_lookup_elem(&fd_connect, &fdc_key);
-    if (!fdc_val)
+    return BPF_OK;
+}
+
+/*
+ * /sys/kernel/tracing/events/syscalls/sys_enter_read/format
+ *
+ * uint fd
+ * const char *buf
+ * size_t count
+ */
+SEC("tp/syscalls/sys_enter_read")
+int sys_enter_read(struct trace_event_raw_sys_enter *ctx) {
+    int trace_all = 0;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
-    struct ssl_assoc_sock_key assoc_key = {
-        .pid_tgid = pid_tgid,
-        .rw_flag = 1, /* write */
-        .saddr = 0,
-        .sport = 0,
-        .daddr = fdc_val->daddr,
-        .dport = fdc_val->dport,
-    };
-
-    char *ptr = bpf_map_lookup_elem(&ssl_assoc_sock, &assoc_key);
-    if (ptr)
+    if (trace_all == 1)
         return BPF_OK;
 
-    u8 one = 1;
-    bpf_map_update_elem(&ssl_assoc_sock, &assoc_key, &one, BPF_ANY);
-
-    /* Similar to assoc_SSL_write_socket_info(). */
-    struct event *event;
-    event = rb_events_reserve_with_stats();
-    if (!event)
-        return BPF_OK;
-
-    event->type = TYPE_REPORT_WRITE_SOCKET_INFO;
-    set_proc_info(event);
-    event->saddr = 0;
-    event->sport = 0;
-    event->daddr = fdc_val->daddr;
-    event->dport = bpf_htons(fdc_val->dport);
-    rb_events_submit_with_stats(event, 0);
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 fd = BPF_CORE_READ(ctx, args[0]);
+    assoc_rw_socket_info(pid_tgid, F_READ, fd);
 
     return BPF_OK;
 }
@@ -491,8 +479,6 @@ int sys_enter_close(struct trace_event_raw_sys_enter *ctx) {
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 fd = BPF_CORE_READ(ctx, args[0]);
-    bpf_printk("sys_enter_close: pid_tgid=%llu, fd=%u", pid_tgid, fd);
-
     struct fd_connect_k key = {.pid_tgid = pid_tgid, .fd = fd};
     bpf_map_delete_elem(&fd_connect, &key);
 

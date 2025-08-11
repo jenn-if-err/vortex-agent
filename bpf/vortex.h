@@ -23,6 +23,11 @@ enum {
     TYPE_ANY = 255,
 };
 
+enum {
+    F_READ,
+    F_WRITE,
+};
+
 #define EVENT_BUF_LEN 256
 
 #define TGID_ENABLE_ALL 0xFFFFFFFF

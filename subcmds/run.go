@@ -108,7 +108,7 @@ func RunCmd() *cobra.Command {
 			go func() {
 				sigch := make(chan os.Signal, 1)
 				signal.Notify(sigch, syscall.SIGINT, syscall.SIGTERM)
-				glog.Infof("signal: %v", <-sigch)
+				<-sigch
 				cancel()
 			}()
 
@@ -232,6 +232,13 @@ func run(ctx context.Context, done chan error) {
 	l, err = link.Tracepoint("syscalls", "sys_enter_write", objs.SysEnterWrite, nil)
 	if err != nil {
 		glog.Errorf("tp/syscalls/sys_enter_write failed: %v", err)
+	} else {
+		hostLinks = append(hostLinks, l)
+	}
+
+	l, err = link.Tracepoint("syscalls", "sys_enter_read", objs.SysEnterRead, nil)
+	if err != nil {
+		glog.Errorf("tp/syscalls/sys_enter_read failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
 	}

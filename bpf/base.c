@@ -111,27 +111,25 @@ struct {
  * in the future, for those BIO-custom apps.
  */
 
+/* Key for the fd_connect map. */
+struct ssl_callstack_k {
+    __u64 pid_tgid;
+    __u32 rw_flag; /* 0 = read, 1 = write */
+};
+
 /* Callstack context information. */
-struct ssl_callstack_ctx {
+struct ssl_callstack_v {
     uintptr_t buf; /* instead of (char *), which bpf2go doesn't support */
     int len;
 };
 
-/* Active on SSL_write entry, removed on SSL_write exit. */
+/* Active on SSL_write|read entry, removed on SSL_write|read exit. */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
-    __type(key, __u64); /* PID/TGID */
-    __type(value, struct ssl_callstack_ctx);
-} ssl_write_callstack SEC(".maps");
-
-/* Active on SSL_read entry, removed on SSL_read exit. */
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, __u64); /* PID/TGID */
-    __type(value, struct ssl_callstack_ctx);
-} ssl_read_callstack SEC(".maps");
+    __type(key, struct ssl_callstack_k);
+    __type(value, struct ssl_callstack_v);
+} ssl_callstack SEC(".maps");
 
 /* Key for the ssl_assoc_sock map. */
 struct ssl_assoc_sock_key {
