@@ -17,9 +17,9 @@ import (
 
 var (
 	rootCmd = &cobra.Command{
-		Use:   "prism-agent",
-		Short: "Main agent for Prism",
-		Long:  `Main agent for Prism.`,
+		Use:   "vortex-agent",
+		Short: "Main agent for Vortex",
+		Long:  `Main agent for Vortex.`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			goflag.Parse() // for cobra + glog flags
 		},
