@@ -134,6 +134,7 @@ struct {
     __type(value, struct ssl_callstack_ctx);
 } ssl_read_callstack SEC(".maps");
 
+/* Key for the ssl_assoc_sock map. */
 struct ssl_assoc_sock_key {
     __u64 pid_tgid;
     __u32 rw_flag; /* 0 for read, 1 for write */
@@ -143,6 +144,7 @@ struct ssl_assoc_sock_key {
     __be16 dport;
 };
 
+/* Check if a PID/TGID is already associated with a socket. */
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1024);
@@ -168,6 +170,7 @@ static __always_inline int should_trace_tgid(__u32 tgid) {
     return VORTEX_TRACE;
 }
 
+/* Are we tracing this comm? */
 static __always_inline int should_trace_comm(int *all) {
     *all = 0;
     u32 key = 0;
@@ -188,6 +191,7 @@ static __always_inline int should_trace_comm(int *all) {
     return cmp == 0 ? VORTEX_TRACE : VORTEX_NO_TRACE;
 }
 
+/* Our wrapper to bpf_ringbuf_reserve() to track lost packets. */
 static __always_inline void *rb_events_reserve_with_stats() {
     void *rb = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
     if (rb)
@@ -212,6 +216,7 @@ static __always_inline void *rb_events_reserve_with_stats() {
     return rb;
 }
 
+/* Our wrapper to bpf_ringbuf_submit() to track sent packets. */
 static __always_inline void rb_events_submit_with_stats(void *event, __u64 flags) {
     bpf_ringbuf_submit(event, flags);
 
