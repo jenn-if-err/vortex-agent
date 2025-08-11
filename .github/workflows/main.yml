@@ -23,6 +23,8 @@ jobs:
 
     - name: 'Setup llvm and clang'
       uses: KyleMayes/install-llvm-action@v2
+      with:
+        version: "20.1.8"
 
     - name: 'Build binary'
       if: startsWith(github.event.ref, 'refs/heads/')
