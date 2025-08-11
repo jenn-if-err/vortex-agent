@@ -44,8 +44,8 @@ struct events_stats_t {
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1);
-    __type(key, u32);
-    __type(value, struct events_stats_t);
+    __type(key, u32);                     /* always 0 */
+    __type(value, struct events_stats_t); /* stats */
 } events_stats SEC(".maps");
 
 /*
@@ -55,24 +55,24 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
-    __type(key, __u32);
-    __type(value, __u8);
+    __type(key, __u32);  /* TGID */
+    __type(value, __u8); /* unused */
 } tgids_to_trace SEC(".maps");
 
 /* Optional comm (single) to trace (when provided from userspace). */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1);
-    __type(key, u32);
-    __type(value, char[TASK_COMM_LEN]);
+    __type(key, u32);                   /* always 0 */
+    __type(value, char[TASK_COMM_LEN]); /* comm to trace */
 } trace_comm SEC(".maps");
 
 /* should_trace_comm()'s buffer for getting comm instead of stack. */
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __type(key, u32);
-    __type(value, char[TASK_COMM_LEN]);
     __uint(max_entries, 1);
+    __type(key, u32);                   /* always 0 */
+    __type(value, char[TASK_COMM_LEN]); /* buffer for comm */
 } buf_comm SEC(".maps");
 
 /*
@@ -122,7 +122,7 @@ struct ssl_callstack_ctx {
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
-    __type(key, __u64);
+    __type(key, __u64); /* PID/TGID */
     __type(value, struct ssl_callstack_ctx);
 } ssl_write_callstack SEC(".maps");
 
@@ -130,7 +130,7 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
-    __type(key, __u64);
+    __type(key, __u64); /* PID/TGID */
     __type(value, struct ssl_callstack_ctx);
 } ssl_read_callstack SEC(".maps");
 
@@ -147,7 +147,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1024);
     __type(key, struct ssl_assoc_sock_key);
-    __type(value, u8);
+    __type(value, u8); /* unused */
 } ssl_assoc_sock SEC(".maps");
 
 /* Set process information in the event structure. */
@@ -221,15 +221,16 @@ static __always_inline void rb_events_submit_with_stats(void *event, __u64 flags
     if (!stats) {
         struct events_stats_t n_stats = {.sent = 1, .lost = 0};
         bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
-    } else {
-        struct events_stats_t n_stats = {
-            .sent = stats->sent + 1,
-            .lost = stats->lost,
-        };
-
-        /* bpf_printk("rb_events_submit_with_stats: sent=%llu", n_stats.sent); */
-        bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
+        return;
     }
+
+    struct events_stats_t n_stats = {
+        .sent = stats->sent + 1,
+        .lost = stats->lost,
+    };
+
+    /* bpf_printk("rb_events_submit_with_stats: sent=%llu", n_stats.sent); */
+    bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
 }
 
 #endif /* __BPF_VORTEX_COMMON_C */
