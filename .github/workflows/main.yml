@@ -35,22 +35,21 @@ jobs:
         cd /tmp/ && git clone https://github.com/cilium/ebpf
         cd ebpf/cmd/bpf2go/ && go build -v
         mkdir -p $HOME/.local/bin/ && cp bpf2go $HOME/.local/bin/
-        cd $OLD_PWD/
-        go generate
-        make
+        cd $OLD_PWD/ && go generate && make
 
-    # - name: 'Release from tags'
-    #   if: startsWith(github.event.ref, 'refs/tags/v')
-    #   env:
-    #     GH_TOKEN: ${{ secrets.GH_TOKEN }}
-    #   run: |
-    #     make
-    #     cp -v prism-gh-key.pem bin/
-    #     cp -v prism-gws-dwd-svcacct.json bin/
-    #     cp -v config.yaml bin/
-    #     cp -v update-agent.sh bin/
-    #     tar czvf prism-agent-${GITHUB_REF_NAME}-x86_64-linux.tar.gz bin/
-    #     gh release create ${GITHUB_REF_NAME} ./*.tar.gz --generate-notes
+    - name: 'Release from tags'
+      if: startsWith(github.event.ref, 'refs/tags/v')
+      env:
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      run: |
+        ls -laF
+        # make
+        # cp -v prism-gh-key.pem bin/
+        # cp -v prism-gws-dwd-svcacct.json bin/
+        # cp -v config.yaml bin/
+        # cp -v update-agent.sh bin/
+        # tar czvf prism-agent-${GITHUB_REF_NAME}-x86_64-linux.tar.gz bin/
+        # gh release create ${GITHUB_REF_NAME} ./*.tar.gz --generate-notes
 
     # - name: 'Setup gcloud for release'
     #   if: startsWith(github.event.ref, 'refs/tags/v')
