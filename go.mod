@@ -7,6 +7,8 @@ require (
 	github.com/cilium/ebpf v0.19.0
 	github.com/golang/glog v1.2.5
 	github.com/lmittmann/tint v1.1.2
+	github.com/spf13/cobra v1.9.1
+	github.com/spf13/pflag v1.0.6
 	k8s.io/apimachinery v0.30.13
 	k8s.io/client-go v0.30.13
 )
@@ -42,6 +44,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect

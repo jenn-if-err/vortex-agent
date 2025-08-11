@@ -49,8 +49,8 @@ struct {
 } events_stats SEC(".maps");
 
 /*
- * Map to control which TGIDs are traced. A key of TGID_ENABLE_ALL means all
- * TGIDs are traced. Otherwise, only trace whatever's in the map.
+ * Map to control which TGIDs are traced. A key of TGID_ENABLE_ALL means
+ * all TGIDs are traced. Otherwise, only trace whatever's in the map.
  */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);

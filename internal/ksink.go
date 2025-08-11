@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -9,6 +10,10 @@ import (
 	"strings"
 	"unsafe"
 )
+
+func ChildCtx(p context.Context) context.Context {
+	return context.WithValue(p, struct{}{}, nil)
+}
 
 // IsLE checks the endianness of the system
 // and logs whether it is little-endian (LE)
