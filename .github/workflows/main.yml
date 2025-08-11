@@ -31,18 +31,23 @@ jobs:
     - name: 'Build binary'
       if: startsWith(github.event.ref, 'refs/heads/')
       run: |
-        OLD_PWD=$PWD
-        cd /tmp/ && git clone https://github.com/cilium/ebpf
+        ROOT_DIR=$PWD
+        git clone https://github.com/cilium/ebpf
         cd ebpf/cmd/bpf2go/ && go build -v
         mkdir -p $HOME/.local/bin/ && cp bpf2go $HOME/.local/bin/
-        cd $OLD_PWD/ && go generate && make
+        cd $ROOT_DIR/ && go generate && make
 
     - name: 'Release from tags'
       if: startsWith(github.event.ref, 'refs/tags/v')
       env:
         GH_TOKEN: ${{ secrets.GH_TOKEN }}
       run: |
-        ls -laF
+        ROOT_DIR=$PWD
+        git clone https://github.com/cilium/ebpf
+        cd ebpf/cmd/bpf2go/ && go build -v
+        mkdir -p $HOME/.local/bin/ && cp bpf2go $HOME/.local/bin/
+        cd $ROOT_DIR/ && go generate && make
+        ls -laF bin/
         # make
         # cp -v prism-gh-key.pem bin/
         # cp -v prism-gws-dwd-svcacct.json bin/
