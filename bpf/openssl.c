@@ -50,8 +50,6 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     bpf_map_update_elem(&ssl_write_callstack, &pid_tgid, &w_ctx, BPF_ANY);
 
-    bpf_printk("do_uprobe_SSL_write: pid_tgid=%llu -- 1", pid_tgid);
-
     char *buf = (char *)PT_REGS_PARM2(ctx);
     int num = (int)PT_REGS_PARM3(ctx);
     int orig_num = num;
@@ -86,9 +84,6 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
 static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     bpf_map_delete_elem(&ssl_write_callstack, &pid_tgid);
-
-    bpf_printk("do_uretprobe_SSL_write: pid_tgid=%llu -- 3", pid_tgid);
-
     return BPF_OK;
 }
 

@@ -143,13 +143,41 @@ struct ssl_assoc_sock_key {
     __be16 dport;
 };
 
-/* Check if a PID/TGID is already associated with a socket. */
+/*
+ * Check if a PID/TGID is already associated with a socket.
+ * Prevents multiple ringbuf submissions for the same PID/TGID.
+ */
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1024);
     __type(key, struct ssl_assoc_sock_key);
     __type(value, u8); /* unused */
 } ssl_assoc_sock SEC(".maps");
+
+/* Key for the fd_connect map. */
+struct fd_connect_k {
+    __u64 pid_tgid;
+    __u32 fd;
+};
+
+/* Value for the fd_connect map. */
+struct fd_connect_v {
+    __be32 saddr;
+    __be32 daddr;
+    __u16 sport;
+    __be16 dport;
+};
+
+/*
+ * Check if a PID/TGID's fd has called connect on socket.
+ * Active on sys_enter_connect, removed on sys_enter_close.
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 1024);
+    __type(key, struct fd_connect_k);
+    __type(value, struct fd_connect_v);
+} fd_connect SEC(".maps");
 
 /* Set process information in the event structure. */
 static __always_inline void set_proc_info(struct event *event) {

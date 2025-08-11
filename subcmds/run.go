@@ -99,7 +99,7 @@ func RunCmd() *cobra.Command {
 		Short: "Run as agent (long running)",
 		Long:  `Run as agent (long running).`,
 		Run: func(cmd *cobra.Command, args []string) {
-			glog.Infof("Running vortex-agent as daemon (%v)", time.Now().Format(time.RFC3339))
+			glog.Infof("Running vortex-agent as service (%v)", time.Now().Format(time.RFC3339))
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan error)
 
@@ -232,6 +232,13 @@ func run(ctx context.Context, done chan error) {
 	l, err = link.Tracepoint("syscalls", "sys_enter_write", objs.SysEnterWrite, nil)
 	if err != nil {
 		glog.Errorf("tp/syscalls/sys_enter_write failed: %v", err)
+	} else {
+		hostLinks = append(hostLinks, l)
+	}
+
+	l, err = link.Tracepoint("syscalls", "sys_enter_close", objs.SysEnterClose, nil)
+	if err != nil {
+		glog.Errorf("tp/syscalls/sys_enter_close failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
 	}

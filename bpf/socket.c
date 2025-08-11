@@ -335,20 +335,15 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
         if (sa_in.sin_family != AF_INET)
             return BPF_OK;
 
-        /* Similar to assoc_SSL_write_socket_info(). */
-        struct event *event;
-        event = rb_events_reserve_with_stats();
-        if (!event)
-            return BPF_OK;
+        struct fd_connect_k key = {.pid_tgid = pid_tgid, .fd = fd};
+        struct fd_connect_v val = {
+            .saddr = 0,
+            .sport = 0,
+            .daddr = sa_in.sin_addr.s_addr,
+            .dport = sa_in.sin_port,
+        };
 
-        event->type = TYPE_REPORT_WRITE_SOCKET_INFO;
-        set_proc_info(event);
-        event->saddr = 0;
-        event->sport = 0;
-        event->daddr = sa_in.sin_addr.s_addr;
-        event->dport = sa_in.sin_port;
-
-        rb_events_submit_with_stats(event, 0);
+        bpf_map_update_elem(&fd_connect, &key, &val, BPF_ANY);
         bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d, ipv4", pid_tgid, fd);
     } else if (usr_addrlen >= sizeof(struct sockaddr_in6)) {
         /* TODO */
@@ -440,6 +435,66 @@ int sys_enter_write(struct trace_event_raw_sys_enter *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 fd = BPF_CORE_READ(ctx, args[0]);
     bpf_printk("sys_enter_write: pid_tgid=%llu, fd=%u", pid_tgid, fd);
+
+    struct fd_connect_k fdc_key = {.pid_tgid = pid_tgid, .fd = fd};
+    struct fd_connect_v *fdc_val;
+    fdc_val = bpf_map_lookup_elem(&fd_connect, &fdc_key);
+    if (!fdc_val)
+        return BPF_OK;
+
+    struct ssl_assoc_sock_key assoc_key = {
+        .pid_tgid = pid_tgid,
+        .rw_flag = 1, /* write */
+        .saddr = 0,
+        .sport = 0,
+        .daddr = fdc_val->daddr,
+        .dport = fdc_val->dport,
+    };
+
+    char *ptr = bpf_map_lookup_elem(&ssl_assoc_sock, &assoc_key);
+    if (ptr)
+        return BPF_OK;
+
+    u8 one = 1;
+    bpf_map_update_elem(&ssl_assoc_sock, &assoc_key, &one, BPF_ANY);
+
+    /* Similar to assoc_SSL_write_socket_info(). */
+    struct event *event;
+    event = rb_events_reserve_with_stats();
+    if (!event)
+        return BPF_OK;
+
+    event->type = TYPE_REPORT_WRITE_SOCKET_INFO;
+    set_proc_info(event);
+    event->saddr = 0;
+    event->sport = 0;
+    event->daddr = fdc_val->daddr;
+    event->dport = fdc_val->dport;
+    rb_events_submit_with_stats(event, 0);
+
+    return BPF_OK;
+}
+
+/*
+ * /sys/kernel/tracing/events/syscalls/sys_enter_close/format
+ *
+ * uint fd
+ */
+SEC("tp/syscalls/sys_enter_close")
+int sys_enter_close(struct trace_event_raw_sys_enter *ctx) {
+    int trace_all = 0;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
+        return BPF_OK;
+
+    if (trace_all == 1)
+        return BPF_OK;
+
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 fd = BPF_CORE_READ(ctx, args[0]);
+    bpf_printk("sys_enter_close: pid_tgid=%llu, fd=%u", pid_tgid, fd);
+
+    struct fd_connect_k key = {.pid_tgid = pid_tgid, .fd = fd};
+    bpf_map_delete_elem(&fd_connect, &key);
 
     return BPF_OK;
 }
