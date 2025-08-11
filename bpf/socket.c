@@ -469,7 +469,7 @@ int sys_enter_write(struct trace_event_raw_sys_enter *ctx) {
     event->saddr = 0;
     event->sport = 0;
     event->daddr = fdc_val->daddr;
-    event->dport = fdc_val->dport;
+    event->dport = bpf_htons(fdc_val->dport);
     rb_events_submit_with_stats(event, 0);
 
     return BPF_OK;
