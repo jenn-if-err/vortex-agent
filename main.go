@@ -83,7 +83,6 @@ var (
 	testf    = flag.Bool("test", false, "Run in test mode")
 	uprobesf = flag.String("uprobes", "", "Lib/bin files to attach uprobes to (comma-separated)")
 	commf    = flag.String("comm", "", "Process name to trace, max 16 bytes, default all")
-
 	cctx = func(p context.Context) context.Context {
 		return context.WithValue(p, struct{}{}, nil)
 	}
@@ -1069,3 +1068,4 @@ func main() {
 
 	wg.Wait()
 }
+	"cloud.google.com/go/spanner"
