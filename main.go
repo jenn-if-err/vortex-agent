@@ -1091,4 +1091,3 @@ func main() {
 
 	wg.Wait()
 }
-	"cloud.google.com/go/spanner"
