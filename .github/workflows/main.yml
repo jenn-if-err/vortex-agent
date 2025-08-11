@@ -26,7 +26,8 @@ jobs:
       run: |
         OLD_PWD=$PWD
         cd /tmp/ && git clone https://github.com/cilium/ebpf
-        cd ebpf/cmd/bpf2go/ && go build -v && env && cp bpf2go $HOME/.local/bin/
+        cd ebpf/cmd/bpf2go/ && go build -v
+        mkdir -p $HOME/.local/bin/ && cp bpf2go $HOME/.local/bin/
         cd $OLD_PWD/
         go generate
         make
