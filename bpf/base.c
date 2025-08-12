@@ -76,17 +76,6 @@ struct {
 } buf_comm SEC(".maps");
 
 /*
- * Map to store the user buffer pointer for SSL_read. The key is the PID/TGID,
- * and the value is a pointer to the user buffer.
- */
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, __u64);
-    __type(value, char *);
-} ssl_read_buf SEC(".maps");
-
-/*
  * Map to store the read pointer for SSL_read_ex. The key is the PID/TGID,
  * and the value is a pointer to the "bytes written" value.
  */
@@ -121,6 +110,10 @@ struct ssl_callstack_k {
 struct ssl_callstack_v {
     uintptr_t buf; /* instead of (char *), which bpf2go doesn't support */
     int len;
+    __be32 saddr;
+    __be32 daddr;
+    __u16 sport;
+    __be16 dport;
 };
 
 /* Active on SSL_{write|read} entry, removed on SSL_{write|read} exit. */

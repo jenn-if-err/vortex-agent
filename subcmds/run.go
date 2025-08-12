@@ -23,9 +23,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
-
 	"github.com/flowerinthenight/vortex-agent/bpf"
-
 	"github.com/flowerinthenight/vortex-agent/internal"
 	internalglog "github.com/flowerinthenight/vortex-agent/internal/glog"
 	"github.com/flowerinthenight/vortex-agent/params"
@@ -123,6 +121,8 @@ func RunCmd() *cobra.Command {
 }
 
 func run(ctx context.Context, done chan error) {
+	defer func() { done <- nil }()
+
 	sslTestOnly := false
 
 	// Allow the current process to lock memory for eBPF resources.
@@ -929,6 +929,8 @@ func run(ctx context.Context, done chan error) {
 				case TYPE_TP_SYS_ENTER_SENDTO:
 
 				case TYPE_UPROBE_SSL_WRITE:
+
+				case TYPE_URETPROBE_SSL_WRITE:
 					if event.ChunkIdx == CHUNK_END_IDX {
 						continue
 					}
@@ -942,7 +944,7 @@ func run(ctx context.Context, done chan error) {
 						header := make([]byte, 9)
 						_, err = buf.Read(header)
 						if err != nil {
-							glog.Errorf("[uprobe/SSL_write] incomplete frame header: %v", err)
+							glog.Errorf("[uretprobe/SSL_write] incomplete frame header: %v", err)
 							continue
 						}
 
@@ -963,19 +965,21 @@ func run(ctx context.Context, done chan error) {
 
 						if frameType <= FrameContinuation {
 							var h strings.Builder
-							fmt.Fprintf(&h, "[uprobe/SSL_write{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
+							fmt.Fprintf(&h, "[uretprobe/SSL_write{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
 							fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
 							fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
 							internalglog.LogInfof(h.String())
 						}
 					}
 
-					fmt.Fprintf(&line, "[uprobe/SSL_write{_ex}] idx=%v, ", event.ChunkIdx)
+					fmt.Fprintf(&line, "[uretprobe/SSL_write{_ex}] idx=%v, ", event.ChunkIdx)
 					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
+					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v, ", key, event.TotalLen, event.ChunkLen)
+					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
 					internalglog.LogInfo(line.String())
 
-					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") && runfSaveDb {
+					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") && params.RunfSaveDb {
 						cols := []string{"id", "idx", "comm", "content", "created_at"}
 						vals := []any{key, fmt.Sprintf("%v", event.ChunkIdx), fmt.Sprintf("%s", event.Comm), internal.Readable(event.Buf[:], max(event.ChunkLen, 0)), spanner.CommitTimestamp}
 						mut := spanner.InsertOrUpdate("llm_prompts", cols, vals)
@@ -984,8 +988,6 @@ func run(ctx context.Context, done chan error) {
 							glog.Errorf("client.Apply failed: %v", err)
 						}
 					}
-
-				case TYPE_URETPROBE_SSL_WRITE:
 
 				case TYPE_REPORT_WRITE_SOCKET_INFO:
 					fmt.Fprintf(&line, "[TYPE_REPORT_WRITE_SOCKET_INFO] key=%v, ", key)
@@ -1035,7 +1037,9 @@ func run(ctx context.Context, done chan error) {
 
 					fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v, ", event.ChunkIdx)
 					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
+					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v, ", key, event.TotalLen, event.ChunkLen)
+					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
+					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Saddr), event.Sport)
 					internalglog.LogInfo(line.String())
 
 				case TYPE_REPORT_READ_SOCKET_INFO:
@@ -1100,5 +1104,4 @@ func run(ctx context.Context, done chan error) {
 	internalglog.LogInfof("%d events processed, %d events dropped", true, count, dropped)
 
 	wg.Wait()
-	done <- nil
 }

@@ -10,6 +10,10 @@ struct loop_data {
     char **buf_ptr;
     int *len;
     int *orig_len;
+    __be32 saddr;
+    __be32 daddr;
+    __u16 sport;
+    __be16 dport;
 };
 
 /* bpf_loop callback: send data to userspace in chunks of EVENT_BUF_LEN bytes. */
@@ -25,6 +29,10 @@ static int do_SSL_loop(u64 index, struct loop_data *data) {
     event->total_len = *data->orig_len;
     event->chunk_len = len;
     event->chunk_idx = index;
+    event->saddr = data->saddr;
+    event->sport = data->sport;
+    event->daddr = data->daddr;
+    event->dport = bpf_ntohs(data->dport);
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
 
     char *buf = *data->buf_ptr;
@@ -44,25 +52,52 @@ static int do_SSL_loop(u64 index, struct loop_data *data) {
 }
 
 static int do_uprobe_SSL_write(struct pt_regs *ctx) {
-    struct ssl_callstack_v w_ctx;
-    w_ctx.buf = (uintptr_t)PT_REGS_PARM2(ctx);
-    w_ctx.len = (int)PT_REGS_PARM3(ctx);
+    struct ssl_callstack_v cs_val;
+    cs_val.buf = (uintptr_t)PT_REGS_PARM2(ctx);
+    cs_val.len = (int)PT_REGS_PARM3(ctx);
+    cs_val.saddr = 0;
+    cs_val.daddr = 0;
+    cs_val.sport = 0;
+    cs_val.dport = 0;
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-
     struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
-    bpf_map_update_elem(&ssl_callstack, &cs_key, &w_ctx, BPF_ANY);
+    bpf_map_update_elem(&ssl_callstack, &cs_key, &cs_val, BPF_ANY);
 
     bpf_printk("do_uprobe_SSL_write: pid_tgid=%llu", pid_tgid);
 
-    char *buf = (char *)PT_REGS_PARM2(ctx);
-    int num = (int)PT_REGS_PARM3(ctx);
+    return BPF_OK;
+}
+
+static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
+
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret <= 0) {
+        bpf_map_delete_elem(&ssl_callstack, &cs_key);
+        return BPF_OK;
+    }
+
+    struct ssl_callstack_v *cs_val;
+    cs_val = bpf_map_lookup_elem(&ssl_callstack, &cs_key);
+    if (!cs_val)
+        return BPF_OK;
+
+    bpf_printk("do_uretprobe_SSL_write: pid_tgid=%llu", pid_tgid);
+
+    char *buf = (char *)cs_val->buf;
+    int num = cs_val->len;
     int orig_num = num;
 
     struct loop_data data = {
-        .type = TYPE_UPROBE_SSL_WRITE,
+        .type = TYPE_URETPROBE_SSL_WRITE,
         .buf_ptr = &buf,
         .len = &num,
         .orig_len = &orig_num,
+        .saddr = cs_val->saddr,
+        .daddr = cs_val->daddr,
+        .sport = cs_val->sport,
+        .dport = cs_val->dport,
     };
 
     /* Is EVENT_BUF_LEN * 1000 enough? */
@@ -71,24 +106,25 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
     /* Signal previous chunked stream's end. */
     struct event *event;
     event = rb_events_reserve_with_stats();
-    if (!event)
+    if (!event) {
+        bpf_map_delete_elem(&ssl_callstack, &cs_key);
         return BPF_OK;
+    }
 
     event->type = TYPE_UPROBE_SSL_WRITE;
     set_proc_info(event);
     event->total_len = orig_num;
     event->chunk_len = -1;
     event->chunk_idx = CHUNKED_END_IDX;
+    event->saddr = cs_val->saddr;
+    event->sport = cs_val->sport;
+    event->daddr = cs_val->daddr;
+    event->dport = bpf_ntohs(cs_val->dport);
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
+
     rb_events_submit_with_stats(event, 0);
-
-    return BPF_OK;
-}
-
-static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
     bpf_map_delete_elem(&ssl_callstack, &cs_key);
+
     return BPF_OK;
 }
 
@@ -121,15 +157,18 @@ SEC("uretprobe/SSL_write_ex")
 int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx); }
 
 static int do_uprobe_SSL_read(struct pt_regs *ctx) {
-    struct ssl_callstack_v r_ctx;
-    r_ctx.buf = (uintptr_t)PT_REGS_PARM2(ctx);
-    r_ctx.len = (int)PT_REGS_PARM3(ctx);
+    struct ssl_callstack_v cs_val;
+    cs_val.buf = (uintptr_t)PT_REGS_PARM2(ctx);
+    cs_val.len = (int)PT_REGS_PARM3(ctx);
+    cs_val.saddr = 0;
+    cs_val.daddr = 0;
+    cs_val.sport = 0;
+    cs_val.dport = 0;
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
-    bpf_map_update_elem(&ssl_callstack, &cs_key, &r_ctx, BPF_ANY);
+    bpf_map_update_elem(&ssl_callstack, &cs_key, &cs_val, BPF_ANY);
 
-    char *buf = (char *)PT_REGS_PARM2(ctx);
-    bpf_map_update_elem(&ssl_read_buf, &pid_tgid, &buf, BPF_ANY);
+    bpf_printk("do_uprobe_SSL_read: pid_tgid=%llu", pid_tgid);
 
     return BPF_OK;
 }
@@ -137,18 +176,26 @@ static int do_uprobe_SSL_read(struct pt_regs *ctx) {
 static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
-    bpf_map_delete_elem(&ssl_callstack, &cs_key);
 
-    if (read <= 0) {
-        bpf_map_delete_elem(&ssl_read_buf, &pid_tgid);
+    int ret = (int)PT_REGS_RC(ctx);
+    if (ret <= 0) {
+        bpf_map_delete_elem(&ssl_callstack, &cs_key);
         return BPF_OK;
     }
 
-    char **buf_ptr = bpf_map_lookup_elem(&ssl_read_buf, &pid_tgid);
-    if (!buf_ptr)
+    if (read <= 0)
         return BPF_OK;
 
-    char *buf = (char *)*buf_ptr;
+    struct ssl_callstack_v *cs_val;
+    cs_val = bpf_map_lookup_elem(&ssl_callstack, &cs_key);
+    if (!cs_val)
+        return BPF_OK;
+
+
+    bpf_printk("do_uretprobe_SSL_read: pid_tgid=%llu", pid_tgid);
+
+    /* char *buf = (char *)*buf_ptr; */
+    char *buf = (char *)cs_val->buf;
     int orig_len = read;
 
     struct loop_data data = {
@@ -156,12 +203,14 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
         .buf_ptr = &buf,
         .len = &read,
         .orig_len = &orig_len,
+        .saddr = cs_val->saddr,
+        .daddr = cs_val->daddr,
+        .sport = cs_val->sport,
+        .dport = cs_val->dport,
     };
 
     /* Is EVENT_BUF_LEN * 1000 enough? */
     bpf_loop(1000, do_SSL_loop, &data, 0);
-
-    bpf_map_delete_elem(&ssl_read_buf, &pid_tgid);
 
     /* Signal previous chunked stream's end. */
     struct event *event;
@@ -174,8 +223,14 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     event->total_len = orig_len;
     event->chunk_len = -1;
     event->chunk_idx = CHUNKED_END_IDX;
+    event->saddr = cs_val->saddr;
+    event->sport = cs_val->sport;
+    event->daddr = cs_val->daddr;
+    event->dport = bpf_ntohs(cs_val->dport);
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
+
     rb_events_submit_with_stats(event, 0);
+    bpf_map_delete_elem(&ssl_callstack, &cs_key);
 
     return BPF_OK;
 }
