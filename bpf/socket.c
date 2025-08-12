@@ -450,9 +450,9 @@ int sys_enter_write(struct trace_event_raw_sys_enter *ctx) {
     if (trace_all == COMM_TRACE_ALL)
         return BPF_OK;
 
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 fd = BPF_CORE_READ(ctx, args[0]);
-    assoc_rw_socket_info(pid_tgid, F_WRITE, fd);
+    /* __u64 pid_tgid = bpf_get_current_pid_tgid(); */
+    /* u32 fd = BPF_CORE_READ(ctx, args[0]); */
+    /* assoc_rw_socket_info(pid_tgid, F_WRITE, fd); */
 
     return BPF_OK;
 }
@@ -473,9 +473,9 @@ int sys_enter_read(struct trace_event_raw_sys_enter *ctx) {
     if (trace_all == COMM_TRACE_ALL)
         return BPF_OK;
 
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 fd = BPF_CORE_READ(ctx, args[0]);
-    assoc_rw_socket_info(pid_tgid, F_READ, fd);
+    /* __u64 pid_tgid = bpf_get_current_pid_tgid(); */
+    /* u32 fd = BPF_CORE_READ(ctx, args[0]); */
+    /* assoc_rw_socket_info(pid_tgid, F_READ, fd); */
 
     return BPF_OK;
 }
