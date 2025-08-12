@@ -309,6 +309,7 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
         };
 
         bpf_map_update_elem(&fd_connect, &key, &val, BPF_ANY);
+        bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d", pid_tgid, fd);
     } else if (usr_addrlen >= sizeof(struct sockaddr_in6)) {
         /* TODO: IPv6 */
     }
