@@ -1097,7 +1097,7 @@ func run(ctx context.Context, done chan error) {
 		}
 	}
 
-	internalglog.LogInfof("%d events processed, %d events dropped", count, dropped)
+	internalglog.LogInfof("%d events processed, %d events dropped", true, count, dropped)
 
 	wg.Wait()
 	done <- nil
