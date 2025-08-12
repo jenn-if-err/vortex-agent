@@ -150,7 +150,7 @@ static __always_inline void assoc_SSL_rw_socket_info(__u64 pid_tgid, __u32 rw_fl
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332 */
 SEC("fexit/tcp_sendmsg")
 int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
-    int trace_all = 0;
+    int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
@@ -183,7 +183,7 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     if (ret <= 0)
         return BPF_OK;
 
-    int trace_all = 0;
+    int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
@@ -215,7 +215,7 @@ SEC("fexit/udp_sendmsg")
 int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, ret) {
     return BPF_OK; /* NOTE: disable for now */
 
-    int trace_all = 0;
+    int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
@@ -247,7 +247,7 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     if (ret <= 0)
         return BPF_OK;
 
-    int trace_all = 0;
+    int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
@@ -280,11 +280,11 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
  */
 SEC("tp/syscalls/sys_enter_connect")
 int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
-    int trace_all = 0;
+    int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
-    if (trace_all == 1)
+    if (trace_all == COMM_TRACE_ALL)
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -366,11 +366,11 @@ const char *tcp_state_to_string(int state) {
  */
 SEC("tp/sock/inet_sock_set_state")
 int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
-    int trace_all = 0;
+    int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
-    if (trace_all == 1)
+    if (trace_all == COMM_TRACE_ALL)
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -430,11 +430,11 @@ static __always_inline void assoc_rw_socket_info(__u64 pid_tgid, __u32 rw_flag, 
  */
 SEC("tp/syscalls/sys_enter_write")
 int sys_enter_write(struct trace_event_raw_sys_enter *ctx) {
-    int trace_all = 0;
+    int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
-    if (trace_all == 1)
+    if (trace_all == COMM_TRACE_ALL)
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -453,11 +453,11 @@ int sys_enter_write(struct trace_event_raw_sys_enter *ctx) {
  */
 SEC("tp/syscalls/sys_enter_read")
 int sys_enter_read(struct trace_event_raw_sys_enter *ctx) {
-    int trace_all = 0;
+    int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
-    if (trace_all == 1)
+    if (trace_all == COMM_TRACE_ALL)
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -474,11 +474,11 @@ int sys_enter_read(struct trace_event_raw_sys_enter *ctx) {
  */
 SEC("tp/syscalls/sys_enter_close")
 int sys_enter_close(struct trace_event_raw_sys_enter *ctx) {
-    int trace_all = 0;
+    int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
-    if (trace_all == 1)
+    if (trace_all == COMM_TRACE_ALL)
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();

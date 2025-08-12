@@ -39,6 +39,11 @@ enum {
 };
 
 enum {
+    COMM_NO_TRACE_ALL,
+    COMM_TRACE_ALL,
+};
+
+enum {
     BPF_CONTINUE_LOOP,
     BPF_END_LOOP,
 };

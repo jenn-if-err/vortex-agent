@@ -197,11 +197,11 @@ static __always_inline int should_trace_tgid(__u32 tgid) {
 
 /* Are we tracing this comm? */
 static __always_inline int should_trace_comm(int *all) {
-    *all = 0;
+    *all = COMM_NO_TRACE_ALL;
     u32 key = 0;
     char *comm_tr = bpf_map_lookup_elem(&trace_comm, &key);
     if (!comm_tr) {
-        *all = 1;
+        *all = COMM_TRACE_ALL;
         return VORTEX_TRACE;
     }
 
