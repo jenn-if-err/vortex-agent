@@ -23,8 +23,12 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+
 	"github.com/flowerinthenight/vortex-agent/bpf"
+
 	"github.com/flowerinthenight/vortex-agent/internal"
+	internalglog "github.com/flowerinthenight/vortex-agent/internal/glog"
+	"github.com/flowerinthenight/vortex-agent/params"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -87,19 +91,13 @@ type eventStateT struct {
 	http2 atomic.Int32 // 0: not http2, 1: http2
 }
 
-var (
-	runfComm    string
-	runfUprobes string
-	runfSaveDb  bool
-)
-
 func RunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run as agent (long running)",
 		Long:  `Run as agent (long running).`,
 		Run: func(cmd *cobra.Command, args []string) {
-			glog.Infof("Running vortex-agent as service (%v)", time.Now().Format(time.RFC3339))
+			internalglog.LogInfof("Running vortex-agent as service (%v)", time.Now().Format(time.RFC3339))
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan error)
 
@@ -117,9 +115,10 @@ func RunCmd() *cobra.Command {
 	}
 
 	cmd.Flags().SortFlags = false
-	cmd.Flags().StringVar(&runfComm, "comm", "", "Process name to trace, max 16 bytes, default all")
-	cmd.Flags().StringVar(&runfUprobes, "uprobes", "", "Lib/bin files to attach uprobes to (comma-separated)")
-	cmd.Flags().BoolVar(&runfSaveDb, "savedb", false, "If set to true, save data to Spanner")
+	cmd.Flags().StringVar(&params.RunfComm, "comm", "", "Process name to trace, max 16 bytes, default all")
+	cmd.Flags().StringVar(&params.RunfUprobes, "uprobes", "", "Lib/bin files to attach to uprobes (comma-separated)")
+	cmd.Flags().BoolVar(&params.RunfSaveDb, "savedb", false, "If set to true, save data to Spanner")
+	cmd.Flags().BoolVar(&params.RunfDisableLogs, "nologs", false, "If set to true, disable logs (for performance)")
 	return cmd
 }
 
@@ -140,16 +139,16 @@ func run(ctx context.Context, done chan error) {
 	}
 
 	defer objs.Close()
-	glog.Info("BPF objects loaded")
+	internalglog.LogInfo("BPF objects loaded")
 
-	if runfComm != "" {
+	if params.RunfComm != "" {
 		var comm [16]byte
-		copy(comm[:], runfComm)
+		copy(comm[:], params.RunfComm)
 		err := objs.TraceComm.Put(uint32(0), comm)
 		if err != nil {
 			glog.Errorf("objs.TraceCommSock.Put failed: %v", err)
 		} else {
-			glog.Infof("tracing only for [%s]", runfComm)
+			internalglog.LogInfof("tracing only for [%s]", params.RunfComm)
 		}
 	}
 
@@ -251,7 +250,7 @@ func run(ctx context.Context, done chan error) {
 	}
 
 	var client *spanner.Client
-	if runfSaveDb {
+	if params.RunfSaveDb {
 		// Spanner client creation
 		client, err = internal.NewSpannerClient(ctx, "projects/alphaus-dashboard/instances/vortex-main/databases/main")
 		if err != nil {
@@ -262,7 +261,7 @@ func run(ctx context.Context, done chan error) {
 	}
 
 	isk8s := internal.IsK8s()
-	uprobeFiles := strings.Split(runfUprobes, ",")
+	uprobeFiles := strings.Split(params.RunfUprobes, ",")
 
 	if !isk8s {
 		libsslPath, err := internal.FindLibSSL("")
@@ -283,7 +282,7 @@ func run(ctx context.Context, done chan error) {
 				return
 			}
 
-			glog.Infof("attaching uprobes to [%s]", uf)
+			internalglog.LogInfof("attaching u[ret]probes to [%s]", uf)
 
 			l, err = ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
 			if err != nil {
@@ -626,7 +625,7 @@ func run(ctx context.Context, done chan error) {
 
 					sslAttached[rootPath] = true // mark as attached
 
-					glog.Infof("found libssl at: %s", libsslPath)
+					internalglog.LogInfof("found libssl at: %s", libsslPath)
 					ex, err := link.OpenExecutable(libsslPath)
 					if err != nil {
 						glog.Errorf("OpenExecutable failed: %v", err)
@@ -638,7 +637,7 @@ func run(ctx context.Context, done chan error) {
 						glog.Errorf("uprobe/SSL_write (%v) failed: %v", libsslPath, err)
 					} else {
 						cgroupLinks = append(cgroupLinks, l)
-						glog.Infof("uprobe/SSL_write attached for %v", libsslPath)
+						internalglog.LogInfof("uprobe/SSL_write attached for %v", libsslPath)
 					}
 
 					// urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
@@ -648,14 +647,14 @@ func run(ctx context.Context, done chan error) {
 					// }
 
 					// linksToClose = append(linksToClose, urpSSLWrite)
-					// glog.Infof("uretprobe/SSL_write attached for %v", libsslPath)
+					// internalglog.LogInfof("uretprobe/SSL_write attached for %v", libsslPath)
 
 					l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
 					if err != nil {
 						glog.Errorf("uprobe/SSL_read (%v) failed: %v", libsslPath, err)
 					} else {
 						cgroupLinks = append(cgroupLinks, l)
-						glog.Infof("uprobe/SSL_read attached for %v", libsslPath)
+						internalglog.LogInfof("uprobe/SSL_read attached for %v", libsslPath)
 					}
 
 					l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
@@ -663,7 +662,7 @@ func run(ctx context.Context, done chan error) {
 						glog.Errorf("uretprobe/SSL_read (%v) failed: %v", libsslPath, err)
 					} else {
 						cgroupLinks = append(cgroupLinks, l)
-						glog.Infof("uretprobe/SSL_read attached for %v", libsslPath)
+						internalglog.LogInfof("uretprobe/SSL_read attached for %v", libsslPath)
 					}
 				}()
 				// ---------------------------------------------
@@ -675,7 +674,7 @@ func run(ctx context.Context, done chan error) {
 				}
 
 				cgroup := string(cgroupb)
-				// glog.Infof("jailed: pid=%d, cgroup=%s", pid, cgroup)
+				// internalglog.LogInfof("jailed: pid=%d, cgroup=%s", pid, cgroup)
 
 				podUidsClone := func() map[string]string {
 					podUidsMtx.Lock()
@@ -806,7 +805,7 @@ func run(ctx context.Context, done chan error) {
 						continue // skip if no traffic
 					}
 
-					glog.Infof("tgid=%d, ip=%v|%v, info=%s, ingress=%d, egress=%d",
+					internalglog.LogInfof("tgid=%d, ip=%v|%v, info=%s, ingress=%d, egress=%d",
 						tgid,
 						ip,
 						ipToDomainClone[ip],
@@ -817,7 +816,7 @@ func run(ctx context.Context, done chan error) {
 				}
 			}
 
-			glog.Infof("%d tgids under trace", len(tracedTgidsClone))
+			internalglog.LogInfof("%d tgids under trace", len(tracedTgidsClone))
 		}
 
 		for {
@@ -872,7 +871,7 @@ func run(ctx context.Context, done chan error) {
 						fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
 						fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
 						fmt.Fprintf(&line, "len=%v", event.TotalLen)
-						glog.Info(line.String())
+						internalglog.LogInfo(line.String())
 						continue
 					}
 
@@ -920,7 +919,7 @@ func run(ctx context.Context, done chan error) {
 						fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
 						fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
 						fmt.Fprintf(&line, "len=%v", event.TotalLen)
-						glog.Info(line.String())
+						internalglog.LogInfo(line.String())
 					}
 
 				case TYPE_FEXIT_UDP_SENDMSG:
@@ -967,14 +966,14 @@ func run(ctx context.Context, done chan error) {
 							fmt.Fprintf(&h, "[uprobe/SSL_write{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
 							fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
 							fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
-							glog.Infof(h.String())
+							internalglog.LogInfof(h.String())
 						}
 					}
 
 					fmt.Fprintf(&line, "[uprobe/SSL_write{_ex}] idx=%v, ", event.ChunkIdx)
 					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
-					glog.Info(line.String())
+					internalglog.LogInfo(line.String())
 
 					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") && runfSaveDb {
 						cols := []string{"id", "idx", "comm", "content", "created_at"}
@@ -992,7 +991,7 @@ func run(ctx context.Context, done chan error) {
 					fmt.Fprintf(&line, "[TYPE_REPORT_WRITE_SOCKET_INFO] key=%v, ", key)
 					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
 					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
-					glog.Info(line.String())
+					internalglog.LogInfo(line.String())
 
 				case TYPE_UPROBE_SSL_READ:
 
@@ -1030,26 +1029,26 @@ func run(ctx context.Context, done chan error) {
 							fmt.Fprintf(&h, "[uretprobe/SSL_read{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
 							fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
 							fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
-							glog.Infof(h.String())
+							internalglog.LogInfo(h.String())
 						}
 					}
 
 					fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v, ", event.ChunkIdx)
 					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
-					glog.Info(line.String())
+					internalglog.LogInfo(line.String())
 
 				case TYPE_REPORT_READ_SOCKET_INFO:
 					fmt.Fprintf(&line, "[TYPE_REPORT_READ_SOCKET_INFO] key=%v, ", key)
 					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
 					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Saddr), event.Sport)
-					glog.Info(line.String())
+					internalglog.LogInfo(line.String())
 
 				case TYPE_ANY:
 					fmt.Fprintf(&line, "[TYPE_ANY] key=%v, totalLen=%v, ", key, event.TotalLen)
 					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
 					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
-					glog.Info(line.String())
+					internalglog.LogInfo(line.String())
 
 				default:
 				}
@@ -1066,7 +1065,7 @@ func run(ctx context.Context, done chan error) {
 		err = rd.ReadInto(&record)
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
-				glog.Info("received signal, exiting...")
+				internalglog.LogInfo("received signal, exiting...")
 				close(eventSink)
 				break
 			}
@@ -1083,7 +1082,7 @@ func run(ctx context.Context, done chan error) {
 
 		count++
 		if count%1000 == 0 {
-			glog.Infof("%d events processed, %d events dropped", count, dropped)
+			internalglog.LogInfof("%d events processed, %d events dropped", count, dropped)
 		}
 
 		key := fmt.Sprintf("%v/%v", event.Tgid, event.Pid)
@@ -1098,7 +1097,7 @@ func run(ctx context.Context, done chan error) {
 		}
 	}
 
-	glog.Infof("%d events processed, %d events dropped", count, dropped)
+	internalglog.LogInfof("%d events processed, %d events dropped", count, dropped)
 
 	wg.Wait()
 	done <- nil
