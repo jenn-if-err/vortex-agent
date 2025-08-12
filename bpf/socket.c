@@ -482,6 +482,8 @@ int sys_enter_close(struct trace_event_raw_sys_enter *ctx) {
     struct fd_connect_k key = {.pid_tgid = pid_tgid, .fd = fd};
     bpf_map_delete_elem(&fd_connect, &key);
 
+    bpf_printk("sys_enter_close: pid_tgid=%llu, fd=%u", pid_tgid, fd);
+
     return BPF_OK;
 }
 

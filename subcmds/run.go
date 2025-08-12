@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,8 +84,7 @@ type trafficInfo struct {
 }
 
 type eventStateT struct {
-	count uint64
-	http2 bool
+	http2 atomic.Int32 // 0: not http2, 1: http2
 }
 
 var (
@@ -536,6 +536,7 @@ func run(ctx context.Context, done chan error) {
 				return
 			}
 
+			// NOTE:
 			// Methods for accessing container-based file systems for u[ret]probes.
 			//
 			// 1) Check /proc/pid/root/. Symbolic link to pid's root directory.
@@ -685,9 +686,11 @@ func run(ctx context.Context, done chan error) {
 				}()
 
 				for k, v := range podUidsClone {
-					// NOTE: This is a very fragile way of matching cgroups to pods.
+					// NOTE:
+					// This is a very fragile way of matching cgroups to pods.
 					// Tested only on GKE (Alphaus). Need to explore other k8s setups,
 					// i.e. EKS, AKS, OpenShift, etc.
+
 					kf := strings.ReplaceAll(k, "-", "_")
 					if !strings.Contains(cgroup, kf) {
 						continue
@@ -833,18 +836,235 @@ func run(ctx context.Context, done chan error) {
 		}
 	}()
 
+	// eventStateMtx := sync.Mutex{}
 	eventState := make(map[string]*eventStateT)
+	eventSink := make(chan bpf.BpfEvent, 2048) // what size to use?
+
+	for i := range runtime.NumCPU() {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			var line strings.Builder
+
+			// NOTE: All logs/prints here are for debugging purposes only.
+			// They need to be removed in production code as they have
+			// a significant performance impact.
+
+			for event := range eventSink {
+				line.Reset()
+				key := fmt.Sprintf("%v/%v", event.Tgid, event.Pid)
+				switch event.Type {
+				case TYPE_FENTRY_SOCK_SENDMSG:
+
+				case TYPE_FEXIT_SOCK_RECVMSG:
+
+				case TYPE_FEXIT_TCP_SENDMSG:
+					if strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "sshd") {
+						continue
+					}
+
+					if !isk8s && !sslTestOnly {
+						if !strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "node") {
+							continue
+						}
+
+						fmt.Fprintf(&line, "[fexit/tcp_sendmsg] comm=%s, key=%v, ", event.Comm, key)
+						fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+						fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
+						fmt.Fprintf(&line, "len=%v", event.TotalLen)
+						glog.Info(line.String())
+						continue
+					}
+
+					if tracedTgidsUseMtx.Load() == 0 {
+						if _, ok := tracedTgids[event.Tgid]; !ok {
+							continue
+						}
+
+						dstIp := internal.IntToIp(event.Daddr).String()
+						if _, ok := tracedTgids[event.Tgid][dstIp]; !ok {
+							continue // double check; should be present
+						}
+
+						atomic.AddUint64(
+							&tracedTgids[event.Tgid][dstIp].Egress,
+							uint64(event.TotalLen),
+						)
+					} else {
+						func() {
+							tracedTgidsMtx.Lock()
+							defer tracedTgidsMtx.Unlock()
+							if _, ok := tracedTgids[event.Tgid]; !ok {
+								return
+							}
+
+							dstIp := internal.IntToIp(event.Daddr).String()
+							if _, ok := tracedTgids[event.Tgid][dstIp]; !ok {
+								return
+							}
+
+							atomic.AddUint64(
+								&tracedTgids[event.Tgid][dstIp].Egress,
+								uint64(event.TotalLen),
+							)
+						}()
+					}
+
+				case TYPE_FEXIT_TCP_RECVMSG:
+					if !isk8s && !sslTestOnly {
+						if !strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "node") {
+							continue
+						}
+
+						fmt.Fprintf(&line, "[fexit/tcp_recvmsg] comm=%s, key=%v, ", event.Comm, key)
+						fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
+						fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+						fmt.Fprintf(&line, "len=%v", event.TotalLen)
+						glog.Info(line.String())
+					}
+
+				case TYPE_FEXIT_UDP_SENDMSG:
+
+				case TYPE_FEXIT_UDP_RECVMSG:
+
+				case TYPE_TP_SYS_ENTER_SENDTO:
+
+				case TYPE_UPROBE_SSL_WRITE:
+					if event.ChunkIdx == CHUNK_END_IDX {
+						continue
+					}
+
+					if strings.HasPrefix(internal.Readable(event.Buf[:15], 15), "PRI * HTTP/2.0") {
+						eventState[key].http2.Store(1)
+					}
+
+					if eventState[key].http2.Load() == 1 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
+						buf := bytes.NewReader(event.Buf[:])
+						header := make([]byte, 9)
+						_, err = buf.Read(header)
+						if err != nil {
+							glog.Errorf("[uprobe/SSL_write] incomplete frame header: %v", err)
+							continue
+						}
+
+						// Parse header: length is 24 bits (3 bytes), big-endian.
+						length := uint32(header[0])<<16 | uint32(header[1])<<8 | uint32(header[2])
+						frameType := header[3]
+						flags := header[4]
+						streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
+
+						switch frameType {
+						case FrameData:
+						case FrameHeaders:
+						default:
+							if frameType >= FramePriority && frameType <= FrameContinuation {
+								continue
+							}
+						}
+
+						if frameType <= FrameContinuation {
+							var h strings.Builder
+							fmt.Fprintf(&h, "[uprobe/SSL_write{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
+							fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
+							fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
+							glog.Infof(h.String())
+						}
+					}
+
+					fmt.Fprintf(&line, "[uprobe/SSL_write{_ex}] idx=%v, ", event.ChunkIdx)
+					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
+					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
+					glog.Info(line.String())
+
+					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") && runfSaveDb {
+						cols := []string{"id", "idx", "comm", "content", "created_at"}
+						vals := []any{key, fmt.Sprintf("%v", event.ChunkIdx), fmt.Sprintf("%s", event.Comm), internal.Readable(event.Buf[:], max(event.ChunkLen, 0)), spanner.CommitTimestamp}
+						mut := spanner.InsertOrUpdate("llm_prompts", cols, vals)
+						_, err := client.Apply(ctx, []*spanner.Mutation{mut})
+						if err != nil {
+							glog.Errorf("client.Apply failed: %v", err)
+						}
+					}
+
+				case TYPE_URETPROBE_SSL_WRITE:
+
+				case TYPE_REPORT_WRITE_SOCKET_INFO:
+					fmt.Fprintf(&line, "[TYPE_REPORT_WRITE_SOCKET_INFO] key=%v, ", key)
+					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
+					glog.Info(line.String())
+
+				case TYPE_UPROBE_SSL_READ:
+
+				case TYPE_URETPROBE_SSL_READ:
+					if event.ChunkIdx == CHUNK_END_IDX {
+						continue
+					}
+
+					if eventState[key].http2.Load() == 1 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
+						buf := bytes.NewReader(event.Buf[:])
+						header := make([]byte, 9)
+						_, err = buf.Read(header)
+						if err != nil {
+							glog.Errorf("[uretprobe/SSL_read] incomplete frame header: %v", err)
+							continue
+						}
+
+						// Parse header: length is 24 bits (3 bytes), big-endian.
+						length := uint32(header[0])<<16 | uint32(header[1])<<8 | uint32(header[2])
+						frameType := header[3]
+						flags := header[4]
+						streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
+
+						switch frameType {
+						case FrameData:
+						case FrameHeaders:
+						default:
+							if frameType >= FramePriority && frameType <= FrameContinuation {
+								continue
+							}
+						}
+
+						if frameType <= FrameContinuation {
+							var h strings.Builder
+							fmt.Fprintf(&h, "[uretprobe/SSL_read{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
+							fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
+							fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
+							glog.Infof(h.String())
+						}
+					}
+
+					fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v, ", event.ChunkIdx)
+					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
+					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
+					glog.Info(line.String())
+
+				case TYPE_REPORT_READ_SOCKET_INFO:
+					fmt.Fprintf(&line, "[TYPE_REPORT_READ_SOCKET_INFO] key=%v, ", key)
+					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
+					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Saddr), event.Sport)
+					glog.Info(line.String())
+
+				case TYPE_ANY:
+					glog.Infof("[TYPE_ANY] buf=%s", event.Buf)
+
+				default:
+				}
+			}
+		}(i)
+	}
 
 	var count uint64
-	var line strings.Builder
-	var event bpf.BpfEvent
+	var dropped uint64
 	var record ringbuf.Record
+	var event bpf.BpfEvent
 
 	for {
 		err = rd.ReadInto(&record)
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				glog.Info("received signal, exiting...")
+				close(eventSink)
 				break
 			}
 
@@ -852,14 +1072,15 @@ func run(ctx context.Context, done chan error) {
 			continue
 		}
 
-		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
+		err = binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event)
+		if err != nil {
 			glog.Errorf("parsing ringbuf event failed: %v", err)
 			continue
 		}
 
 		count++
 		if count%1000 == 0 {
-			glog.Infof("processed %d events", count)
+			glog.Infof("%d events processed, %d events dropped", count, dropped)
 		}
 
 		key := fmt.Sprintf("%v/%v", event.Tgid, event.Pid)
@@ -867,250 +1088,14 @@ func run(ctx context.Context, done chan error) {
 			eventState[key] = &eventStateT{}
 		}
 
-		eventState[key].count++
-		line.Reset()
-
-		switch event.Type {
-		case TYPE_FENTRY_SOCK_SENDMSG:
-			// NOTE: Not used now.
-
-			// fmt.Fprintf(&line, "comm=%s, pid=%v, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fentry/sock_sendmsg",
-			// 	event.Comm,
-			// 	event.Pid,
-			// 	event.Tgid,
-			// 	intToIP(event.Saddr),
-			// 	event.Sport,
-			// 	intToIP(event.Daddr),
-			// 	event.Dport,
-			// 	event.Bytes,
-			// )
-
-			// glog.Info(line.String())
-
-		case TYPE_FEXIT_SOCK_RECVMSG:
-			// NOTE: Not used now.
-
-			// fmt.Fprintf(&line, "comm=%s, tgid=%v, src=%v:%v, dst=%v:%v, ret=%v, fn=fexit/sock_recvmsg",
-			// 	event.Comm,
-			// 	event.Tgid,
-			// 	internal.IntToIp(event.Daddr),
-			// 	event.Dport,
-			// 	internal.IntToIp(event.Saddr),
-			// 	event.Sport,
-			// 	event.Bytes,
-			// )
-
-			// glog.Info(line.String())
-
-		case TYPE_FEXIT_TCP_SENDMSG:
-			if strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "sshd") {
-				continue
-			}
-
-			if !isk8s && !sslTestOnly {
-				if !strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "node") {
-					continue
-				}
-
-				fmt.Fprintf(&line, "[fexit/tcp_sendmsg] comm=%s, key=%v, ", event.Comm, key)
-				fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
-				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
-				fmt.Fprintf(&line, "len=%v", event.TotalLen)
-				glog.Info(line.String())
-				continue
-			}
-
-			if tracedTgidsUseMtx.Load() == 0 {
-				if _, ok := tracedTgids[event.Tgid]; !ok {
-					continue
-				}
-
-				dstIp := internal.IntToIp(event.Daddr).String()
-				if _, ok := tracedTgids[event.Tgid][dstIp]; !ok {
-					continue // double check; should be present
-				}
-
-				atomic.AddUint64(
-					&tracedTgids[event.Tgid][dstIp].Egress,
-					uint64(event.TotalLen),
-				)
-			} else {
-				func() {
-					tracedTgidsMtx.Lock()
-					defer tracedTgidsMtx.Unlock()
-					if _, ok := tracedTgids[event.Tgid]; !ok {
-						return
-					}
-
-					dstIp := internal.IntToIp(event.Daddr).String()
-					if _, ok := tracedTgids[event.Tgid][dstIp]; !ok {
-						return
-					}
-
-					atomic.AddUint64(
-						&tracedTgids[event.Tgid][dstIp].Egress,
-						uint64(event.TotalLen),
-					)
-				}()
-			}
-
-		case TYPE_FEXIT_TCP_RECVMSG:
-			if !isk8s && !sslTestOnly {
-				if !strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "node") {
-					continue
-				}
-
-				fmt.Fprintf(&line, "[fexit/tcp_recvmsg] comm=%s, key=%v, ", event.Comm, key)
-				fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
-				fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
-				fmt.Fprintf(&line, "len=%v", event.TotalLen)
-				glog.Info(line.String())
-			}
-
-		case TYPE_FEXIT_UDP_SENDMSG:
-			// if !isk8s && !sslTestOnly {
-			// 	fmt.Fprintf(&line, "[fexit/udp_sendmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
-			// 	fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
-			// 	fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
-			// 	fmt.Fprintf(&line, "len=%v", event.TotalLen)
-			// 	glog.Info(line.String())
-			// }
-
-		case TYPE_FEXIT_UDP_RECVMSG:
-			// if !isk8s && !sslTestOnly {
-			// 	fmt.Fprintf(&line, "[fexit/udp_recvmsg] comm=%s, tgid=%v, ", event.Comm, event.Tgid)
-			// 	fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
-			// 	fmt.Fprintf(&line, "dst=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
-			// 	fmt.Fprintf(&line, "len=%v", event.TotalLen)
-			// 	glog.Info(line.String())
-			// }
-
-		case TYPE_TP_SYS_ENTER_SENDTO:
-
-		case TYPE_UPROBE_SSL_WRITE:
-			if event.ChunkIdx == CHUNK_END_IDX {
-				continue
-			}
-
-			if strings.HasPrefix(internal.Readable(event.Buf[:15], 15), "PRI * HTTP/2.0") {
-				eventState[key].http2 = true
-			}
-
-			if eventState[key].http2 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
-				buf := bytes.NewReader(event.Buf[:])
-				header := make([]byte, 9)
-				_, err = buf.Read(header)
-				if err != nil {
-					glog.Errorf("[uprobe/SSL_write] incomplete frame header: %v", err)
-					continue
-				}
-
-				// Parse header: length is 24 bits (3 bytes), big-endian.
-				length := uint32(header[0])<<16 | uint32(header[1])<<8 | uint32(header[2])
-				frameType := header[3]
-				flags := header[4]
-				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
-
-				switch frameType {
-				case FrameData:
-				case FrameHeaders:
-				default:
-					if frameType >= FramePriority && frameType <= FrameContinuation {
-						continue
-					}
-				}
-
-				if frameType <= FrameContinuation {
-					var h strings.Builder
-					fmt.Fprintf(&h, "[uprobe/SSL_write{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
-					fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
-					fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
-					glog.Infof(h.String())
-				}
-			}
-
-			fmt.Fprintf(&line, "[uprobe/SSL_write{_ex}] idx=%v, ", event.ChunkIdx)
-			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
-			glog.Info(line.String())
-
-			if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") && runfSaveDb {
-				cols := []string{"id", "idx", "comm", "content", "created_at"}
-				vals := []any{key, fmt.Sprintf("%v", event.ChunkIdx), fmt.Sprintf("%s", event.Comm), internal.Readable(event.Buf[:], max(event.ChunkLen, 0)), spanner.CommitTimestamp}
-				mut := spanner.InsertOrUpdate("llm_prompts", cols, vals)
-				_, err := client.Apply(ctx, []*spanner.Mutation{mut})
-				if err != nil {
-					glog.Errorf("client.Apply failed: %v", err)
-				}
-			}
-
-		case TYPE_URETPROBE_SSL_WRITE:
-
-		case TYPE_REPORT_WRITE_SOCKET_INFO:
-			glog.Infof("[TYPE_REPORT_WRITE_SOCKET_INFO] key=%v, src=%v:%v, dst=%v:%v",
-				key,
-				internal.IntToIp(event.Saddr), event.Sport,
-				internal.IntToIp(event.Daddr), event.Dport,
-			)
-
-		case TYPE_UPROBE_SSL_READ:
-
-		case TYPE_URETPROBE_SSL_READ:
-			if event.ChunkIdx == CHUNK_END_IDX {
-				continue
-			}
-
-			if eventState[key].http2 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
-				buf := bytes.NewReader(event.Buf[:])
-				header := make([]byte, 9)
-				_, err = buf.Read(header)
-				if err != nil {
-					glog.Errorf("[uretprobe/SSL_read] incomplete frame header: %v", err)
-					continue
-				}
-
-				// Parse header: length is 24 bits (3 bytes), big-endian.
-				length := uint32(header[0])<<16 | uint32(header[1])<<8 | uint32(header[2])
-				frameType := header[3]
-				flags := header[4]
-				streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
-
-				switch frameType {
-				case FrameData:
-				case FrameHeaders:
-				default:
-					if frameType >= FramePriority && frameType <= FrameContinuation {
-						continue
-					}
-				}
-
-				if frameType <= FrameContinuation {
-					var h strings.Builder
-					fmt.Fprintf(&h, "[uretprobe/SSL_read{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
-					fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
-					fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
-					glog.Infof(h.String())
-				}
-			}
-
-			fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v, ", event.ChunkIdx)
-			fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-			fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v", key, event.TotalLen, event.ChunkLen)
-			glog.Info(line.String())
-
-		case TYPE_REPORT_READ_SOCKET_INFO:
-			glog.Infof("[TYPE_REPORT_READ_SOCKET_INFO] key=%v, src=%v:%v, dst=%v:%v",
-				key,
-				internal.IntToIp(event.Daddr), event.Dport,
-				internal.IntToIp(event.Saddr), event.Sport,
-			)
-
-		case TYPE_ANY:
-			glog.Infof("[TYPE_ANY] buf=%s", event.Buf)
-
+		select {
+		case eventSink <- event:
 		default:
+			dropped++
 		}
 	}
+
+	glog.Infof("%d events processed, %d events dropped", count, dropped)
 
 	wg.Wait()
 	done <- nil
