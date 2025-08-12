@@ -52,6 +52,8 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
     struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
     bpf_map_update_elem(&ssl_callstack, &cs_key, &w_ctx, BPF_ANY);
 
+    bpf_printk("do_uprobe_SSL_write: pid_tgid=%llu", pid_tgid);
+
     char *buf = (char *)PT_REGS_PARM2(ctx);
     int num = (int)PT_REGS_PARM3(ctx);
     int orig_num = num;

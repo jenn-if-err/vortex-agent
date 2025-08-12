@@ -1046,7 +1046,10 @@ func run(ctx context.Context, done chan error) {
 					glog.Info(line.String())
 
 				case TYPE_ANY:
-					glog.Infof("[TYPE_ANY] buf=%s", event.Buf)
+					fmt.Fprintf(&line, "[TYPE_ANY] key=%v, totalLen=%v, ", key, event.TotalLen)
+					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
+					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
+					glog.Info(line.String())
 
 				default:
 				}
