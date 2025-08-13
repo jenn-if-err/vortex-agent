@@ -17,7 +17,7 @@ spec:
       hostPID: true
       containers:
       - name: vortex-agent
-        image: asia.gcr.io/mobingi-main/vortex-agent:2f032154-771f-4cc2-9361-f0a29fde8245
+        image: asia.gcr.io/mobingi-main/vortex-agent:374f59e0-588b-4364-bcb3-62255df908c1
         imagePullPolicy: Always
         env:
         - name: MY_NODE_NAME
