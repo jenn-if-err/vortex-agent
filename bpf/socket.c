@@ -129,29 +129,8 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     BPF_CORE_READ_INTO(&cs_val->daddr, sk, __sk_common.skc_daddr);
     BPF_CORE_READ_INTO(&cs_val->dport, sk, __sk_common.skc_dport);
 
-    /* bpf_map_update_elem(&ssl_assoc_sock, &cs_key, cs_val, BPF_ANY); */
-
     bpf_printk("tcp_sendmsg_fexit: pid_tgid=%llu, src=%x:%u, dst=%x:%u", pid_tgid, cs_val->saddr, cs_val->sport,
                cs_val->daddr, bpf_ntohs(cs_val->dport));
-
-    /*
-    struct event *event;
-    event = rb_events_reserve_with_stats();
-    if (!event)
-        return 0;
-
-    set_proc_info(event);
-
-    if (should_trace_tgid(event->tgid) == VORTEX_NO_TRACE) {
-        bpf_ringbuf_discard(event, 0);
-        return 0;
-    }
-
-    event->type = TYPE_FEXIT_TCP_SENDMSG;
-    event->total_len = size;
-    set_send_recv_msg_sk_info(event, sk);
-    rb_events_submit_with_stats(event, 0);
-    */
 
     return BPF_OK;
 }
@@ -178,29 +157,8 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     BPF_CORE_READ_INTO(&cs_val->daddr, sk, __sk_common.skc_daddr);
     BPF_CORE_READ_INTO(&cs_val->dport, sk, __sk_common.skc_dport);
 
-    /* bpf_map_update_elem(&ssl_assoc_sock, &cs_key, cs_val, BPF_ANY); */
-
     bpf_printk("tcp_recvmsg_fexit: pid_tgid=%llu, src=%x:%u, dst=%x:%u", pid_tgid, cs_val->saddr, cs_val->sport,
                cs_val->daddr, bpf_ntohs(cs_val->dport));
-
-    /*
-    struct event *event;
-    event = rb_events_reserve_with_stats();
-    if (!event)
-        return BPF_OK;
-
-    set_proc_info(event);
-
-    if (should_trace_tgid(event->tgid) == VORTEX_NO_TRACE) {
-        bpf_ringbuf_discard(event, 0);
-        return BPF_OK;
-    }
-
-    event->type = TYPE_FEXIT_TCP_RECVMSG;
-    event->total_len = ret;
-    set_send_recv_msg_sk_info(event, sk);
-    rb_events_submit_with_stats(event, 0);
-    */
 
     return BPF_OK;
 }
@@ -384,14 +342,10 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
      * struct sock *sk = (struct sock *)ctx->skaddr;
      */
 
-    struct sock *sk = (struct sock *)ctx->skaddr;
-
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    bpf_printk("inet_sock_set_state: pid_tgid=%llu, old=%s, new=%s", pid_tgid, tcp_state_to_string(ctx->oldstate),
-               tcp_state_to_string(ctx->newstate));
-
-    bpf_printk("inet_sock_set_state: pid_tgid=%llu, src=%x:%u, dst=%x:%u, sk=%p", pid_tgid, *((__be32 *)ctx->saddr),
-               ctx->sport, *((__be32 *)ctx->daddr), ctx->dport, sk);
+    bpf_printk("inet_sock_set_state: pid_tgid=%llu, old=%s, new=%s, src=%x:%u, dst=%x:%u", pid_tgid,
+               tcp_state_to_string(ctx->oldstate), tcp_state_to_string(ctx->newstate), *((__be32 *)ctx->saddr),
+               ctx->sport, *((__be32 *)ctx->daddr), ctx->dport);
 
     return BPF_OK;
 }

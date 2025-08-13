@@ -108,16 +108,6 @@ struct {
     __type(value, struct ssl_callstack_v);
 } ssl_callstack SEC(".maps");
 
-/* Key for the ssl_assoc_sock map. */
-struct ssl_assoc_sock_key {
-    __u64 pid_tgid;
-    __u32 rw_flag; /* 0 = read, 1 = write */
-    __be32 saddr;
-    __be32 daddr;
-    __u16 sport;
-    __be16 dport;
-};
-
 /* Key for the fd_connect map. */
 struct fd_connect_k {
     __u64 pid_tgid;

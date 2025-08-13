@@ -121,10 +121,9 @@ static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
     event->daddr = cs_val->daddr;
     event->dport = bpf_ntohs(cs_val->dport);
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
-
     rb_events_submit_with_stats(event, 0);
-    bpf_map_delete_elem(&ssl_callstack, &cs_key);
 
+    bpf_map_delete_elem(&ssl_callstack, &cs_key);
     return BPF_OK;
 }
 
@@ -183,18 +182,18 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
         return BPF_OK;
     }
 
-    if (read <= 0)
+    if (read <= 0) {
+        bpf_map_delete_elem(&ssl_callstack, &cs_key);
         return BPF_OK;
+    }
 
     struct ssl_callstack_v *cs_val;
     cs_val = bpf_map_lookup_elem(&ssl_callstack, &cs_key);
     if (!cs_val)
         return BPF_OK;
 
-
     bpf_printk("do_uretprobe_SSL_read: pid_tgid=%llu", pid_tgid);
 
-    /* char *buf = (char *)*buf_ptr; */
     char *buf = (char *)cs_val->buf;
     int orig_len = read;
 
@@ -228,10 +227,9 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     event->daddr = cs_val->daddr;
     event->dport = bpf_ntohs(cs_val->dport);
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
-
     rb_events_submit_with_stats(event, 0);
-    bpf_map_delete_elem(&ssl_callstack, &cs_key);
 
+    bpf_map_delete_elem(&ssl_callstack, &cs_key);
     return BPF_OK;
 }
 
@@ -281,8 +279,10 @@ SEC("uretprobe/SSL_read_ex")
 int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     u64 *read = bpf_map_lookup_elem(&ssl_read_ex_p4, &pid_tgid);
-    if (!read)
+    if (!read) {
+        bpf_map_delete_elem(&ssl_read_ex_p4, &pid_tgid);
         return BPF_OK;
+    }
 
     size_t len = 0;
     bpf_probe_read_user(&len, sizeof(len), (void *)*read);
