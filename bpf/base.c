@@ -36,15 +36,15 @@ struct {
 
 /* Basic stats data. */
 struct events_stats_t {
-    u64 sent;
-    u64 lost;
+    __u64 sent;
+    __u64 lost;
 };
 
 /* Map for basic stats. */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1);
-    __type(key, u32);                     /* always 0 */
+    __type(key, __u32);                   /* always 0 */
     __type(value, struct events_stats_t); /* stats */
 } events_stats SEC(".maps");
 
@@ -67,7 +67,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
     __type(key, __u64);
-    __type(value, u64);
+    __type(value, __u64);
 } ssl_read_ex_p4 SEC(".maps");
 
 /*
@@ -113,7 +113,7 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1);
-    __type(key, u32);                   /* always 0 */
+    __type(key, __u32);                 /* always 0 */
     __type(value, char[TASK_COMM_LEN]); /* comm to trace */
 } trace_comm SEC(".maps");
 
@@ -121,13 +121,13 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
-    __type(key, u32);                   /* always 0 */
+    __type(key, __u32);                 /* always 0 */
     __type(value, char[TASK_COMM_LEN]); /* buffer for comm */
 } buf_comm SEC(".maps");
 
 /* Value for the fd_connect map. */
 struct fd_connect_v {
-    u32 fd;
+    __u32 fd;
     uintptr_t sk; /* instead of (struct sock *), which bpf2go doesn't support */
     __be32 saddr;
     __be32 daddr;
@@ -167,7 +167,7 @@ static __always_inline int should_trace_tgid(__u32 tgid) {
 /* Are we tracing this comm? */
 static __always_inline int should_trace_comm(int *all) {
     *all = COMM_NO_TRACE_ALL;
-    u32 key = 0;
+    __u32 key = 0;
     char *comm_tr = bpf_map_lookup_elem(&trace_comm, &key);
     if (!comm_tr) {
         *all = COMM_TRACE_ALL;
@@ -191,7 +191,7 @@ static __always_inline void *rb_events_reserve_with_stats() {
     if (rb)
         return rb;
 
-    u32 key = 0;
+    __u32 key = 0;
     struct events_stats_t *stats;
     stats = bpf_map_lookup_elem(&events_stats, &key);
     if (!stats) {
@@ -214,7 +214,7 @@ static __always_inline void *rb_events_reserve_with_stats() {
 static __always_inline void rb_events_submit_with_stats(void *event, __u64 flags) {
     bpf_ringbuf_submit(event, flags);
 
-    u32 key = 0;
+    __u32 key = 0;
     struct events_stats_t *stats;
     stats = bpf_map_lookup_elem(&events_stats, &key);
     if (!stats) {
