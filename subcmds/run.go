@@ -183,28 +183,6 @@ func run(ctx context.Context, done chan error) {
 		hostLinks = append(hostLinks, l)
 	}
 
-	l, err = link.AttachTracing(link.TracingOptions{
-		Program:    objs.UdpSendmsgFexit,
-		AttachType: ebpf.AttachTraceFExit,
-	})
-
-	if err != nil {
-		glog.Errorf("fexit/udp_sendmsg failed: %v", err)
-	} else {
-		hostLinks = append(hostLinks, l)
-	}
-
-	l, err = link.AttachTracing(link.TracingOptions{
-		Program:    objs.UdpRecvmsgFexit,
-		AttachType: ebpf.AttachTraceFExit,
-	})
-
-	if err != nil {
-		glog.Errorf("fexit/udp_recvmsg failed: %v", err)
-	} else {
-		hostLinks = append(hostLinks, l)
-	}
-
 	// kssm, err := link.Kprobe("sock_sendmsg", objs.SockSendmsgEntry, nil)
 	// if err != nil {
 	// 	slog.Error("kprobe/sock_sendmsg failed:", "err", err)

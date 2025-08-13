@@ -93,15 +93,11 @@ static int do_uretprobe_SSL_write(struct pt_regs *ctx, int written) {
         struct fd_connect_v *fdc_v;
         fdc_v = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
         if (fdc_v) {
-            u32 fd = fdc_v->fd;
             struct sock *sk = (struct sock *)fdc_v->sk;
             BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
             BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
             BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
             BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
-
-            bpf_printk("do_uretprobe_SSL_write: pid_tgid=%llu, written=%d, fd=%u, src=%x:%u, dst=%x:%u", pid_tgid,
-                       written, fd, saddr, sport, daddr, bpf_ntohs(dport));
         }
     }
 
@@ -222,15 +218,11 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
         struct fd_connect_v *fdc_v;
         fdc_v = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
         if (fdc_v) {
-            u32 fd = fdc_v->fd;
             struct sock *sk = (struct sock *)fdc_v->sk;
             BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
             BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
             BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
             BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
-
-            bpf_printk("do_uretprobe_SSL_read: pid_tgid=%llu, read=%d, fd=%u, src=%x:%u, dst=%x:%u", pid_tgid, read, fd,
-                       saddr, sport, daddr, bpf_ntohs(dport));
         }
     }
 

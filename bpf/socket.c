@@ -144,22 +144,21 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 }
 
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/udp.h#L271 */
+/*
 SEC("fexit/udp_sendmsg")
 int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, ret) {
-    return BPF_OK; /* NOTE: disable for now */
-
     int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
     return BPF_OK;
 }
+*/
 
 /* https://elixir.bootlin.com/linux/v6.1.146/source/net/ipv4/udp_impl.h#L20 */
+/*
 SEC("fexit/udp_recvmsg")
 int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
-    return BPF_OK; /* NOTE: disable for now */
-
     if (ret <= 0)
         return BPF_OK;
 
@@ -169,6 +168,7 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 
     return BPF_OK;
 }
+*/
 
 /*
  * /sys/kernel/tracing/events/syscalls/sys_enter_connect/format
@@ -255,7 +255,7 @@ const char *tcp_state_to_string(int state) {
 /*
  * /sys/kernel/tracing/events/sock/inet_sock_set_state/format
  *
- *   const void * skaddr;
+ *   const void *skaddr;
  *   int oldstate;
  *   int newstate;
  *   __u16 sport;
@@ -276,29 +276,22 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
     if (trace_all == COMM_TRACE_ALL)
         return BPF_OK;
 
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct sock *sk = (struct sock *)BPF_CORE_READ(ctx, skaddr);
     int oldstate = (int)BPF_CORE_READ(ctx, oldstate);
     int newstate = (int)BPF_CORE_READ(ctx, newstate);
-    __be32 saddr = 0, daddr = 0;
-    __u16 sport = 0;
-    __be16 dport = 0;
-    BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
-    BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
-    BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
-    BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
 
     struct fd_connect_v *fdc_v;
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
     fdc_v = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
     if (fdc_v)
-        if (oldstate == TCP_CLOSE && newstate == TCP_SYN_SENT)
+        if (fdc_v->fd > 2 && oldstate == TCP_CLOSE && newstate == TCP_SYN_SENT)
             fdc_v->sk = (uintptr_t)sk;
 
     if (oldstate == TCP_ESTABLISHED)
         bpf_map_delete_elem(&fd_connect, &pid_tgid);
 
-    bpf_printk("inet_sock_set_state: pid_tgid=%llu, old=%s, new=%s, src=%x:%u, dst=%x:%u", pid_tgid,
-               tcp_state_to_string(oldstate), tcp_state_to_string(newstate), saddr, sport, daddr, bpf_ntohs(dport));
+    bpf_printk("inet_sock_set_state: pid_tgid=%llu, old=%s, new=%s", pid_tgid, tcp_state_to_string(oldstate),
+               tcp_state_to_string(newstate));
 
     return BPF_OK;
 }
