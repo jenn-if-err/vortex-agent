@@ -23,9 +23,7 @@ static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct
     BPF_CORE_READ_INTO(&event->saddr, sock->sk, __sk_common.skc_rcv_saddr);
     BPF_CORE_READ_INTO(&event->sport, sock->sk, __sk_common.skc_num);
     BPF_CORE_READ_INTO(&event->daddr, sock->sk, __sk_common.skc_daddr);
-    __be16 dport = 0;
-    BPF_CORE_READ_INTO(&dport, sock->sk, __sk_common.skc_dport);
-    event->dport = bpf_htons(dport);
+    event->dport = bpf_htons(BPF_CORE_READ(sock->sk, __sk_common.skc_dport));
 
     return ret_val;
 }
@@ -286,6 +284,10 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
         return BPF_OK;
 
     if (trace_all == COMM_TRACE_ALL)
+        return BPF_OK;
+
+    __u16 family = (int)BPF_CORE_READ(ctx, family);
+    if (family != AF_INET)
         return BPF_OK;
 
     struct sock *sk = (struct sock *)BPF_CORE_READ(ctx, skaddr);
