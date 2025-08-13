@@ -396,44 +396,6 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
     return BPF_OK;
 }
 
-static __always_inline void assoc_rw_socket_info(__u64 pid_tgid, __u32 rw_flag, __u32 fd) {
-    struct fd_connect_k fdc_key = {.pid_tgid = pid_tgid, .fd = fd};
-    struct fd_connect_v *fdc_val;
-    fdc_val = bpf_map_lookup_elem(&fd_connect, &fdc_key);
-    if (!fdc_val)
-        return;
-
-    struct ssl_assoc_sock_key assoc_key = {
-        .pid_tgid = pid_tgid,
-        .rw_flag = rw_flag,
-        .saddr = 0,
-        .sport = 0,
-        .daddr = fdc_val->daddr,
-        .dport = fdc_val->dport,
-    };
-
-    char *ptr = bpf_map_lookup_elem(&ssl_assoc_sock, &assoc_key);
-    if (ptr)
-        return;
-
-    u8 one = 1;
-    bpf_map_update_elem(&ssl_assoc_sock, &assoc_key, &one, BPF_ANY);
-
-    /* Similar to assoc_SSL_rw_socket_info(). */
-    struct event *event;
-    event = rb_events_reserve_with_stats();
-    if (!event)
-        return;
-
-    event->type = rw_flag == F_WRITE ? TYPE_REPORT_WRITE_SOCKET_INFO : TYPE_REPORT_READ_SOCKET_INFO;
-    set_proc_info(event);
-    event->saddr = 0;
-    event->sport = 0;
-    event->daddr = fdc_val->daddr;
-    event->dport = bpf_htons(fdc_val->dport);
-    rb_events_submit_with_stats(event, 0);
-}
-
 /*
  * /sys/kernel/tracing/events/syscalls/sys_enter_write/format
  *

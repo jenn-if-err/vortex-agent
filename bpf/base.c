@@ -134,17 +134,6 @@ struct ssl_assoc_sock_key {
     __be16 dport;
 };
 
-/*
- * Check if a PID/TGID is already associated with a socket.
- * Prevents multiple ringbuf submissions for the same PID/TGID.
- */
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 1024);
-    __type(key, struct ssl_assoc_sock_key);
-    __type(value, u8); /* unused */
-} ssl_assoc_sock SEC(".maps");
-
 /* Key for the fd_connect map. */
 struct fd_connect_k {
     __u64 pid_tgid;
