@@ -183,6 +183,7 @@ static int do_uprobe_SSL_read(struct pt_regs *ctx) {
     cs_val.daddr = 0;
     cs_val.sport = 0;
     cs_val.dport = 0;
+
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
     bpf_map_update_elem(&ssl_callstack, &cs_key, &cs_val, BPF_ANY);
