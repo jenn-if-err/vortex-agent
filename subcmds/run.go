@@ -221,6 +221,13 @@ func run(ctx context.Context, done chan error) {
 		hostLinks = append(hostLinks, l)
 	}
 
+	l, err = link.Tracepoint("syscalls", "sys_exit_connect", objs.SysExitConnect, nil)
+	if err != nil {
+		glog.Errorf("tp/syscalls/sys_exit_connect failed: %v", err)
+	} else {
+		hostLinks = append(hostLinks, l)
+	}
+
 	l, err = link.Tracepoint("sock", "inet_sock_set_state", objs.InetSockSetState, nil)
 	if err != nil {
 		glog.Errorf("tp/sock/inet_sock_set_state failed: %v", err)
@@ -231,6 +238,13 @@ func run(ctx context.Context, done chan error) {
 	l, err = link.Tracepoint("syscalls", "sys_enter_write", objs.SysEnterWrite, nil)
 	if err != nil {
 		glog.Errorf("tp/syscalls/sys_enter_write failed: %v", err)
+	} else {
+		hostLinks = append(hostLinks, l)
+	}
+
+	l, err = link.Tracepoint("syscalls", "sys_exit_write", objs.SysExitWrite, nil)
+	if err != nil {
+		glog.Errorf("tp/syscalls/sys_exit_write failed: %v", err)
 	} else {
 		hostLinks = append(hostLinks, l)
 	}

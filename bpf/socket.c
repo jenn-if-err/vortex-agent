@@ -41,28 +41,18 @@ static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct
 /*
 SEC("fentry/sock_sendmsg")
 int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) {
-    struct event *e;
-    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e)
-        return 0;
+    int trace_all = COMM_NO_TRACE_ALL;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
+        return BPF_OK;
 
-    e->type = TYPE_FENTRY_SOCK_SENDMSG;
-    set_proc_info(e);
+    if (trace_all == COMM_TRACE_ALL)
+        return BPF_OK;
 
-    if (should_trace(e->tgid) == 0) {
-        bpf_ringbuf_discard(e, 0);
-        return 0;
-    }
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
 
-    int discard = set_sock_sendrecv_sk_info(e, sock, 1);
-    if (discard < 0) {
-        bpf_ringbuf_discard(e, 0);
-        return 0;
-    }
+    bpf_printk("sysfentry/sock_sendmsg: pid_tgid=%llu", pid_tgid);
 
-    bpf_ringbuf_submit(e, 0);
-
-    return 0;
+    return BPF_OK;
 }
 */
 
@@ -110,6 +100,18 @@ static __always_inline void set_send_recv_msg_sk_info(struct event *event, struc
     event->dport = bpf_htons(dport);
 }
 
+static __always_inline void set_SSL_callstack_socket_info(struct ssl_callstack_k *key, struct sock *sk) {
+    struct ssl_callstack_v *cs_val;
+    cs_val = bpf_map_lookup_elem(&ssl_callstack, key);
+    if (!cs_val)
+        return;
+
+    BPF_CORE_READ_INTO(&cs_val->saddr, sk, __sk_common.skc_rcv_saddr);
+    BPF_CORE_READ_INTO(&cs_val->sport, sk, __sk_common.skc_num);
+    BPF_CORE_READ_INTO(&cs_val->daddr, sk, __sk_common.skc_daddr);
+    BPF_CORE_READ_INTO(&cs_val->dport, sk, __sk_common.skc_dport);
+}
+
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332 */
 SEC("fexit/tcp_sendmsg")
 int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
@@ -118,19 +120,8 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    struct ssl_callstack_v *cs_val;
     struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
-    cs_val = bpf_map_lookup_elem(&ssl_callstack, &cs_key);
-    if (!cs_val)
-        return BPF_OK;
-
-    BPF_CORE_READ_INTO(&cs_val->saddr, sk, __sk_common.skc_rcv_saddr);
-    BPF_CORE_READ_INTO(&cs_val->sport, sk, __sk_common.skc_num);
-    BPF_CORE_READ_INTO(&cs_val->daddr, sk, __sk_common.skc_daddr);
-    BPF_CORE_READ_INTO(&cs_val->dport, sk, __sk_common.skc_dport);
-
-    bpf_printk("tcp_sendmsg_fexit: pid_tgid=%llu, src=%x:%u, dst=%x:%u", pid_tgid, cs_val->saddr, cs_val->sport,
-               cs_val->daddr, bpf_ntohs(cs_val->dport));
+    set_SSL_callstack_socket_info(&cs_key, sk);
 
     return BPF_OK;
 }
@@ -146,19 +137,8 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    struct ssl_callstack_v *cs_val;
     struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
-    cs_val = bpf_map_lookup_elem(&ssl_callstack, &cs_key);
-    if (!cs_val)
-        return BPF_OK;
-
-    BPF_CORE_READ_INTO(&cs_val->saddr, sk, __sk_common.skc_rcv_saddr);
-    BPF_CORE_READ_INTO(&cs_val->sport, sk, __sk_common.skc_num);
-    BPF_CORE_READ_INTO(&cs_val->daddr, sk, __sk_common.skc_daddr);
-    BPF_CORE_READ_INTO(&cs_val->dport, sk, __sk_common.skc_dport);
-
-    bpf_printk("tcp_recvmsg_fexit: pid_tgid=%llu, src=%x:%u, dst=%x:%u", pid_tgid, cs_val->saddr, cs_val->sport,
-               cs_val->daddr, bpf_ntohs(cs_val->dport));
+    set_SSL_callstack_socket_info(&cs_key, sk);
 
     return BPF_OK;
 }
@@ -171,25 +151,6 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
-
-    /*
-    struct event *event;
-    event = rb_events_reserve_with_stats();
-    if (!event)
-        return BPF_OK;
-
-    set_proc_info(event);
-
-    if (should_trace_tgid(event->tgid) == VORTEX_NO_TRACE) {
-        bpf_ringbuf_discard(event, 0);
-        return BPF_OK;
-    }
-
-    event->type = TYPE_FEXIT_UDP_SENDMSG;
-    event->total_len = len;
-    set_send_recv_msg_sk_info(event, sk);
-    rb_events_submit_with_stats(event, 0);
-    */
 
     return BPF_OK;
 }
@@ -205,25 +166,6 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     int trace_all = COMM_NO_TRACE_ALL;
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
-
-    /*
-    struct event *event;
-    event = rb_events_reserve_with_stats();
-    if (!event)
-        return BPF_OK;
-
-    event->type = TYPE_FEXIT_UDP_RECVMSG;
-    event->total_len = ret;
-    set_proc_info(event);
-
-    if (should_trace_tgid(event->tgid) == VORTEX_NO_TRACE) {
-        bpf_ringbuf_discard(event, 0);
-        return BPF_OK;
-    }
-
-    set_send_recv_msg_sk_info(event, sk);
-    rb_events_submit_with_stats(event, 0);
-    */
 
     return BPF_OK;
 }
@@ -245,8 +187,7 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    int fd = BPF_CORE_READ(ctx, args[0]);
-
+    int fd = ctx->args[0];
     void *usr_addr = (void *)ctx->args[1];
     int usr_addrlen = (int)ctx->args[2];
     if (usr_addrlen >= sizeof(struct sockaddr_in)) {
@@ -257,15 +198,15 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
         if (sa_in.sin_family != AF_INET)
             return BPF_OK;
 
-        struct fd_connect_k key = {.pid_tgid = pid_tgid, .fd = fd};
         struct fd_connect_v val = {
+            .fd = fd,
             .saddr = 0,
             .sport = 0,
             .daddr = sa_in.sin_addr.s_addr,
             .dport = sa_in.sin_port,
         };
 
-        bpf_map_update_elem(&fd_connect, &key, &val, BPF_ANY);
+        bpf_map_update_elem(&fd_connect, &pid_tgid, &val, BPF_ANY);
 
         bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d, dst=%x:%u", pid_tgid, fd, sa_in.sin_addr.s_addr,
                    bpf_ntohs(sa_in.sin_port));
@@ -276,6 +217,23 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
     if (usr_addrlen >= sizeof(struct sockaddr_in6)) {
         /* TODO: IPv6 */
     }
+
+    return BPF_OK;
+}
+
+SEC("tp/syscalls/sys_exit_connect")
+int sys_exit_connect(struct trace_event_raw_sys_exit *ctx) {
+    int trace_all = COMM_NO_TRACE_ALL;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
+        return BPF_OK;
+
+    if (trace_all == COMM_TRACE_ALL)
+        return BPF_OK;
+
+    /* __u64 pid_tgid = bpf_get_current_pid_tgid(); */
+    /* int ret = (int)BPF_CORE_READ(ctx, ret); */
+
+    /* bpf_printk("sys_exit_connect: pid_tgid=%llu, ret=%d", pid_tgid, ret); */
 
     return BPF_OK;
 }
@@ -336,16 +294,29 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
     if (trace_all == COMM_TRACE_ALL)
         return BPF_OK;
 
-    /*
-     * NOTE:
-     * We can use ctx->sock to get the sock pointer:
-     * struct sock *sk = (struct sock *)ctx->skaddr;
-     */
-
     __u64 pid_tgid = bpf_get_current_pid_tgid();
+    struct sock *sk = (struct sock *)BPF_CORE_READ(ctx, skaddr);
+    int oldstate = (int)BPF_CORE_READ(ctx, oldstate);
+    int newstate = (int)BPF_CORE_READ(ctx, newstate);
+    __be32 saddr = 0, daddr = 0;
+    __u16 sport = 0;
+    __be16 dport = 0;
+    BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
+    BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+    BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
+    BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
+
+    struct fd_connect_v *fdc_v;
+    fdc_v = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
+    if (fdc_v)
+        if (oldstate == TCP_CLOSE && newstate == TCP_SYN_SENT)
+            fdc_v->sk = (uintptr_t)sk;
+
+    if (oldstate == TCP_ESTABLISHED)
+        bpf_map_delete_elem(&fd_connect, &pid_tgid);
+
     bpf_printk("inet_sock_set_state: pid_tgid=%llu, old=%s, new=%s, src=%x:%u, dst=%x:%u", pid_tgid,
-               tcp_state_to_string(ctx->oldstate), tcp_state_to_string(ctx->newstate), *((__be32 *)ctx->saddr),
-               ctx->sport, *((__be32 *)ctx->daddr), ctx->dport);
+               tcp_state_to_string(oldstate), tcp_state_to_string(newstate), saddr, sport, daddr, bpf_ntohs(dport));
 
     return BPF_OK;
 }
@@ -367,8 +338,27 @@ int sys_enter_write(struct trace_event_raw_sys_enter *ctx) {
         return BPF_OK;
 
     /* __u64 pid_tgid = bpf_get_current_pid_tgid(); */
-    /* u32 fd = BPF_CORE_READ(ctx, args[0]); */
-    /* assoc_rw_socket_info(pid_tgid, F_WRITE, fd); */
+    /* u32 fd = (u32)BPF_CORE_READ(ctx, args[0]); */
+    /* int num = (int)BPF_CORE_READ(ctx, args[2]); */
+
+    /* bpf_printk("sys_enter_write: pid_tgid=%llu, fd=%u, num=%u", pid_tgid, fd, num); */
+
+    return BPF_OK;
+}
+
+SEC("tp/syscalls/sys_exit_write")
+int sys_exit_write(struct trace_event_raw_sys_exit *ctx) {
+    int trace_all = COMM_NO_TRACE_ALL;
+    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
+        return BPF_OK;
+
+    if (trace_all == COMM_TRACE_ALL)
+        return BPF_OK;
+
+    /* __u64 pid_tgid = bpf_get_current_pid_tgid(); */
+    /* int ret = (int)BPF_CORE_READ(ctx, ret); */
+
+    /* bpf_printk("sys_exit_write: pid_tgid=%llu, ret=%u", pid_tgid, ctx->ret); */
 
     return BPF_OK;
 }
@@ -390,8 +380,9 @@ int sys_enter_read(struct trace_event_raw_sys_enter *ctx) {
         return BPF_OK;
 
     /* __u64 pid_tgid = bpf_get_current_pid_tgid(); */
-    /* u32 fd = BPF_CORE_READ(ctx, args[0]); */
-    /* assoc_rw_socket_info(pid_tgid, F_READ, fd); */
+    /* u32 fd = (u32)BPF_CORE_READ(ctx, args[0]); */
+
+    /* bpf_printk("sys_enter_read: pid_tgid=%llu, fd=%u", pid_tgid, fd); */
 
     return BPF_OK;
 }
@@ -410,12 +401,10 @@ int sys_enter_close(struct trace_event_raw_sys_enter *ctx) {
     if (trace_all == COMM_TRACE_ALL)
         return BPF_OK;
 
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 fd = BPF_CORE_READ(ctx, args[0]);
-    struct fd_connect_k key = {.pid_tgid = pid_tgid, .fd = fd};
-    bpf_map_delete_elem(&fd_connect, &key);
+    /* __u64 pid_tgid = bpf_get_current_pid_tgid(); */
+    /* bpf_map_delete_elem(&fd_connect, &pid_tgid); */
 
-    /* bpf_printk("sys_enter_close: pid_tgid=%llu, fd=%u", pid_tgid, fd); */
+    /* bpf_printk("sys_enter_close: pid_tgid=%llu, fd=%u", pid_tgid, ctx->args[0]); */
 
     return BPF_OK;
 }

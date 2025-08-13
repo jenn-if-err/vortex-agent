@@ -59,16 +59,17 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
     cs_val.daddr = 0;
     cs_val.sport = 0;
     cs_val.dport = 0;
+
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
     bpf_map_update_elem(&ssl_callstack, &cs_key, &cs_val, BPF_ANY);
 
-    bpf_printk("do_uprobe_SSL_write: pid_tgid=%llu", pid_tgid);
+    /* bpf_printk("do_uprobe_SSL_write: pid_tgid=%llu, num=%d", pid_tgid, cs_val.len); */
 
     return BPF_OK;
 }
 
-static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
+static int do_uretprobe_SSL_write(struct pt_regs *ctx, int written) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
 
@@ -83,7 +84,26 @@ static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
     if (!cs_val)
         return BPF_OK;
 
-    bpf_printk("do_uretprobe_SSL_write: pid_tgid=%llu", pid_tgid);
+    __be32 saddr = cs_val->saddr;
+    __be32 daddr = cs_val->daddr;
+    __u16 sport = cs_val->sport;
+    __be16 dport = cs_val->dport;
+
+    if (daddr == 0 || dport == 0) {
+        struct fd_connect_v *fdc_v;
+        fdc_v = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
+        if (fdc_v) {
+            u32 fd = fdc_v->fd;
+            struct sock *sk = (struct sock *)fdc_v->sk;
+            BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
+            BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+            BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
+            BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
+
+            bpf_printk("do_uretprobe_SSL_write: pid_tgid=%llu, written=%d, fd=%u, src=%x:%u, dst=%x:%u", pid_tgid,
+                       written, fd, saddr, sport, daddr, bpf_ntohs(dport));
+        }
+    }
 
     char *buf = (char *)cs_val->buf;
     int num = cs_val->len;
@@ -94,10 +114,10 @@ static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
         .buf_ptr = &buf,
         .len = &num,
         .orig_len = &orig_num,
-        .saddr = cs_val->saddr,
-        .daddr = cs_val->daddr,
-        .sport = cs_val->sport,
-        .dport = cs_val->dport,
+        .saddr = saddr,
+        .daddr = daddr,
+        .sport = sport,
+        .dport = dport,
     };
 
     /* Is EVENT_BUF_LEN * 1000 enough? */
@@ -116,10 +136,10 @@ static int do_uretprobe_SSL_write(struct pt_regs *ctx) {
     event->total_len = orig_num;
     event->chunk_len = -1;
     event->chunk_idx = CHUNKED_END_IDX;
-    event->saddr = cs_val->saddr;
-    event->sport = cs_val->sport;
-    event->daddr = cs_val->daddr;
-    event->dport = bpf_ntohs(cs_val->dport);
+    event->saddr = saddr;
+    event->sport = sport;
+    event->daddr = daddr;
+    event->dport = bpf_ntohs(dport);
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
     rb_events_submit_with_stats(event, 0);
 
@@ -139,7 +159,7 @@ int uprobe_SSL_write(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); }
  * int SSL_write(SSL *s, const void *buf, int num);
  */
 SEC("uretprobe/SSL_write")
-int uretprobe_SSL_write(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx); }
+int uretprobe_SSL_write(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx, (int)PT_REGS_RC(ctx)); }
 
 /*
  * Synopsis:
@@ -153,7 +173,7 @@ int uprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); 
  * int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written);
  */
 SEC("uretprobe/SSL_write_ex")
-int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx); }
+int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx, (int)PT_REGS_PARM3(ctx)); }
 
 static int do_uprobe_SSL_read(struct pt_regs *ctx) {
     struct ssl_callstack_v cs_val;
@@ -167,7 +187,7 @@ static int do_uprobe_SSL_read(struct pt_regs *ctx) {
     struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
     bpf_map_update_elem(&ssl_callstack, &cs_key, &cs_val, BPF_ANY);
 
-    bpf_printk("do_uprobe_SSL_read: pid_tgid=%llu", pid_tgid);
+    /* bpf_printk("do_uprobe_SSL_read: pid_tgid=%llu", pid_tgid); */
 
     return BPF_OK;
 }
@@ -192,7 +212,26 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     if (!cs_val)
         return BPF_OK;
 
-    bpf_printk("do_uretprobe_SSL_read: pid_tgid=%llu", pid_tgid);
+    __be32 saddr = cs_val->saddr;
+    __be32 daddr = cs_val->daddr;
+    __u16 sport = cs_val->sport;
+    __be16 dport = cs_val->dport;
+
+    if (daddr == 0 || dport == 0) {
+        struct fd_connect_v *fdc_v;
+        fdc_v = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
+        if (fdc_v) {
+            u32 fd = fdc_v->fd;
+            struct sock *sk = (struct sock *)fdc_v->sk;
+            BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
+            BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+            BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
+            BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
+
+            bpf_printk("do_uretprobe_SSL_read: pid_tgid=%llu, read=%d, fd=%u, src=%x:%u, dst=%x:%u", pid_tgid, read, fd,
+                       saddr, sport, daddr, bpf_ntohs(dport));
+        }
+    }
 
     char *buf = (char *)cs_val->buf;
     int orig_len = read;
@@ -202,10 +241,10 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
         .buf_ptr = &buf,
         .len = &read,
         .orig_len = &orig_len,
-        .saddr = cs_val->saddr,
-        .daddr = cs_val->daddr,
-        .sport = cs_val->sport,
-        .dport = cs_val->dport,
+        .saddr = saddr,
+        .daddr = daddr,
+        .sport = sport,
+        .dport = dport,
     };
 
     /* Is EVENT_BUF_LEN * 1000 enough? */
@@ -222,10 +261,10 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     event->total_len = orig_len;
     event->chunk_len = -1;
     event->chunk_idx = CHUNKED_END_IDX;
-    event->saddr = cs_val->saddr;
-    event->sport = cs_val->sport;
-    event->daddr = cs_val->daddr;
-    event->dport = bpf_ntohs(cs_val->dport);
+    event->saddr = saddr;
+    event->sport = sport;
+    event->daddr = daddr;
+    event->dport = bpf_ntohs(dport);
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
     rb_events_submit_with_stats(event, 0);
 
@@ -279,10 +318,8 @@ SEC("uretprobe/SSL_read_ex")
 int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     u64 *read = bpf_map_lookup_elem(&ssl_read_ex_p4, &pid_tgid);
-    if (!read) {
-        bpf_map_delete_elem(&ssl_read_ex_p4, &pid_tgid);
+    if (!read)
         return BPF_OK;
-    }
 
     size_t len = 0;
     bpf_probe_read_user(&len, sizeof(len), (void *)*read);

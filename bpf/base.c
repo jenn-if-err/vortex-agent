@@ -108,20 +108,6 @@ struct {
     __type(value, struct ssl_callstack_v);
 } ssl_callstack SEC(".maps");
 
-/* Key for the fd_connect map. */
-struct fd_connect_k {
-    __u64 pid_tgid;
-    __u32 fd;
-};
-
-/* Value for the fd_connect map. */
-struct fd_connect_v {
-    __be32 saddr;
-    __be32 daddr;
-    __u16 sport;
-    __be16 dport;
-};
-
 /* Optional comm (single) to trace (when provided from userspace). */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -138,6 +124,16 @@ struct {
     __type(value, char[TASK_COMM_LEN]); /* buffer for comm */
 } buf_comm SEC(".maps");
 
+/* Value for the fd_connect map. */
+struct fd_connect_v {
+    u32 fd;
+    uintptr_t sk; /* instead of (struct sock *), which bpf2go doesn't support */
+    __be32 saddr;
+    __be32 daddr;
+    __u16 sport;
+    __be16 dport;
+};
+
 /*
  * Check if a PID/TGID's fd has called connect on socket.
  * Active on sys_enter_connect, removed on sys_enter_close.
@@ -145,7 +141,7 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1024);
-    __type(key, struct fd_connect_k);
+    __type(key, __u64);
     __type(value, struct fd_connect_v);
 } fd_connect SEC(".maps");
 
