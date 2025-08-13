@@ -212,7 +212,7 @@ func run(ctx context.Context, done chan error) {
 	// }
 
 	// defer kssm.Close()
-	// slog.Info("kprobe/sock_sendmsg attached")
+	// slog.LogInfo("kprobe/sock_sendmsg attached")
 
 	l, err = link.Tracepoint("syscalls", "sys_enter_connect", objs.SysEnterConnect, nil)
 	if err != nil {
@@ -282,7 +282,7 @@ func run(ctx context.Context, done chan error) {
 				return
 			}
 
-			internalglog.LogInfof("attaching u[ret]probes to [%s]", uf)
+			internalglog.LogInfof("attaching u[ret]probes to [%s]", true, uf)
 
 			l, err = ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
 			if err != nil {
@@ -586,7 +586,7 @@ func run(ctx context.Context, done chan error) {
 				}
 
 				fullCmdline := strings.Join(fargs, " ")
-				// glog.Infof("jailed: pid=%d, cmdline=%s", pid, strings.Join(fargs, " "))
+				// internalglog.LogInfof("jailed: pid=%d, cmdline=%s", pid, strings.Join(fargs, " "))
 
 				if strings.HasPrefix(fullCmdline, "/pause") {
 					continue // skip pause binaries
@@ -835,16 +835,47 @@ func run(ctx context.Context, done chan error) {
 		}
 	}()
 
-	// eventStateMtx := sync.Mutex{}
+	mutBuf := make([]*spanner.Mutation, 0)
+	mutBufCh := make(chan *spanner.Mutation, 2048)
+
+	// TODO: Should we do multiple goroutines here? temp: 1 for now.
+	spctx := internal.ChildCtx(ctx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for s := range mutBufCh {
+			mutBuf = append(mutBuf, s)
+			if len(mutBuf) >= 1_000 {
+				_, err := client.Apply(spctx, mutBuf)
+				if err != nil {
+					glog.Errorf("failed to apply mutation batch: %v", err)
+				} else {
+					internalglog.LogInfof("saved %d event(s) to db", true, len(mutBuf))
+				}
+				mutBuf = mutBuf[:0]
+			}
+		}
+		if len(mutBuf) > 0 {
+			lctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+			defer cancel()
+			_, err := client.Apply(lctx, mutBuf)
+			if err != nil {
+				glog.Errorf("failed to apply mutation batch: %v", err)
+			} else {
+				internalglog.LogInfof("leftovers: saved %d event(s) to db", true, len(mutBuf))
+			}
+		}
+	}()
 	eventState := make(map[string]*eventStateT)
 	eventSink := make(chan bpf.BpfEvent, 2048) // what size to use?
 
 	for i := range runtime.NumCPU() {
 		wg.Add(1)
 		go func(id int) {
-			defer wg.Done()
+			defer func() {
+				wg.Done()
+			}()
 			var line strings.Builder
-
 			// NOTE: All logs/prints here are for debugging purposes only.
 			// They need to be removed in production code as they have
 			// a significant performance impact.
@@ -981,12 +1012,15 @@ func run(ctx context.Context, done chan error) {
 
 					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") && params.RunfSaveDb {
 						cols := []string{"id", "idx", "comm", "content", "created_at"}
-						vals := []any{key, fmt.Sprintf("%v", event.ChunkIdx), fmt.Sprintf("%s", event.Comm), internal.Readable(event.Buf[:], max(event.ChunkLen, 0)), spanner.CommitTimestamp}
-						mut := spanner.InsertOrUpdate("llm_prompts", cols, vals)
-						_, err := client.Apply(ctx, []*spanner.Mutation{mut})
-						if err != nil {
-							glog.Errorf("client.Apply failed: %v", err)
+						vals := []any{
+							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
+							fmt.Sprintf("%v", event.ChunkIdx),
+							fmt.Sprintf("%s", event.Comm),
+							internal.Readable(event.Buf[:], max(event.ChunkLen, 0)),
+							spanner.CommitTimestamp,
 						}
+						mut := spanner.InsertOrUpdate("llm_prompts", cols, vals)
+						mutBufCh <- mut
 					}
 
 				case TYPE_REPORT_WRITE_SOCKET_INFO:
@@ -1071,6 +1105,7 @@ func run(ctx context.Context, done chan error) {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				internalglog.LogInfo("received signal, exiting...")
 				close(eventSink)
+				close(mutBufCh)
 				break
 			}
 
