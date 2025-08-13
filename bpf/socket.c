@@ -95,21 +95,19 @@ static __always_inline void set_send_recv_msg_sk_info(struct event *event, struc
     BPF_CORE_READ_INTO(&event->saddr, sk, __sk_common.skc_rcv_saddr);
     BPF_CORE_READ_INTO(&event->sport, sk, __sk_common.skc_num);
     BPF_CORE_READ_INTO(&event->daddr, sk, __sk_common.skc_daddr);
-    __be16 dport = 0;
-    BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
-    event->dport = bpf_htons(dport);
+    event->dport = bpf_htons(BPF_CORE_READ(sk, __sk_common.skc_dport));
 }
 
 static __always_inline void set_SSL_callstack_socket_info(struct ssl_callstack_k *key, struct sock *sk) {
-    struct ssl_callstack_v *cs_val;
-    cs_val = bpf_map_lookup_elem(&ssl_callstack, key);
-    if (!cs_val)
+    struct ssl_callstack_v *val;
+    val = bpf_map_lookup_elem(&ssl_callstack, key);
+    if (!val)
         return;
 
-    BPF_CORE_READ_INTO(&cs_val->saddr, sk, __sk_common.skc_rcv_saddr);
-    BPF_CORE_READ_INTO(&cs_val->sport, sk, __sk_common.skc_num);
-    BPF_CORE_READ_INTO(&cs_val->daddr, sk, __sk_common.skc_daddr);
-    BPF_CORE_READ_INTO(&cs_val->dport, sk, __sk_common.skc_dport);
+    BPF_CORE_READ_INTO(&val->saddr, sk, __sk_common.skc_rcv_saddr);
+    BPF_CORE_READ_INTO(&val->sport, sk, __sk_common.skc_num);
+    BPF_CORE_READ_INTO(&val->daddr, sk, __sk_common.skc_daddr);
+    BPF_CORE_READ_INTO(&val->dport, sk, __sk_common.skc_dport);
 }
 
 /* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332 */
@@ -120,8 +118,8 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
-    set_SSL_callstack_socket_info(&cs_key, sk);
+    struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
+    set_SSL_callstack_socket_info(&key, sk);
 
     return BPF_OK;
 }
@@ -137,8 +135,8 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    struct ssl_callstack_k cs_key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
-    set_SSL_callstack_socket_info(&cs_key, sk);
+    struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
+    set_SSL_callstack_socket_info(&key, sk);
 
     return BPF_OK;
 }
@@ -280,12 +278,12 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
     int oldstate = (int)BPF_CORE_READ(ctx, oldstate);
     int newstate = (int)BPF_CORE_READ(ctx, newstate);
 
-    struct fd_connect_v *fdc_v;
+    struct fd_connect_v *val;
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    fdc_v = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
-    if (fdc_v)
-        if (fdc_v->fd > 2 && oldstate == TCP_CLOSE && newstate == TCP_SYN_SENT)
-            fdc_v->sk = (uintptr_t)sk;
+    val = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
+    if (val)
+        if (val->fd > 2 && oldstate == TCP_CLOSE && newstate == TCP_SYN_SENT)
+            val->sk = (uintptr_t)sk;
 
     if (oldstate == TCP_ESTABLISHED)
         bpf_map_delete_elem(&fd_connect, &pid_tgid);
