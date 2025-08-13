@@ -8,4 +8,4 @@ RUN set -x && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -
 WORKDIR /app/
 COPY --from=0 /go/src/github.com/flowerinthenight/vortex-agent/vortex-agent .
 ENTRYPOINT ["/app/vortex-agent"]
-CMD ["-logtostderr"]
+CMD ["--logtostderr"]
