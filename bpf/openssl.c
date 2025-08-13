@@ -5,6 +5,22 @@
 #ifndef __BPF_VORTEX_OPENSSL_C
 #define __BPF_VORTEX_OPENSSL_C
 
+static __always_inline void set_fdc_sock(__u64 pid_tgid, __be32 *saddr, __be32 *daddr, __u16 *sport, __be16 *dport) {
+    struct fd_connect_v *val;
+    val = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
+    if (!val)
+        return;
+
+    struct sock *sk = (struct sock *)val->sk;
+    if (!sk)
+        return;
+
+    BPF_CORE_READ_INTO(saddr, sk, __sk_common.skc_rcv_saddr);
+    BPF_CORE_READ_INTO(sport, sk, __sk_common.skc_num);
+    BPF_CORE_READ_INTO(daddr, sk, __sk_common.skc_daddr);
+    BPF_CORE_READ_INTO(dport, sk, __sk_common.skc_dport);
+}
+
 struct loop_data {
     __u32 type;
     char **buf_ptr;
@@ -51,7 +67,7 @@ static int do_loop_send_SSL_payload(u64 index, struct loop_data *data) {
     return BPF_CONTINUE_LOOP;
 }
 
-static int do_uprobe_SSL_write(struct pt_regs *ctx) {
+static __always_inline int do_uprobe_SSL_write(struct pt_regs *ctx) {
     struct ssl_callstack_v val;
     val.buf = (uintptr_t)PT_REGS_PARM2(ctx);
     val.len = (int)PT_REGS_PARM3(ctx);
@@ -69,7 +85,7 @@ static int do_uprobe_SSL_write(struct pt_regs *ctx) {
     return BPF_OK;
 }
 
-static int do_uretprobe_SSL_write(struct pt_regs *ctx, int written) {
+static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int written) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
 
@@ -89,17 +105,8 @@ static int do_uretprobe_SSL_write(struct pt_regs *ctx, int written) {
     __u16 sport = val->sport;
     __be16 dport = val->dport;
 
-    if (daddr == 0 || dport == 0) {
-        struct fd_connect_v *fdc_val;
-        fdc_val = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
-        if (fdc_val) {
-            struct sock *sk = (struct sock *)fdc_val->sk;
-            BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
-            BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
-            BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
-            BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
-        }
-    }
+    if (daddr == 0 || dport == 0)
+        set_fdc_sock(pid_tgid, &saddr, &daddr, &sport, &dport);
 
     char *buf = (char *)val->buf;
     int num = val->len;
@@ -171,7 +178,7 @@ int uprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); 
 SEC("uretprobe/SSL_write_ex")
 int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx, (int)PT_REGS_PARM3(ctx)); }
 
-static int do_uprobe_SSL_read(struct pt_regs *ctx) {
+static __always_inline int do_uprobe_SSL_read(struct pt_regs *ctx) {
     struct ssl_callstack_v val;
     val.buf = (uintptr_t)PT_REGS_PARM2(ctx);
     val.len = (int)PT_REGS_PARM3(ctx);
@@ -189,7 +196,7 @@ static int do_uprobe_SSL_read(struct pt_regs *ctx) {
     return BPF_OK;
 }
 
-static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
+static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
 
@@ -214,17 +221,8 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     __u16 sport = val->sport;
     __be16 dport = val->dport;
 
-    if (daddr == 0 || dport == 0) {
-        struct fd_connect_v *fdc_val;
-        fdc_val = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
-        if (fdc_val) {
-            struct sock *sk = (struct sock *)fdc_val->sk;
-            BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
-            BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
-            BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
-            BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
-        }
-    }
+    if (daddr == 0 || dport == 0)
+        set_fdc_sock(pid_tgid, &saddr, &daddr, &sport, &dport);
 
     char *buf = (char *)val->buf;
     int orig_len = read;

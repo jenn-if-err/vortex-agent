@@ -16,7 +16,6 @@ static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct
 
     __u16 family = 0;
     BPF_CORE_READ_INTO(&family, sock->sk, __sk_common.skc_family);
-
     if (!(family == AF_INET || family == AF_INET6))
         ret_val = -1;
 
@@ -301,7 +300,7 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
         if (val->fd > 2 && oldstate == TCP_CLOSE && newstate == TCP_SYN_SENT)
             val->sk = (uintptr_t)sk;
 
-    if (oldstate == TCP_ESTABLISHED)
+    if (oldstate == TCP_ESTABLISHED && newstate != TCP_ESTABLISHED)
         bpf_map_delete_elem(&fd_connect, &pid_tgid);
 
     bpf_printk("inet_sock_set_state: pid_tgid=%llu, old=%s, new=%s", pid_tgid, tcp_state_to_string(oldstate),
