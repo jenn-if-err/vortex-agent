@@ -1,4 +1,4 @@
-FROM golang:1.24.5-bookworm
+FROM golang:1.24.6-bookworm
 COPY . /go/src/github.com/flowerinthenight/vortex-agent/
 WORKDIR /go/src/github.com/flowerinthenight/vortex-agent/
 RUN CGO_ENABLED=0 GOOS=linux go build -v -trimpath -installsuffix cgo -o vortex-agent .
