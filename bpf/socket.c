@@ -5,9 +5,8 @@
 #ifndef __BPF_VORTEX_SOCKET_C
 #define __BPF_VORTEX_SOCKET_C
 
-/*
 static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct socket *sock, long ret) {
-    event->bytes = ret;
+    event->total_len = ret;
     int ret_val = 0;
 
     __s16 sk_type = 0;
@@ -30,7 +29,6 @@ static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct
 
     return ret_val;
 }
-*/
 
 /*
  * fentry/fexit hooks can be found in:
@@ -87,10 +85,6 @@ int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, i
 }
 */
 
-/*
- * Set the socket information in the event structure for sendmsg/recvmsg.
- * This is used for both TCP and UDP send/recv messages.
- */
 static __always_inline void set_send_recv_msg_sk_info(struct event *event, struct sock *sk) {
     BPF_CORE_READ_INTO(&event->saddr, sk, __sk_common.skc_rcv_saddr);
     BPF_CORE_READ_INTO(&event->sport, sk, __sk_common.skc_num);
@@ -110,7 +104,12 @@ static __always_inline void set_SSL_callstack_socket_info(struct ssl_callstack_k
     BPF_CORE_READ_INTO(&val->dport, sk, __sk_common.skc_dport);
 }
 
-/* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332 */
+/*
+ * fentry/fexit hooks can be found in:
+ * /sys/kernel/tracing/available_filter_functions
+ *
+ * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L332
+ */
 SEC("fexit/tcp_sendmsg")
 int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
     int trace_all = COMM_NO_TRACE_ALL;
@@ -124,7 +123,12 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     return BPF_OK;
 }
 
-/* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L425 */
+/*
+ * fentry/fexit hooks can be found in:
+ * /sys/kernel/tracing/available_filter_functions
+ *
+ * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/tcp.h#L425
+ */
 SEC("fexit/tcp_recvmsg")
 int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
     if (ret <= 0)
@@ -141,7 +145,12 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
     return BPF_OK;
 }
 
-/* https://elixir.bootlin.com/linux/v6.1.146/source/include/net/udp.h#L271 */
+/*
+ * fentry/fexit hooks can be found in:
+ * /sys/kernel/tracing/available_filter_functions
+ *
+ * https://elixir.bootlin.com/linux/v6.1.146/source/include/net/udp.h#L271
+ */
 /*
 SEC("fexit/udp_sendmsg")
 int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, len, int, ret) {
@@ -153,7 +162,12 @@ int BPF_PROG2(udp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
 }
 */
 
-/* https://elixir.bootlin.com/linux/v6.1.146/source/net/ipv4/udp_impl.h#L20 */
+/*
+ * fentry/fexit hooks can be found in:
+ * /sys/kernel/tracing/available_filter_functions
+ *
+ * https://elixir.bootlin.com/linux/v6.1.146/source/net/ipv4/udp_impl.h#L20
+ */
 /*
 SEC("fexit/udp_recvmsg")
 int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
@@ -184,10 +198,9 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
     if (trace_all == COMM_TRACE_ALL)
         return BPF_OK;
 
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    int fd = ctx->args[0];
-    void *usr_addr = (void *)ctx->args[1];
-    int usr_addrlen = (int)ctx->args[2];
+    int fd = (int)BPF_CORE_READ(ctx, args[0]);
+    void *usr_addr = (void *)BPF_CORE_READ(ctx, args[1]);
+    int usr_addrlen = (int)BPF_CORE_READ(ctx, args[2]);
     if (usr_addrlen >= sizeof(struct sockaddr_in)) {
         struct sockaddr_in sa_in;
         if (bpf_probe_read_user(&sa_in, sizeof(sa_in), usr_addr) < 0)
@@ -204,6 +217,7 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
             .dport = sa_in.sin_port,
         };
 
+        __u64 pid_tgid = bpf_get_current_pid_tgid();
         bpf_map_update_elem(&fd_connect, &pid_tgid, &val, BPF_ANY);
 
         bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d, dst=%x:%u", pid_tgid, fd, sa_in.sin_addr.s_addr,
