@@ -71,6 +71,7 @@ struct {
 } ssl_read_ex_p4 SEC(".maps");
 
 /*
+ * NOTE:
  * The following struct defs are for associating SSL_writes and SSL_reads to
  * socket information. This makes it limited to apps that are "BIO-native",
  * or those that use their TLS/SSL libraries to handle the networking
