@@ -17,7 +17,7 @@ struct loop_data {
 };
 
 /* bpf_loop callback: send data to userspace in chunks of EVENT_BUF_LEN bytes. */
-static int do_SSL_loop(u64 index, struct loop_data *data) {
+static int do_loop_send_SSL_payload(u64 index, struct loop_data *data) {
     struct event *event;
     event = rb_events_reserve_with_stats();
     if (!event)
@@ -121,7 +121,7 @@ static int do_uretprobe_SSL_write(struct pt_regs *ctx, int written) {
     };
 
     /* Is EVENT_BUF_LEN * 1000 enough? */
-    bpf_loop(1000, do_SSL_loop, &data, 0);
+    bpf_loop(1000, do_loop_send_SSL_payload, &data, 0);
 
     /* Signal previous chunked stream's end. */
     struct event *event;
@@ -249,7 +249,7 @@ static int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     };
 
     /* Is EVENT_BUF_LEN * 1000 enough? */
-    bpf_loop(1000, do_SSL_loop, &data, 0);
+    bpf_loop(1000, do_loop_send_SSL_payload, &data, 0);
 
     /* Signal previous chunked stream's end. */
     struct event *event;
