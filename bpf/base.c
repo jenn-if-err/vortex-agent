@@ -59,22 +59,6 @@ struct {
     __type(value, __u8); /* unused */
 } tgids_to_trace SEC(".maps");
 
-/* Optional comm (single) to trace (when provided from userspace). */
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1);
-    __type(key, u32);                   /* always 0 */
-    __type(value, char[TASK_COMM_LEN]); /* comm to trace */
-} trace_comm SEC(".maps");
-
-/* should_trace_comm()'s buffer for getting comm instead of stack. */
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, u32);                   /* always 0 */
-    __type(value, char[TASK_COMM_LEN]); /* buffer for comm */
-} buf_comm SEC(".maps");
-
 /*
  * Map to store the read pointer for SSL_read_ex. The key is the PID/TGID,
  * and the value is a pointer to the "bytes written" value.
@@ -147,6 +131,22 @@ struct fd_connect_v {
     __u16 sport;
     __be16 dport;
 };
+
+/* Optional comm (single) to trace (when provided from userspace). */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1);
+    __type(key, u32);                   /* always 0 */
+    __type(value, char[TASK_COMM_LEN]); /* comm to trace */
+} trace_comm SEC(".maps");
+
+/* should_trace_comm()'s buffer for getting comm instead of stack. */
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);                   /* always 0 */
+    __type(value, char[TASK_COMM_LEN]); /* buffer for comm */
+} buf_comm SEC(".maps");
 
 /*
  * Check if a PID/TGID's fd has called connect on socket.
