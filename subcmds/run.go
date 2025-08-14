@@ -26,6 +26,7 @@ import (
 	"github.com/flowerinthenight/vortex-agent/bpf"
 	"github.com/flowerinthenight/vortex-agent/internal"
 	internalglog "github.com/flowerinthenight/vortex-agent/internal/glog"
+	"github.com/flowerinthenight/vortex-agent/internal/reassemble"
 	"github.com/flowerinthenight/vortex-agent/params"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
@@ -920,6 +921,17 @@ func run(ctx context.Context, done chan error) {
 
 				case TYPE_URETPROBE_SSL_WRITE:
 					if event.ChunkIdx == CHUNK_END_IDX {
+						if params.RunfSaveDb {
+							go func(id string) {
+								time.Sleep(2 * time.Second) // wait for the last chunk to be processed, to be adjusted
+								reassembled, err := reassemble.ReassemblePrompt(context.Background(), client, fmt.Sprintf("%v/%v", event.Tgid, event.Pid))
+								if err != nil {
+									fmt.Printf("reassembly failed for id %s: %v\n", id, err)
+									return
+								}
+								fmt.Printf("\n[REASSEMBLED PROMPT for id=%s]:\n%s\n", id, reassembled)
+							}(fmt.Sprintf("%v/%v", event.Tgid, event.Pid))
+						}
 						continue
 					}
 
