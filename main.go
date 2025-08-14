@@ -35,6 +35,7 @@ func init() {
 	rootCmd.AddCommand(
 		subcmds.RunCmd(),
 		subcmds.TestCmd(),
+		subcmds.ReassembleCmd(),
 	)
 
 	// For cobra + glog flags.
