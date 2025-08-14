@@ -270,9 +270,6 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
 /*
  * Synopsis:
  * int SSL_read(SSL *s, void *buf, int num);
- *
- * Store the pointer of the user buffer in a map,
- * so that we can retrieve it in its uretprobe pair.
  */
 SEC("uprobe/SSL_read")
 int uprobe_SSL_read(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
@@ -280,9 +277,6 @@ int uprobe_SSL_read(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
 /*
  * Synopsis:
  * int SSL_read(SSL *s, void *buf, int num);
- *
- * Retrieve the user buffer pointer from our map, read the data, and send to
- * our ring buffer (userspace).
  */
 SEC("uretprobe/SSL_read")
 int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx, (int)PT_REGS_RC(ctx)); }
@@ -290,9 +284,6 @@ int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx, 
 /*
  * Synopsis:
  * int SSL_read_ex(SSL *s, void *buf, size_t num, size_t *read);
- *
- * Store the pointer of the user buffer in a map so that we can
- * retrieve it in its uretprobe pair.
  */
 SEC("uprobe/SSL_read_ex")
 int uprobe_SSL_read_ex(struct pt_regs *ctx) {
@@ -305,9 +296,6 @@ int uprobe_SSL_read_ex(struct pt_regs *ctx) {
 /*
  * Synopsis:
  * int SSL_read_ex(SSL *s, void *buf, size_t num, size_t *read);
- *
- * Retrieve the user buffer pointer from our map, read the data,
- * and send to our ring buffer (userspace).
  */
 SEC("uretprobe/SSL_read_ex")
 int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
