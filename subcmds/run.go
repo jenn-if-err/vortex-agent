@@ -634,37 +634,37 @@ func run(ctx context.Context, done chan error) {
 						// Uprobe SSl_read
 						l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
 						if err != nil {
-							glog.Errorf("uprobe/SSL_read (%v) failed: %v", libsslPath, err)
+							glog.Errorf("uprobe/SSL_read (%v) failed: %v", lib, err)
 						} else {
 							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uprobe/SSL_read attached for %v", libsslPath)
+							internalglog.LogInfof("uprobe/SSL_read attached for %v", lib)
 						}
 
 						// Uprobe SSL_read_ex
 						l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
 						if err != nil {
-							glog.Errorf("uprobe/SSL_read (%v) failed: %v", libsslPath, err)
+							glog.Errorf("uprobe/SSL_read (%v) failed: %v", lib, err)
 						} else {
 							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uprobe/SSL_read_ex attached for %v", libsslPath)
+							internalglog.LogInfof("uprobe/SSL_read_ex attached for %v", lib)
 						}
 
 						// Uretprobe SSL_read
 						l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
 						if err != nil {
-							glog.Errorf("uretprobe/SSL_read (%v) failed: %v", libsslPath, err)
+							glog.Errorf("uretprobe/SSL_read (%v) failed: %v", lib, err)
 						} else {
 							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uretprobe/SSL_read attached for %v", libsslPath)
+							internalglog.LogInfof("uretprobe/SSL_read attached for %v", lib)
 						}
 
 						// Uretprobe SSL_read_ex
 						l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
 						if err != nil {
-							glog.Errorf("uretprobe/SSL_read_ex (%v) failed: %v", libsslPath, err)
+							glog.Errorf("uretprobe/SSL_read_ex (%v) failed: %v", lib, err)
 						} else {
 							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uretprobe/SSL_read_ex attached for %v", libsslPath)
+							internalglog.LogInfof("uretprobe/SSL_read_ex attached for %v", lib)
 						}
 					}
 				}()
