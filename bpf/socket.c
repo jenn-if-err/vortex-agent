@@ -192,9 +192,6 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
-    if (trace_all == COMM_TRACE_ALL)
-        return BPF_OK;
-
     int fd = (int)BPF_CORE_READ(ctx, args[0]);
     void *usr_addr = (void *)BPF_CORE_READ(ctx, args[1]);
     int usr_addrlen = (int)BPF_CORE_READ(ctx, args[2]);
@@ -216,9 +213,6 @@ int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
 
         __u64 pid_tgid = bpf_get_current_pid_tgid();
         bpf_map_update_elem(&fd_connect, &pid_tgid, &val, BPF_ANY);
-
-        bpf_printk("sys_enter_connect: pid_tgid=%llu, fd=%d, dst=%x:%u", pid_tgid, fd, sa_in.sin_addr.s_addr,
-                   bpf_ntohs(sa_in.sin_port));
 
         return BPF_OK;
     }
@@ -282,9 +276,6 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
     if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
-    if (trace_all == COMM_TRACE_ALL)
-        return BPF_OK;
-
     __u16 family = (int)BPF_CORE_READ(ctx, family);
     if (family != AF_INET)
         return BPF_OK;
@@ -302,9 +293,6 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
 
     if (oldstate == TCP_ESTABLISHED && newstate != TCP_ESTABLISHED)
         bpf_map_delete_elem(&fd_connect, &pid_tgid);
-
-    bpf_printk("inet_sock_set_state: pid_tgid=%llu, old=%s, new=%s", pid_tgid, tcp_state_to_string(oldstate),
-               tcp_state_to_string(newstate));
 
     return BPF_OK;
 }
