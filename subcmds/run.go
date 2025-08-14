@@ -29,6 +29,7 @@ import (
 	"github.com/flowerinthenight/vortex-agent/params"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
+	"google.golang.org/api/iterator"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -923,7 +924,7 @@ func run(ctx context.Context, done chan error) {
 						if params.RunfSaveDb {
 							go func(id string) {
 								time.Sleep(2 * time.Second) // wait for the last chunk to be processed, to be adjusted
-								reassembled, err := reassemble.ReassemblePrompt(context.Background(), client, fmt.Sprintf("%v/%v", event.Tgid, event.Pid))
+								reassembled, err := ReassemblePrompt(context.Background(), client, fmt.Sprintf("%v/%v", event.Tgid, event.Pid))
 								if err != nil {
 									fmt.Printf("reassembly failed for id %s: %v\n", id, err)
 									return
