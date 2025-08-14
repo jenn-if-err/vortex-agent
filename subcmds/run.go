@@ -930,6 +930,14 @@ func run(ctx context.Context, done chan error) {
 									return
 								}
 								fmt.Printf("\n[REASSEMBLED PROMPT for id=%s]:\n%s\n", id, reassembled)
+								// Save to assembled.txt
+								f, ferr := os.OpenFile("assembled.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+								if ferr == nil {
+									defer f.Close()
+									f.WriteString("[REASSEMBLED PROMPT for id=" + id + "]:\n" + reassembled + "\n\n")
+								} else {
+									fmt.Printf("failed to write to assembled.txt: %v\n", ferr)
+								} //temporary, cant see logs
 							}(fmt.Sprintf("%v/%v", event.Tgid, event.Pid))
 						}
 						continue
