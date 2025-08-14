@@ -21,9 +21,8 @@ struct {
 
 SEC("sockops")
 int bpf_sockops_handler(struct bpf_sock_ops *sk_ops) {
-    if (sk_ops->family != AF_INET || sk_ops->op != BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB) {
+    if (sk_ops->family != AF_INET || sk_ops->op != BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB)
         return BPF_OK;
-    }
 
     struct sock_key key = {
         .sip4 = sk_ops->local_ip4,
@@ -32,21 +31,19 @@ int bpf_sockops_handler(struct bpf_sock_ops *sk_ops) {
         .dport = bpf_ntohl(sk_ops->remote_port),
     };
 
-    bpf_printk("sockops: established connection %pI4:%u -> %pI4:%u", &key.sip4, key.sport, &key.dip4, key.dport);
+    bpf_printk("bpf_sockops_handler: established connection %pI4:%u -> %pI4:%u", &key.sip4, key.sport, &key.dip4,
+               key.dport);
 
-    // The last argument to bpf_sock_hash_update is a flag (e.g., BPF_NOEXIST).
-    // The value (the socket) is added implicitly from the sk_ops context.
     int ret = bpf_sock_hash_update(sk_ops, &sock_map, &key, BPF_NOEXIST);
-    if (ret != 0) {
-        bpf_printk("sockops: failed to update sock_hash: %d", ret);
-    }
+    if (ret != 0)
+        bpf_printk("bpf_sockops_handler: failed to update sock_map: %d", ret);
 
     return BPF_OK;
 }
 
 SEC("sk_msg")
 int bpf_sk_msg_handler(struct sk_msg_md *msg) {
-    bpf_printk("sk_msg: Intercepted a message of size %d on a monitored socket!", msg->size);
+    bpf_printk("bpf_sk_msg_handler: message of size %d intercepted on a monitored socket", msg->size);
     return SK_PASS;
 }
 
