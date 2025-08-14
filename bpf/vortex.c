@@ -4,5 +4,6 @@
 #include "base.c"
 #include "openssl.c"
 #include "socket.c"
+#include "sk.c"
 
 char __license[] SEC("license") = "Dual MIT/GPL";
