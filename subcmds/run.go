@@ -1,3 +1,5 @@
+//go:build linux
+
 package subcmds
 
 import (
@@ -562,64 +564,108 @@ func run(ctx context.Context, done chan error) {
 				// ---------------------------------------------
 				// TODO: fn is adding to list outside of goroutine!
 				func() {
-					if true {
-						return // TODO: test only; remove later
-					}
-
+					var libs []string
 					rootPath := fmt.Sprintf("/proc/%d/root", pid)
-					libsslPath, err := internal.FindLibSSL(rootPath)
-					if err != nil {
+					libsslPath, _ := internal.FindLibSSL(rootPath)
+					if libsslPath != "" {
+						libs = append(libs, libsslPath)
+					}
+
+					nodeBinPath, _ := internal.FindNodeBin(rootPath)
+					if nodeBinPath != "" {
+						libs = append(libs, nodeBinPath)
+					}
+
+					if len(libs) == 0 {
+						glog.Errorf("no libraries found for pid %d", pid)
 						return
 					}
 
-					if libsslPath == "" {
-						return
-					}
+					for _, lib := range libs {
+						if _, ok := sslAttached[lib]; ok {
+							continue
+						}
 
-					if _, ok := sslAttached[rootPath]; ok {
-						return // already attached
-					}
+						sslAttached[lib] = true // mark as attached
 
-					sslAttached[rootPath] = true // mark as attached
+						internalglog.LogInfof("found lib/bin at: %s", lib)
+						ex, err := link.OpenExecutable(lib)
+						if err != nil {
+							glog.Errorf("OpenExecutable failed: %v", err)
+							continue
+						}
 
-					internalglog.LogInfof("found libssl at: %s", libsslPath)
-					ex, err := link.OpenExecutable(libsslPath)
-					if err != nil {
-						glog.Errorf("OpenExecutable failed: %v", err)
-						return
-					}
+						// Uprobe SSL_write
+						l, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
+						if err != nil {
+							glog.Errorf("uprobe/SSL_write (%v) failed: %v", lib, err)
+						} else {
+							cgroupLinks = append(cgroupLinks, l)
+							internalglog.LogInfof("uprobe/SSL_write attached for %v", lib)
+						}
 
-					l, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
-					if err != nil {
-						glog.Errorf("uprobe/SSL_write (%v) failed: %v", libsslPath, err)
-					} else {
-						cgroupLinks = append(cgroupLinks, l)
-						internalglog.LogInfof("uprobe/SSL_write attached for %v", libsslPath)
-					}
+						// Uprobe SSL_write_ex
+						l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
+						if err != nil {
+							glog.Errorf("uprobe/SSL_write_ex (%v) failed: %v", lib, err)
+						} else {
+							cgroupLinks = append(cgroupLinks, l)
+							internalglog.LogInfof("uprobe/SSL_write_ex attached for %v", lib)
+						}
 
-					// urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
-					// if err != nil {
-					// 	glog.Errorf("uretprobe/SSL_write (%v) failed: %v", libsslPath, err)
-					// 	return
-					// }
+						// Uretprobe SSL_write
+						l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+						if err != nil {
+							glog.Errorf("uretprobe/SSL_write (%v) failed: %v", lib, err)
+						} else {
+							cgroupLinks = append(cgroupLinks, l)
+							internalglog.LogInfof("uretprobe/SSL_write attached for %v", lib)
+						}
 
-					// linksToClose = append(linksToClose, urpSSLWrite)
-					// internalglog.LogInfof("uretprobe/SSL_write attached for %v", libsslPath)
+						// Uretprobe SSL_write_ex
+						l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
+						if err != nil {
+							glog.Errorf("uretprobe/SSL_write_ex (%v) failed: %v", lib, err)
+						} else {
+							cgroupLinks = append(cgroupLinks, l)
+							internalglog.LogInfof("uretprobe/SSL_write_ex attached for %v", lib)
+						}
 
-					l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
-					if err != nil {
-						glog.Errorf("uprobe/SSL_read (%v) failed: %v", libsslPath, err)
-					} else {
-						cgroupLinks = append(cgroupLinks, l)
-						internalglog.LogInfof("uprobe/SSL_read attached for %v", libsslPath)
-					}
+						// Uprobe SSl_read
+						l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+						if err != nil {
+							glog.Errorf("uprobe/SSL_read (%v) failed: %v", lib, err)
+						} else {
+							cgroupLinks = append(cgroupLinks, l)
+							internalglog.LogInfof("uprobe/SSL_read attached for %v", lib)
+						}
 
-					l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
-					if err != nil {
-						glog.Errorf("uretprobe/SSL_read (%v) failed: %v", libsslPath, err)
-					} else {
-						cgroupLinks = append(cgroupLinks, l)
-						internalglog.LogInfof("uretprobe/SSL_read attached for %v", libsslPath)
+						// Uprobe SSL_read_ex
+						l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
+						if err != nil {
+							glog.Errorf("uprobe/SSL_read (%v) failed: %v", lib, err)
+						} else {
+							cgroupLinks = append(cgroupLinks, l)
+							internalglog.LogInfof("uprobe/SSL_read_ex attached for %v", lib)
+						}
+
+						// Uretprobe SSL_read
+						l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
+						if err != nil {
+							glog.Errorf("uretprobe/SSL_read (%v) failed: %v", lib, err)
+						} else {
+							cgroupLinks = append(cgroupLinks, l)
+							internalglog.LogInfof("uretprobe/SSL_read attached for %v", lib)
+						}
+
+						// Uretprobe SSL_read_ex
+						l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
+						if err != nil {
+							glog.Errorf("uretprobe/SSL_read_ex (%v) failed: %v", lib, err)
+						} else {
+							cgroupLinks = append(cgroupLinks, l)
+							internalglog.LogInfof("uretprobe/SSL_read_ex attached for %v", lib)
+						}
 					}
 				}()
 				// ---------------------------------------------
