@@ -209,7 +209,7 @@ func run(ctx context.Context, done chan error) {
 		hostLinks = append(hostLinks, l)
 	}
 
-	// NOTE: TEST ONLY: TO BE REMOVED LATER.
+	// NOTE: TEST ONLY: TO BE REMOVED LATER (start).
 	cgroupPath := "/sys/fs/cgroup/"
 	sockMapPath := "/sys/fs/bpf/sk_msg_sock_map"
 
@@ -258,6 +258,7 @@ func run(ctx context.Context, done chan error) {
 	} else {
 		glog.Infof("sk_msg program attached to %v", sockMapPath)
 	}
+	// NOTE: TEST ONLY: TO BE REMOVED LATER (end).
 
 	var client *spanner.Client
 	if params.RunfSaveDb {
