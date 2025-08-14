@@ -67,6 +67,7 @@ static int do_loop_send_SSL_payload(u64 index, struct loop_data *data) {
     return BPF_CONTINUE_LOOP;
 }
 
+/* Shared with uprobe/SSL_write and uprobe/SSL_write_ex. */
 static __always_inline int do_uprobe_SSL_write(struct pt_regs *ctx) {
     struct ssl_callstack_v val;
     val.buf = (uintptr_t)PT_REGS_PARM2(ctx);
@@ -85,6 +86,7 @@ static __always_inline int do_uprobe_SSL_write(struct pt_regs *ctx) {
     return BPF_OK;
 }
 
+/* Shared with uretprobe/SSL_write and uretprobe/SSL_write_ex. */
 static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int written) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
@@ -178,6 +180,7 @@ int uprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); 
 SEC("uretprobe/SSL_write_ex")
 int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx, (int)PT_REGS_PARM3(ctx)); }
 
+/* Shared with uprobe/SSL_read and uprobe/SSL_read_ex. */
 static __always_inline int do_uprobe_SSL_read(struct pt_regs *ctx) {
     struct ssl_callstack_v val;
     val.buf = (uintptr_t)PT_REGS_PARM2(ctx);
@@ -196,6 +199,7 @@ static __always_inline int do_uprobe_SSL_read(struct pt_regs *ctx) {
     return BPF_OK;
 }
 
+/* Shared with uretprobe/SSL_read and uretprobe/SSL_read_ex. */
 static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
