@@ -9,6 +9,7 @@ import (
 	"cloud.google.com/go/spanner"
 	"github.com/flowerinthenight/vortex-agent/internal"
 	"github.com/spf13/cobra"
+	"google.golang.org/api/iterator"
 )
 
 func ReassembleCmd() *cobra.Command {
@@ -44,7 +45,7 @@ func ReassembleCmd() *cobra.Command {
 			for {
 				row, err := iter.Next()
 				if err != nil {
-					if err.Error() == "iterator done" || strings.Contains(err.Error(), "StopIteration") {
+					if err == iterator.Done {
 						break
 					}
 					fmt.Printf("Query error: %v\n", err)
