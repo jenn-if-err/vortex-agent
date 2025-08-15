@@ -21,7 +21,6 @@ import (
 	"syscall"
 	"time"
 
-	"cloud.google.com/go/spanner"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -259,17 +258,6 @@ func run(ctx context.Context, done chan error) {
 		glog.Infof("sk_msg program attached to %v", sockMapPath)
 	}
 	// NOTE: TEST ONLY: TO BE REMOVED LATER (end).
-
-	var client *spanner.Client
-	if params.RunfSaveDb {
-		// Spanner client creation
-		client, err = internal.NewSpannerClient(ctx, "projects/alphaus-dashboard/instances/vortex-main/databases/main")
-		if err != nil {
-			glog.Errorf("Failed to create Spanner client: %v", err)
-			return
-		}
-		defer client.Close()
-	}
 
 	isk8s := internal.IsK8s()
 	uprobeFiles := strings.Split(params.RunfUprobes, ",")
@@ -766,20 +754,18 @@ func run(ctx context.Context, done chan error) {
 		}
 	}()
 
-	mutBuf := make([]*spanner.Mutation, 0)
-	mutBufCh := make(chan *spanner.Mutation, 2048)
-
+	mutBuf := make([]internal.SpannerPayload, 0)
+	mutBufCh := make(chan internal.SpannerPayload, 2048)
 	// TODO: Should we do multiple goroutines here? temp: 1 for now.
-	spctx := internal.ChildCtx(ctx)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for s := range mutBufCh {
 			mutBuf = append(mutBuf, s)
 			if len(mutBuf) >= 1_000 {
-				_, err := client.Apply(spctx, mutBuf)
+				err = internal.Send("", mutBuf)
 				if err != nil {
-					glog.Errorf("failed to apply mutation batch: %v", err)
+					glog.Errorf("failed to send vortex spanner request: %v", err)
 				} else {
 					internalglog.LogInfof("saved %d event(s) to db", true, len(mutBuf))
 				}
@@ -787,13 +773,11 @@ func run(ctx context.Context, done chan error) {
 			}
 		}
 		if len(mutBuf) > 0 {
-			lctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-			defer cancel()
-			_, err := client.Apply(lctx, mutBuf)
+			err = internal.Send("", mutBuf)
 			if err != nil {
-				glog.Errorf("failed to apply mutation batch: %v", err)
+				glog.Errorf("failed to send vortex spanner request: %v", err)
 			} else {
-				internalglog.LogInfof("leftovers: saved %d event(s) to db", true, len(mutBuf))
+				internalglog.LogInfof("lefts: saved %d event(s) to db", true, len(mutBuf))
 			}
 		}
 	}()
@@ -941,16 +925,20 @@ func run(ctx context.Context, done chan error) {
 					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
 					internalglog.LogInfo(line.String())
 
-					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") && params.RunfSaveDb {
+					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Buf[:]), "python")) && params.RunfSaveDb {
 						cols := []string{"id", "idx", "comm", "content", "created_at"}
 						vals := []any{
 							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
 							fmt.Sprintf("%v", event.ChunkIdx),
 							fmt.Sprintf("%s", event.Comm),
 							internal.Readable(event.Buf[:], max(event.ChunkLen, 0)),
-							spanner.CommitTimestamp,
+							"COMMIT_TIMESTAMP",
 						}
-						mut := spanner.InsertOrUpdate("llm_prompts", cols, vals)
+						mut := internal.SpannerPayload{
+							Table: "llm_prompts",
+							Cols:  cols,
+							Vals:  vals,
+						}
 						mutBufCh <- mut
 					}
 
