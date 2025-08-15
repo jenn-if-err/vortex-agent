@@ -1130,7 +1130,7 @@ func AssemblePrompt(ctx context.Context, client *spanner.Client, id string) (str
 
 func AssembleSession(ctx context.Context, client *spanner.Client, id string, resultCh chan<- string, errCh chan<- error) {
 	stmt := spanner.Statement{
-		SQL:    `SELECT idx, content FROM llm_prompts WHERE id=@id ORDER BY idx ASC`,
+		SQL:    `SELECT idx, content FROM llm_prompts WHERE id=@id ORDER BY CAST(idx AS INT64) ASC`,
 		Params: map[string]interface{}{"id": id},
 	}
 	iter := client.Single().Query(ctx, stmt)
