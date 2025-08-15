@@ -32,6 +32,7 @@ import (
 	"github.com/flowerinthenight/vortex-agent/params"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -210,53 +211,68 @@ func run(ctx context.Context, done chan error) {
 	}
 
 	// NOTE: TEST ONLY: TO BE REMOVED LATER (start).
-	cgroupPath := "/sys/fs/cgroup/"
-	sockMapPath := "/sys/fs/bpf/sk_msg_sock_map"
-
-	// Pinning the map is necessary for the sk_msg program to find it.
-	// We must remove any previous pin first.
-	os.Remove(sockMapPath)
-	if err := os.MkdirAll(filepath.Dir(sockMapPath), 0755); err != nil {
-		glog.Errorf("MkdirAll (%v) failed: %v", sockMapPath, err)
-		return
-	}
-
-	// Pin the sock_hash map to the BPF filesystem. This is how the sock_ops and sk_msg
-	// programs will share the map.
-	if err := objs.SockMap.Pin(sockMapPath); err != nil {
-		glog.Errorf("pinning %v failed: %v", sockMapPath, err)
-	} else {
-		defer objs.SockMap.Unpin()
-		glog.Infof("%v pinned", sockMapPath)
-	}
-
-	// The sock_ops program is attached to the cgroup.
-	l, err = link.AttachCgroup(link.CgroupOptions{
-		Path:    cgroupPath,
-		Attach:  ebpf.AttachCGroupSockOps,
-		Program: objs.BpfSockopsHandler,
-	})
-
+	cgroupPath, err := findCgroupPath()
 	if err != nil {
-		glog.Errorf("attaching sock_ops to %v failed: %v", cgroupPath, err)
+		glog.Errorf("findCgroupPath failed: %v", err)
 	} else {
-		hostLinks = append(hostLinks, l)
-		glog.Infof("sock_ops attached to %s", cgroupPath)
-	}
+		// sockMapPath := "/sys/fs/bpf/sk_msg_sock_map"
 
-	// The sk_msg program must be attached to the sock_hash map using a raw link.
-	// This is the general-purpose attachment function for link types that don't
-	// have a dedicated helper.
-	err = link.RawAttachProgram(link.RawAttachProgramOptions{
-		Program: objs.BpfSkMsgHandler,
-		Target:  objs.SockMap.FD(),
-		Attach:  ebpf.AttachSkMsgVerdict,
-	})
+		// Pinning the map is necessary for the sk_msg program to find it.
+		// We must remove any previous pin first.
+		// os.Remove(sockMapPath)
+		// if err := os.MkdirAll(filepath.Dir(sockMapPath), 0755); err != nil {
+		// 	glog.Errorf("MkdirAll (%v) failed: %v", sockMapPath, err)
+		// } else {
+		// 	// Pin the sock_hash map to the BPF filesystem. This is how the
+		// 	// sock_ops and sk_msg programs will share the map.
+		// 	if err := objs.SockMap.Pin(sockMapPath); err != nil {
+		// 		glog.Errorf("pinning %v failed: %v", sockMapPath, err)
+		// 	} else {
+		// 		glog.Infof("%v pinned", sockMapPath)
+		// 		defer func() {
+		// 			objs.SockMap.Unpin()
+		// 			os.Remove(sockMapPath)
+		// 		}()
+		// 	}
+		// }
 
-	if err != nil {
-		glog.Errorf("RawAttachProgram failed: %v", err)
-	} else {
-		glog.Infof("sk_msg program attached to %v", sockMapPath)
+		// The sock_ops program is attached to the cgroup.
+		// l, err = link.AttachCgroup(link.CgroupOptions{
+		// 	Path:    cgroupPath,
+		// 	Attach:  ebpf.AttachCGroupSockOps,
+		// 	Program: objs.BpfSockopsHandler,
+		// })
+
+		// if err != nil {
+		// 	glog.Errorf("attaching sock_ops to %v failed: %v", cgroupPath, err)
+		// } else {
+		// 	hostLinks = append(hostLinks, l)
+		// 	glog.Infof("sock_ops attached to %s", cgroupPath)
+		// }
+
+		// The sk_msg program must be attached to the sock_hash map using a raw link.
+		// This is the general-purpose attachment function for link types that don't
+		// have a dedicated helper.
+		// err = link.RawAttachProgram(link.RawAttachProgramOptions{
+		// 	Program: objs.BpfSkMsgHandler,
+		// 	Target:  objs.SockMap.FD(),
+		// 	Attach:  ebpf.AttachSkMsgVerdict,
+		// })
+
+		// if err != nil {
+		// 	glog.Errorf("RawAttachProgram failed: %v", err)
+		// } else {
+		// 	glog.Infof("sk_msg program attached to sock_map")
+		// 	defer func() {
+		// 		link.RawDetachProgram(link.RawDetachProgramOptions{
+		// 			Program: objs.BpfSkMsgHandler,
+		// 			Target:  objs.SockMap.FD(),
+		// 			Attach:  ebpf.AttachSkMsgVerdict,
+		// 		})
+		// 	}()
+		// }
+
+		_ = cgroupPath
 	}
 	// NOTE: TEST ONLY: TO BE REMOVED LATER (end).
 
@@ -1128,4 +1144,21 @@ func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects)
 	} else {
 		*links = append(*links, l)
 	}
+}
+
+func findCgroupPath() (string, error) {
+	cgroupPath := "/sys/fs/cgroup"
+
+	var st syscall.Statfs_t
+	err := syscall.Statfs(cgroupPath, &st)
+	if err != nil {
+		return "", err
+	}
+
+	isCgroupV2Enabled := st.Type == unix.CGROUP2_SUPER_MAGIC
+	if !isCgroupV2Enabled {
+		cgroupPath = filepath.Join(cgroupPath, "unified")
+	}
+
+	return cgroupPath, nil
 }
