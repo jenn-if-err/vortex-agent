@@ -17,7 +17,7 @@ spec:
       hostPID: true
       containers:
       - name: vortex-agent
-        image: asia-docker.pkg.dev/mobingi-main/asia-pub/vortex-agent:d439d588-8e87-4ada-bb9a-3b069612609c
+        image: asia-docker.pkg.dev/mobingi-main/asia-pub/vortex-agent:fbb901a8-b49a-45f8-8d43-3dc63689e8d9
         imagePullPolicy: Always
         env:
         - name: MY_NODE_NAME
