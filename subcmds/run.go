@@ -931,6 +931,8 @@ func run(ctx context.Context, done chan error) {
 								}
 								fmt.Printf("\n[REASSEMBLED PROMPT for id=%s]:\n%s\n", id, reassembled)
 
+								go saveAssembledPrompt(context.Background(), client, id, reassembled)
+
 							}(fmt.Sprintf("%v/%v", event.Tgid, event.Pid))
 						}
 						continue
@@ -1151,4 +1153,16 @@ func ReassembleSession(ctx context.Context, client *spanner.Client, id string, r
 		reassembled.WriteString(content)
 	}
 	resultCh <- reassembled.String()
+}
+
+// saves the reassembled prompt to llm_prompts_assembled in Spanner.
+func saveAssembledPrompt(ctx context.Context, client *spanner.Client, id, content string) {
+	m := []*spanner.Mutation{
+		spanner.InsertOrUpdate("llm_prompts_assembled", []string{"id", "content", "created_at"},
+			[]interface{}{id, content, spanner.CommitTimestamp}),
+	}
+	_, err := client.Apply(ctx, m)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to save assembled prompt to Spanner: %v\n", err)
+	}
 }
