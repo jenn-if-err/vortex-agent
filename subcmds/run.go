@@ -980,7 +980,7 @@ func run(ctx context.Context, done chan error) {
 					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
 					internalglog.LogInfo(line.String())
 
-					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") && params.RunfSaveDb {
+					if strings.Contains(fmt.Sprintf("%s", event.Comm), "python") && params.RunfSaveDb {
 						cols := []string{"id", "idx", "comm", "content", "created_at"}
 						vals := []any{
 							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
