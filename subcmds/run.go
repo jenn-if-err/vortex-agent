@@ -923,7 +923,8 @@ func run(ctx context.Context, done chan error) {
 					if event.ChunkIdx == CHUNK_END_IDX {
 						if params.RunfSaveDb {
 							go func(id string) {
-								time.Sleep(2 * time.Second) // wait for the last chunk to be processed, to be adjusted
+								time.Sleep(5 * time.Second) // wait for the last chunk to be processed, to be adjusted
+								fmt.Printf("Triggering reassembly for id=%s\n", id)
 								reassembled, err := ReassemblePrompt(context.Background(), client, fmt.Sprintf("%v/%v", event.Tgid, event.Pid))
 								if err != nil {
 									fmt.Printf("reassembly failed for id %s: %v\n", id, err)
@@ -1144,7 +1145,7 @@ func ReassembleSession(ctx context.Context, client *spanner.Client, id string, r
 			errCh <- err
 			return
 		}
-		var idx int64
+		var idx string
 		var content string
 		if err := row.Columns(&idx, &content); err != nil {
 			errCh <- err
