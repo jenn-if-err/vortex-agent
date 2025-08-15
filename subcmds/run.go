@@ -920,14 +920,15 @@ func run(ctx context.Context, done chan error) {
 				case TYPE_UPROBE_SSL_WRITE:
 
 				case TYPE_URETPROBE_SSL_WRITE:
+					fmt.Printf("[ASSEMBLE]TYPE_URETPROBE_SSL_WRITE: ChunkIdx=%v, SaveDb=%v, key=%v/%v\n", event.ChunkIdx, params.RunfSaveDb, event.Tgid, event.Pid)
 					if event.ChunkIdx == CHUNK_END_IDX {
 						if params.RunfSaveDb {
 							go func(id string) {
 								time.Sleep(5 * time.Second) // wait for the last chunk to be processed, to be adjusted
-								fmt.Printf("Triggering reassembly for id=%s\n", id)
+								fmt.Printf("[ASSEMBLE] Triggering reassembly for id=%s\n", id)
 								reassembled, err := ReassemblePrompt(context.Background(), client, fmt.Sprintf("%v/%v", event.Tgid, event.Pid))
 								if err != nil {
-									fmt.Printf("reassembly failed for id %s: %v\n", id, err)
+									fmt.Printf("[ASSEMBLE] reassembly failed for id %s: %v\n", id, err)
 									return
 								}
 								fmt.Printf("\n[REASSEMBLED PROMPT for id=%s]:\n%s\n", id, reassembled)
