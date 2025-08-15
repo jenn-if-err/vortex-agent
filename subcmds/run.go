@@ -931,6 +931,9 @@ func run(ctx context.Context, done chan error) {
 									fmt.Printf("[ASSEMBLE] assembly failed for id %s: %v\n", id, err)
 									return
 								}
+								if strings.TrimSpace(assembled) == "" {
+									return //dont print empty prompts
+								}
 								fmt.Printf("\n[ASSEMBLED PROMPT for id=%s]", id)
 
 								go saveAssembledPrompt(context.Background(), client, id, assembled)
@@ -1151,6 +1154,9 @@ func AssembleSession(ctx context.Context, client *spanner.Client, id string, res
 		if err := row.Columns(&idx, &content); err != nil {
 			errCh <- err
 			return
+		}
+		if strings.TrimSpace(content) == "" {
+			continue // skip empty chunk
 		}
 		assembled.WriteString(content)
 	}
