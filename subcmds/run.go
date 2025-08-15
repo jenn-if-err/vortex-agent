@@ -926,14 +926,14 @@ func run(ctx context.Context, done chan error) {
 							go func(id string) {
 								time.Sleep(5 * time.Second) // wait for the last chunk to be processed, to be adjusted
 								fmt.Printf("[ASSEMBLE] Triggering reassembly for id=%s\n", id)
-								reassembled, err := ReassemblePrompt(context.Background(), client, fmt.Sprintf("%v/%v", event.Tgid, event.Pid))
+								assembled, err := AssemblePrompt(context.Background(), client, fmt.Sprintf("%v/%v", event.Tgid, event.Pid))
 								if err != nil {
-									fmt.Printf("[ASSEMBLE] reassembly failed for id %s: %v\n", id, err)
+									fmt.Printf("[ASSEMBLE] assembly failed for id %s: %v\n", id, err)
 									return
 								}
-								fmt.Printf("\n[REASSEMBLED PROMPT for id=%s]:\n%s\n", id, reassembled)
+								fmt.Printf("\n[ASSEMBLED PROMPT for id=%s]", id)
 
-								go saveAssembledPrompt(context.Background(), client, id, reassembled)
+								go saveAssembledPrompt(context.Background(), client, id, assembled)
 
 							}(fmt.Sprintf("%v/%v", event.Tgid, event.Pid))
 						}
@@ -1115,11 +1115,11 @@ func run(ctx context.Context, done chan error) {
 	wg.Wait()
 }
 
-// temporary, to avoid import errors
-func ReassemblePrompt(ctx context.Context, client *spanner.Client, id string) (string, error) {
+// temporary, to avoid import errors, move to internal
+func AssemblePrompt(ctx context.Context, client *spanner.Client, id string) (string, error) {
 	resultCh := make(chan string, 1)
 	errCh := make(chan error, 1)
-	go ReassembleSession(ctx, client, id, resultCh, errCh)
+	go AssembleSession(ctx, client, id, resultCh, errCh)
 	select {
 	case result := <-resultCh:
 		return result, nil
@@ -1128,7 +1128,7 @@ func ReassemblePrompt(ctx context.Context, client *spanner.Client, id string) (s
 	}
 }
 
-func ReassembleSession(ctx context.Context, client *spanner.Client, id string, resultCh chan<- string, errCh chan<- error) {
+func AssembleSession(ctx context.Context, client *spanner.Client, id string, resultCh chan<- string, errCh chan<- error) {
 	stmt := spanner.Statement{
 		SQL:    `SELECT idx, content FROM llm_prompts WHERE id=@id ORDER BY idx ASC`,
 		Params: map[string]interface{}{"id": id},
@@ -1136,7 +1136,7 @@ func ReassembleSession(ctx context.Context, client *spanner.Client, id string, r
 	iter := client.Single().Query(ctx, stmt)
 	defer iter.Stop()
 
-	var reassembled strings.Builder
+	var assembled strings.Builder
 	for {
 		row, err := iter.Next()
 		if err != nil {
@@ -1152,12 +1152,12 @@ func ReassembleSession(ctx context.Context, client *spanner.Client, id string, r
 			errCh <- err
 			return
 		}
-		reassembled.WriteString(content)
+		assembled.WriteString(content)
 	}
-	resultCh <- reassembled.String()
+	resultCh <- assembled.String()
 }
 
-// saves the reassembled prompt to llm_prompts_assembled in Spanner.
+// saves the assembled prompt to llm_prompts_assembled in Spanner.
 func saveAssembledPrompt(ctx context.Context, client *spanner.Client, id, content string) {
 	m := []*spanner.Mutation{
 		spanner.InsertOrUpdate("llm_prompts_assembled", []string{"id", "content", "created_at"},
