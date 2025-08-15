@@ -293,63 +293,9 @@ func run(ctx context.Context, done chan error) {
 				return
 			}
 
-			internalglog.LogInfof("attaching u[ret]probes to [%s]", true, uf)
+			glog.Infof("attaching u[ret]probes to [%s]", uf)
 
-			l, err = ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
-			if err != nil {
-				glog.Errorf("uprobe/SSL_write failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_write failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
-			if err != nil {
-				glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_write_ex failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
-			if err != nil {
-				glog.Errorf("uprobe/SSL_read failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_read failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
-			if err != nil {
-				glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
+			setupUprobes(ex, &hostLinks, &objs)
 		}
 	}
 
@@ -647,77 +593,7 @@ func run(ctx context.Context, done chan error) {
 							continue
 						}
 
-						// Uprobe SSL_write
-						l, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
-						if err != nil {
-							glog.Errorf("uprobe/SSL_write (%v) failed: %v", lib, err)
-						} else {
-							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uprobe/SSL_write attached for %v", lib)
-						}
-
-						// Uprobe SSL_write_ex
-						l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
-						if err != nil {
-							glog.Errorf("uprobe/SSL_write_ex (%v) failed: %v", lib, err)
-						} else {
-							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uprobe/SSL_write_ex attached for %v", lib)
-						}
-
-						// Uretprobe SSL_write
-						l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
-						if err != nil {
-							glog.Errorf("uretprobe/SSL_write (%v) failed: %v", lib, err)
-						} else {
-							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uretprobe/SSL_write attached for %v", lib)
-						}
-
-						// Uretprobe SSL_write_ex
-						l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
-						if err != nil {
-							glog.Errorf("uretprobe/SSL_write_ex (%v) failed: %v", lib, err)
-						} else {
-							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uretprobe/SSL_write_ex attached for %v", lib)
-						}
-
-						// Uprobe SSl_read
-						l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
-						if err != nil {
-							glog.Errorf("uprobe/SSL_read (%v) failed: %v", lib, err)
-						} else {
-							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uprobe/SSL_read attached for %v", lib)
-						}
-
-						// Uprobe SSL_read_ex
-						l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
-						if err != nil {
-							glog.Errorf("uprobe/SSL_read (%v) failed: %v", lib, err)
-						} else {
-							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uprobe/SSL_read_ex attached for %v", lib)
-						}
-
-						// Uretprobe SSL_read
-						l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
-						if err != nil {
-							glog.Errorf("uretprobe/SSL_read (%v) failed: %v", lib, err)
-						} else {
-							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uretprobe/SSL_read attached for %v", lib)
-						}
-
-						// Uretprobe SSL_read_ex
-						l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
-						if err != nil {
-							glog.Errorf("uretprobe/SSL_read_ex (%v) failed: %v", lib, err)
-						} else {
-							cgroupLinks = append(cgroupLinks, l)
-							internalglog.LogInfof("uretprobe/SSL_read_ex attached for %v", lib)
-						}
+						setupUprobes(ex, &cgroupLinks, &objs)
 					}
 				}()
 				// ---------------------------------------------
@@ -1194,4 +1070,62 @@ func run(ctx context.Context, done chan error) {
 	internalglog.LogInfof("%d events processed, %d events dropped", true, count, dropped)
 
 	wg.Wait()
+}
+
+func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects) {
+	l, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
+	if err != nil {
+		glog.Errorf("uprobe/SSL_write failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+	if err != nil {
+		glog.Errorf("uretprobe/SSL_write failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
+	if err != nil {
+		glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
+	if err != nil {
+		glog.Errorf("uretprobe/SSL_write_ex failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+	if err != nil {
+		glog.Errorf("uprobe/SSL_read failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
+	if err != nil {
+		glog.Errorf("uretprobe/SSL_read failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
+	if err != nil {
+		glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
+	if err != nil {
+		glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
 }
