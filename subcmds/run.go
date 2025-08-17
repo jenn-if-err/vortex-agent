@@ -92,6 +92,12 @@ type eventStateT struct {
 	http2 atomic.Int32 // 0: not http2, 1: http2
 }
 
+type ContainerInfo struct {
+	Name   string
+	Image  string
+	PodUId string
+}
+
 func RunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -379,6 +385,8 @@ func run(ctx context.Context, done chan error) {
 	}()
 
 	podUids := make(map[string]string) // key=pod-uid, value=ns/pod-name
+	ipToContainer := make(map[string]*ContainerInfo)
+	var ipToContainerMtx sync.Mutex
 	var podUidsMtx sync.Mutex
 	podUidsCtx := internal.ChildCtx(ctx)
 
@@ -419,6 +427,21 @@ func run(ctx context.Context, done chan error) {
 					continue // skip kube-system namespace
 				}
 
+				for _, container := range pod.Spec.Containers {
+					info := ContainerInfo{
+						Name:   container.Name,
+						Image:  container.Image,
+						PodUId: string(pod.ObjectMeta.UID),
+					}
+
+					func() {
+						ipToContainerMtx.Lock()
+						defer ipToContainerMtx.Unlock()
+						glog.Infof("ip=%v, container=%+v", pod.Status.PodIP, info)
+						ipToContainer[pod.Status.PodIP] = &info
+					}()
+				}
+
 				func() {
 					podUidsMtx.Lock()
 					defer podUidsMtx.Unlock()
@@ -428,6 +451,7 @@ func run(ctx context.Context, done chan error) {
 			}
 		}
 
+		go do() // first
 		for {
 			select {
 			case <-podUidsCtx.Done():
@@ -579,7 +603,6 @@ func run(ctx context.Context, done chan error) {
 					}
 
 					if len(libs) == 0 {
-						glog.Errorf("no libraries found for pid %d", pid)
 						return
 					}
 
@@ -590,7 +613,7 @@ func run(ctx context.Context, done chan error) {
 
 						sslAttached[lib] = true // mark as attached
 
-						internalglog.LogInfof("found lib/bin at: %s", lib)
+						internalglog.LogInfof("found lib/bin at: %s, pid=%v", lib, pid)
 						ex, err := link.OpenExecutable(lib)
 						if err != nil {
 							glog.Errorf("OpenExecutable failed: %v", err)
@@ -770,33 +793,45 @@ func run(ctx context.Context, done chan error) {
 		}
 	}()
 
-	mutBuf := make([]internal.SpannerPayload, 0)
+	mutBuf := make([]internal.SpannerPayload, 0, 1000)
 	mutBufCh := make(chan internal.SpannerPayload, 2048)
-	// TODO: Should we do multiple goroutines here? temp: 1 for now.
+
+	flush := func() {
+		if len(mutBuf) == 0 {
+			return
+		}
+		err := internal.Send("", mutBuf)
+		if err != nil {
+			glog.Errorf("failed to send vortex spanner request: %v", err)
+		} else {
+			internalglog.LogInfof("saved %d event(s) to db", true, len(mutBuf))
+		}
+		mutBuf = mutBuf[:0]
+	}
+
+	tickerFlush := time.NewTicker(5 * time.Second)
+	defer tickerFlush.Stop()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for s := range mutBufCh {
-			mutBuf = append(mutBuf, s)
-			if len(mutBuf) >= 1_000 {
-				err = internal.Send("", mutBuf)
-				if err != nil {
-					glog.Errorf("failed to send vortex spanner request: %v", err)
-				} else {
-					internalglog.LogInfof("saved %d event(s) to db", true, len(mutBuf))
+		for {
+			select {
+			case s, ok := <-mutBufCh:
+				if !ok {
+					flush()
+					return
 				}
-				mutBuf = mutBuf[:0]
-			}
-		}
-		if len(mutBuf) > 0 {
-			err = internal.Send("", mutBuf)
-			if err != nil {
-				glog.Errorf("failed to send vortex spanner request: %v", err)
-			} else {
-				internalglog.LogInfof("lefts: saved %d event(s) to db", true, len(mutBuf))
+				mutBuf = append(mutBuf, s)
+				if len(mutBuf) >= 1000 {
+					flush()
+				}
+			case <-tickerFlush.C:
+				flush()
 			}
 		}
 	}()
+
 	eventState := make(map[string]*eventStateT)
 	eventSink := make(chan bpf.BpfEvent, 2048) // what size to use?
 
@@ -938,15 +973,43 @@ func run(ctx context.Context, done chan error) {
 					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v, ", key, event.TotalLen, event.ChunkLen)
 					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
-					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
+					fmt.Fprintf(&line, "dst=%v:%v ", internal.IntToIp(event.Daddr), event.Dport)
+					var containerName, containerImage string
+					func() {
+						if !isk8s {
+							return
+						}
+						ipToContainerMtx.Lock()
+						defer ipToContainerMtx.Unlock()
+						info, ok := ipToContainer[internal.IntToIp(event.Saddr).String()]
+						if ok {
+							containerName = info.Name
+							containerImage = info.Image
+							fmt.Fprintf(&line, "containerName=%v", info.Name)
+						}
+					}()
 					internalglog.LogInfo(line.String())
 
 					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Buf[:]), "python")) && params.RunfSaveDb {
-						cols := []string{"id", "idx", "comm", "content", "created_at"}
+						cols := []string{
+							"id",
+							"idx",
+							"comm",
+							"src_addr",
+							"dst_addr",
+							"container_name",
+							"container_image",
+							"content",
+							"created_at",
+						}
 						vals := []any{
 							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
 							fmt.Sprintf("%v", event.ChunkIdx),
 							fmt.Sprintf("%s", event.Comm),
+							fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
+							fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
+							containerName,
+							containerImage,
 							internal.Readable(event.Buf[:], max(event.ChunkLen, 0)),
 							"COMMIT_TIMESTAMP",
 						}
