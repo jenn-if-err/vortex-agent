@@ -329,6 +329,8 @@ func run(ctx context.Context, done chan error) {
 	domains := []string{
 		"spanner.googleapis.com",
 		"bigquery.googleapis.com",
+		"generativelanguage.googleapis.com",
+		"api.openai.com",
 	}
 
 	ipToDomain := make(map[string]string) // key=ip, value=domain
@@ -985,7 +987,19 @@ func run(ctx context.Context, done chan error) {
 						if ok {
 							containerName = info.Name
 							containerImage = info.Image
-							fmt.Fprintf(&line, "containerName=%v", info.Name)
+							fmt.Fprintf(&line, "srcContainerName=%v ", info.Name)
+						}
+					}()
+
+					func() {
+						if !isk8s {
+							return
+						}
+						ipToDomainMtx.Lock()
+						defer ipToDomainMtx.Unlock()
+						info, ok := ipToDomain[internal.IntToIp(event.Daddr).String()]
+						if ok {
+							fmt.Fprintf(&line, "targetDomain=%v ", info)
 						}
 					}()
 					internalglog.LogInfo(line.String())
@@ -994,7 +1008,6 @@ func run(ctx context.Context, done chan error) {
 						cols := []string{
 							"id",
 							"idx",
-							"comm",
 							"src_addr",
 							"dst_addr",
 							"container_name",
@@ -1005,7 +1018,6 @@ func run(ctx context.Context, done chan error) {
 						vals := []any{
 							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
 							fmt.Sprintf("%v", event.ChunkIdx),
-							fmt.Sprintf("%s", event.Comm),
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
 							containerName,
@@ -1072,6 +1084,29 @@ func run(ctx context.Context, done chan error) {
 					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v, ", key, event.TotalLen, event.ChunkLen)
 					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
 					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Saddr), event.Sport)
+					func() {
+						if !isk8s {
+							return
+						}
+						ipToDomainMtx.Lock()
+						defer ipToDomainMtx.Unlock()
+						info, ok := ipToDomain[internal.IntToIp(event.Daddr).String()]
+						if ok {
+							fmt.Fprintf(&line, "srcDomain=%v ", info)
+						}
+					}()
+
+					func() {
+						if !isk8s {
+							return
+						}
+						ipToContainerMtx.Lock()
+						defer ipToContainerMtx.Unlock()
+						info, ok := ipToContainer[internal.IntToIp(event.Saddr).String()]
+						if ok {
+							fmt.Fprintf(&line, "targetContainerName=%v ", info.Name)
+						}
+					}()
 					internalglog.LogInfo(line.String())
 
 				case TYPE_REPORT_READ_SOCKET_INFO:
