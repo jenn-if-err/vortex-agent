@@ -23,6 +23,9 @@ func TestCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			if true {
 				testListAsStack()
+				l := []string{}
+				modList(&l)
+				slog.Info("list:", "l", l)
 				return
 			}
 
@@ -231,4 +234,8 @@ func testListAsStack() {
 	v = ll.Remove(ll.Back())
 	slog.Info("Popped value from stack", "value", v)
 	slog.Info("Stack is empty now", "length", ll.Len())
+}
+
+func modList(l *[]string) {
+	*l = append(*l, "new")
 }

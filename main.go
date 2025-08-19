@@ -1,6 +1,6 @@
 //go:build linux
 
-//go:generate sh bpf2go.sh
+//go:generate sh bpfgen.sh
 
 package main
 

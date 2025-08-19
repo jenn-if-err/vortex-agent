@@ -35,6 +35,16 @@ func IntToIp(ipNum uint32) net.IP {
 	return ip
 }
 
+func IpToInt(ip net.IP) uint32 {
+	ip4 := ip.To4()
+	switch ip4 {
+	case nil:
+		return 0
+	default:
+		return binary.LittleEndian.Uint32(ip4)
+	}
+}
+
 func GetInitPidNsId() int {
 	nspidLink, err := os.Readlink("/proc/1/ns/pid")
 	if err != nil {
@@ -78,6 +88,23 @@ func FindLibSSL(root string) (string, error) {
 	}
 
 	return "", fmt.Errorf("libssl.so not found")
+}
+
+func FindNodeBin(root string) (string, error) {
+	possiblePaths := []string{
+		"/usr/bin/node",
+		"/usr/local/bin/node",
+		"/bin/node",
+	}
+
+	for _, p := range possiblePaths {
+		path := fmt.Sprintf("%s%s", root, p)
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("node binary not found")
 }
 
 // For debugging SSL buffers.

@@ -1,3 +1,5 @@
+//go:build linux
+
 package subcmds
 
 import (
@@ -10,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -18,7 +21,6 @@ import (
 	"syscall"
 	"time"
 
-	"cloud.google.com/go/spanner"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -29,7 +31,11 @@ import (
 	"github.com/flowerinthenight/vortex-agent/params"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
+<<<<<<< HEAD
 	"google.golang.org/api/iterator"
+=======
+	"golang.org/x/sys/unix"
+>>>>>>> 3f3921b2766e3ad2ae34e82a50c03521d782840f
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -88,6 +94,12 @@ type trafficInfo struct {
 
 type eventStateT struct {
 	http2 atomic.Int32 // 0: not http2, 1: http2
+}
+
+type ContainerInfo struct {
+	Name   string
+	Image  string
+	PodUId string
 }
 
 func RunCmd() *cobra.Command {
@@ -207,16 +219,71 @@ func run(ctx context.Context, done chan error) {
 		hostLinks = append(hostLinks, l)
 	}
 
-	var client *spanner.Client
-	if params.RunfSaveDb {
-		// Spanner client creation
-		client, err = internal.NewSpannerClient(ctx, "projects/alphaus-dashboard/instances/vortex-main/databases/main")
-		if err != nil {
-			glog.Errorf("Failed to create Spanner client: %v", err)
-			return
-		}
-		defer client.Close()
+	// NOTE: TEST ONLY: TO BE REMOVED LATER (start).
+	cgroupPath, err := findCgroupPath()
+	if err != nil {
+		glog.Errorf("findCgroupPath failed: %v", err)
+	} else {
+		// sockMapPath := "/sys/fs/bpf/sk_msg_sock_map"
+
+		// Pinning the map is necessary for the sk_msg program to find it.
+		// We must remove any previous pin first.
+		// os.Remove(sockMapPath)
+		// if err := os.MkdirAll(filepath.Dir(sockMapPath), 0755); err != nil {
+		// 	glog.Errorf("MkdirAll (%v) failed: %v", sockMapPath, err)
+		// } else {
+		// 	// Pin the sock_hash map to the BPF filesystem. This is how the
+		// 	// sock_ops and sk_msg programs will share the map.
+		// 	if err := objs.SockMap.Pin(sockMapPath); err != nil {
+		// 		glog.Errorf("pinning %v failed: %v", sockMapPath, err)
+		// 	} else {
+		// 		glog.Infof("%v pinned", sockMapPath)
+		// 		defer func() {
+		// 			objs.SockMap.Unpin()
+		// 			os.Remove(sockMapPath)
+		// 		}()
+		// 	}
+		// }
+
+		// The sock_ops program is attached to the cgroup.
+		// l, err = link.AttachCgroup(link.CgroupOptions{
+		// 	Path:    cgroupPath,
+		// 	Attach:  ebpf.AttachCGroupSockOps,
+		// 	Program: objs.BpfSockopsHandler,
+		// })
+
+		// if err != nil {
+		// 	glog.Errorf("attaching sock_ops to %v failed: %v", cgroupPath, err)
+		// } else {
+		// 	hostLinks = append(hostLinks, l)
+		// 	glog.Infof("sock_ops attached to %s", cgroupPath)
+		// }
+
+		// The sk_msg program must be attached to the sock_hash map using a raw link.
+		// This is the general-purpose attachment function for link types that don't
+		// have a dedicated helper.
+		// err = link.RawAttachProgram(link.RawAttachProgramOptions{
+		// 	Program: objs.BpfSkMsgHandler,
+		// 	Target:  objs.SockMap.FD(),
+		// 	Attach:  ebpf.AttachSkMsgVerdict,
+		// })
+
+		// if err != nil {
+		// 	glog.Errorf("RawAttachProgram failed: %v", err)
+		// } else {
+		// 	glog.Infof("sk_msg program attached to sock_map")
+		// 	defer func() {
+		// 		link.RawDetachProgram(link.RawDetachProgramOptions{
+		// 			Program: objs.BpfSkMsgHandler,
+		// 			Target:  objs.SockMap.FD(),
+		// 			Attach:  ebpf.AttachSkMsgVerdict,
+		// 		})
+		// 	}()
+		// }
+
+		_ = cgroupPath
 	}
+	// NOTE: TEST ONLY: TO BE REMOVED LATER (end).
 
 	isk8s := internal.IsK8s()
 	uprobeFiles := strings.Split(params.RunfUprobes, ",")
@@ -240,63 +307,9 @@ func run(ctx context.Context, done chan error) {
 				return
 			}
 
-			internalglog.LogInfof("attaching u[ret]probes to [%s]", true, uf)
+			glog.Infof("attaching u[ret]probes to [%s]", uf)
 
-			l, err = ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
-			if err != nil {
-				glog.Errorf("uprobe/SSL_write failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_write failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
-			if err != nil {
-				glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_write_ex failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
-			if err != nil {
-				glog.Errorf("uprobe/SSL_read failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_read failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
-			if err != nil {
-				glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
-
-			l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
-			if err != nil {
-				glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
-			} else {
-				hostLinks = append(hostLinks, l)
-			}
+			setupUprobes(ex, &hostLinks, &objs)
 		}
 	}
 
@@ -320,6 +333,8 @@ func run(ctx context.Context, done chan error) {
 	domains := []string{
 		"spanner.googleapis.com",
 		"bigquery.googleapis.com",
+		"generativelanguage.googleapis.com",
+		"api.openai.com",
 	}
 
 	ipToDomain := make(map[string]string) // key=ip, value=domain
@@ -376,6 +391,8 @@ func run(ctx context.Context, done chan error) {
 	}()
 
 	podUids := make(map[string]string) // key=pod-uid, value=ns/pod-name
+	ipToContainer := make(map[string]*ContainerInfo)
+	var ipToContainerMtx sync.Mutex
 	var podUidsMtx sync.Mutex
 	podUidsCtx := internal.ChildCtx(ctx)
 
@@ -416,6 +433,21 @@ func run(ctx context.Context, done chan error) {
 					continue // skip kube-system namespace
 				}
 
+				for _, container := range pod.Spec.Containers {
+					info := ContainerInfo{
+						Name:   container.Name,
+						Image:  container.Image,
+						PodUId: string(pod.ObjectMeta.UID),
+					}
+
+					func() {
+						ipToContainerMtx.Lock()
+						defer ipToContainerMtx.Unlock()
+						glog.Infof("ip=%v, container=%+v", pod.Status.PodIP, info)
+						ipToContainer[pod.Status.PodIP] = &info
+					}()
+				}
+
 				func() {
 					podUidsMtx.Lock()
 					defer podUidsMtx.Unlock()
@@ -425,6 +457,7 @@ func run(ctx context.Context, done chan error) {
 			}
 		}
 
+		go do() // first
 		for {
 			select {
 			case <-podUidsCtx.Done():
@@ -563,64 +596,37 @@ func run(ctx context.Context, done chan error) {
 				// ---------------------------------------------
 				// TODO: fn is adding to list outside of goroutine!
 				func() {
-					if true {
-						return // TODO: test only; remove later
-					}
-
+					var libs []string
 					rootPath := fmt.Sprintf("/proc/%d/root", pid)
-					libsslPath, err := internal.FindLibSSL(rootPath)
-					if err != nil {
+					libsslPath, _ := internal.FindLibSSL(rootPath)
+					if libsslPath != "" {
+						libs = append(libs, libsslPath)
+					}
+
+					nodeBinPath, _ := internal.FindNodeBin(rootPath)
+					if nodeBinPath != "" {
+						libs = append(libs, nodeBinPath)
+					}
+
+					if len(libs) == 0 {
 						return
 					}
 
-					if libsslPath == "" {
-						return
-					}
+					for _, lib := range libs {
+						if _, ok := sslAttached[lib]; ok {
+							continue
+						}
 
-					if _, ok := sslAttached[rootPath]; ok {
-						return // already attached
-					}
+						sslAttached[lib] = true // mark as attached
 
-					sslAttached[rootPath] = true // mark as attached
+						internalglog.LogInfof("found lib/bin at: %s, pid=%v", lib, pid)
+						ex, err := link.OpenExecutable(lib)
+						if err != nil {
+							glog.Errorf("OpenExecutable failed: %v", err)
+							continue
+						}
 
-					internalglog.LogInfof("found libssl at: %s", libsslPath)
-					ex, err := link.OpenExecutable(libsslPath)
-					if err != nil {
-						glog.Errorf("OpenExecutable failed: %v", err)
-						return
-					}
-
-					l, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
-					if err != nil {
-						glog.Errorf("uprobe/SSL_write (%v) failed: %v", libsslPath, err)
-					} else {
-						cgroupLinks = append(cgroupLinks, l)
-						internalglog.LogInfof("uprobe/SSL_write attached for %v", libsslPath)
-					}
-
-					// urpSSLWrite, err := ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
-					// if err != nil {
-					// 	glog.Errorf("uretprobe/SSL_write (%v) failed: %v", libsslPath, err)
-					// 	return
-					// }
-
-					// linksToClose = append(linksToClose, urpSSLWrite)
-					// internalglog.LogInfof("uretprobe/SSL_write attached for %v", libsslPath)
-
-					l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
-					if err != nil {
-						glog.Errorf("uprobe/SSL_read (%v) failed: %v", libsslPath, err)
-					} else {
-						cgroupLinks = append(cgroupLinks, l)
-						internalglog.LogInfof("uprobe/SSL_read attached for %v", libsslPath)
-					}
-
-					l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
-					if err != nil {
-						glog.Errorf("uretprobe/SSL_read (%v) failed: %v", libsslPath, err)
-					} else {
-						cgroupLinks = append(cgroupLinks, l)
-						internalglog.LogInfof("uretprobe/SSL_read attached for %v", libsslPath)
+						setupUprobes(ex, &cgroupLinks, &objs)
 					}
 				}()
 				// ---------------------------------------------
@@ -793,37 +799,45 @@ func run(ctx context.Context, done chan error) {
 		}
 	}()
 
-	mutBuf := make([]*spanner.Mutation, 0)
-	mutBufCh := make(chan *spanner.Mutation, 2048)
+	mutBuf := make([]internal.SpannerPayload, 0, 1000)
+	mutBufCh := make(chan internal.SpannerPayload, 2048)
 
-	// TODO: Should we do multiple goroutines here? temp: 1 for now.
-	spctx := internal.ChildCtx(ctx)
+	flush := func() {
+		if len(mutBuf) == 0 {
+			return
+		}
+		err := internal.Send("", mutBuf)
+		if err != nil {
+			glog.Errorf("failed to send vortex spanner request: %v", err)
+		} else {
+			internalglog.LogInfof("saved %d event(s) to db", true, len(mutBuf))
+		}
+		mutBuf = mutBuf[:0]
+	}
+
+	tickerFlush := time.NewTicker(5 * time.Second)
+	defer tickerFlush.Stop()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for s := range mutBufCh {
-			mutBuf = append(mutBuf, s)
-			if len(mutBuf) >= 1_000 {
-				_, err := client.Apply(spctx, mutBuf)
-				if err != nil {
-					glog.Errorf("failed to apply mutation batch: %v", err)
-				} else {
-					internalglog.LogInfof("saved %d event(s) to db", true, len(mutBuf))
+		for {
+			select {
+			case s, ok := <-mutBufCh:
+				if !ok {
+					flush()
+					return
 				}
-				mutBuf = mutBuf[:0]
-			}
-		}
-		if len(mutBuf) > 0 {
-			lctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-			defer cancel()
-			_, err := client.Apply(lctx, mutBuf)
-			if err != nil {
-				glog.Errorf("failed to apply mutation batch: %v", err)
-			} else {
-				internalglog.LogInfof("leftovers: saved %d event(s) to db", true, len(mutBuf))
+				mutBuf = append(mutBuf, s)
+				if len(mutBuf) >= 1000 {
+					flush()
+				}
+			case <-tickerFlush.C:
+				flush()
 			}
 		}
 	}()
+
 	eventState := make(map[string]*eventStateT)
 	eventSink := make(chan bpf.BpfEvent, 2048) // what size to use?
 
@@ -984,19 +998,66 @@ func run(ctx context.Context, done chan error) {
 					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v, ", key, event.TotalLen, event.ChunkLen)
 					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Saddr), event.Sport)
-					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Daddr), event.Dport)
+					fmt.Fprintf(&line, "dst=%v:%v ", internal.IntToIp(event.Daddr), event.Dport)
+					var containerName, containerImage string
+					func() {
+						if !isk8s {
+							return
+						}
+						ipToContainerMtx.Lock()
+						defer ipToContainerMtx.Unlock()
+						info, ok := ipToContainer[internal.IntToIp(event.Saddr).String()]
+						if ok {
+							containerName = info.Name
+							containerImage = info.Image
+							fmt.Fprintf(&line, "srcContainerName=%v ", info.Name)
+						}
+					}()
+
+					func() {
+						if !isk8s {
+							return
+						}
+						ipToDomainMtx.Lock()
+						defer ipToDomainMtx.Unlock()
+						info, ok := ipToDomain[internal.IntToIp(event.Daddr).String()]
+						if ok {
+							fmt.Fprintf(&line, "targetDomain=%v ", info)
+						}
+					}()
 					internalglog.LogInfo(line.String())
 
+<<<<<<< HEAD
 					if strings.Contains(fmt.Sprintf("%s", event.Comm), "python") && params.RunfSaveDb {
 						cols := []string{"id", "idx", "comm", "content", "created_at"}
+=======
+					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Buf[:]), "python")) && params.RunfSaveDb {
+						cols := []string{
+							"id",
+							"idx",
+							"src_addr",
+							"dst_addr",
+							"container_name",
+							"container_image",
+							"content",
+							"created_at",
+						}
+>>>>>>> 3f3921b2766e3ad2ae34e82a50c03521d782840f
 						vals := []any{
 							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
 							fmt.Sprintf("%v", event.ChunkIdx),
-							fmt.Sprintf("%s", event.Comm),
+							fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
+							fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
+							containerName,
+							containerImage,
 							internal.Readable(event.Buf[:], max(event.ChunkLen, 0)),
-							spanner.CommitTimestamp,
+							"COMMIT_TIMESTAMP",
 						}
-						mut := spanner.InsertOrUpdate("llm_prompts", cols, vals)
+						mut := internal.SpannerPayload{
+							Table: "llm_prompts",
+							Cols:  cols,
+							Vals:  vals,
+						}
 						mutBufCh <- mut
 					}
 
@@ -1051,6 +1112,29 @@ func run(ctx context.Context, done chan error) {
 					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v, ", key, event.TotalLen, event.ChunkLen)
 					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
 					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Saddr), event.Sport)
+					func() {
+						if !isk8s {
+							return
+						}
+						ipToDomainMtx.Lock()
+						defer ipToDomainMtx.Unlock()
+						info, ok := ipToDomain[internal.IntToIp(event.Daddr).String()]
+						if ok {
+							fmt.Fprintf(&line, "srcDomain=%v ", info)
+						}
+					}()
+
+					func() {
+						if !isk8s {
+							return
+						}
+						ipToContainerMtx.Lock()
+						defer ipToContainerMtx.Unlock()
+						info, ok := ipToContainer[internal.IntToIp(event.Saddr).String()]
+						if ok {
+							fmt.Fprintf(&line, "targetContainerName=%v ", info.Name)
+						}
+					}()
 					internalglog.LogInfo(line.String())
 
 				case TYPE_REPORT_READ_SOCKET_INFO:
@@ -1118,6 +1202,7 @@ func run(ctx context.Context, done chan error) {
 	wg.Wait()
 }
 
+<<<<<<< HEAD
 // temporary, to avoid import errors, move to internal
 func AssemblePrompt(ctx context.Context, client *spanner.Client, id string) (string, error) {
 	resultCh := make(chan string, 1)
@@ -1173,4 +1258,79 @@ func saveAssembledPrompt(ctx context.Context, client *spanner.Client, id, conten
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to save assembled prompt to Spanner: %v\n", err)
 	}
+=======
+func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects) {
+	l, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
+	if err != nil {
+		glog.Errorf("uprobe/SSL_write failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+	if err != nil {
+		glog.Errorf("uretprobe/SSL_write failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
+	if err != nil {
+		glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
+	if err != nil {
+		glog.Errorf("uretprobe/SSL_write_ex failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+	if err != nil {
+		glog.Errorf("uprobe/SSL_read failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
+	if err != nil {
+		glog.Errorf("uretprobe/SSL_read failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
+	if err != nil {
+		glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+
+	l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
+	if err != nil {
+		glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
+	} else {
+		*links = append(*links, l)
+	}
+}
+
+func findCgroupPath() (string, error) {
+	cgroupPath := "/sys/fs/cgroup"
+
+	var st syscall.Statfs_t
+	err := syscall.Statfs(cgroupPath, &st)
+	if err != nil {
+		return "", err
+	}
+
+	isCgroupV2Enabled := st.Type == unix.CGROUP2_SUPER_MAGIC
+	if !isCgroupV2Enabled {
+		cgroupPath = filepath.Join(cgroupPath, "unified")
+	}
+
+	return cgroupPath, nil
+>>>>>>> 3f3921b2766e3ad2ae34e82a50c03521d782840f
 }
