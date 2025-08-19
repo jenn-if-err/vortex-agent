@@ -65,7 +65,7 @@ func GetInitPidNsId() int {
 	return pid
 }
 
-func GetSelfRootNsPid() int {
+func GetSelfRootPid() int {
 	me, err := os.Readlink("/proc/self")
 	if err != nil {
 		return -1

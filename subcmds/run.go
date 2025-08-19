@@ -571,7 +571,7 @@ func run(ctx context.Context, done chan error) {
 			return
 		}
 
-		pidSelf := internal.GetSelfRootNsPid()
+		pidSelf := internal.GetSelfRootPid()
 		sslAttached := make(map[string]bool) // key=libssl path, value=true
 
 		ticker := time.NewTicker(time.Second * 10)
