@@ -930,9 +930,6 @@ func run(ctx context.Context, done chan error) {
 				case TYPE_UPROBE_SSL_WRITE:
 
 				case TYPE_URETPROBE_SSL_WRITE:
-					fmt.Printf("[DEBUG] Event: id=%v/%v, idx=%v, chunklen=%v, buf=%s\n",
-						event.Tgid, event.Pid, event.ChunkIdx, event.ChunkLen,
-						internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 					if event.ChunkIdx == CHUNK_END_IDX {
 						continue
 					}
@@ -1008,7 +1005,6 @@ func run(ctx context.Context, done chan error) {
 					internalglog.LogInfo(line.String())
 
 					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Buf[:]), "python")) && params.RunfSaveDb {
-						fmt.Printf("[DEBUG] Saving chunk to Spanner for id=%v/%v, idx=%v\n", event.Tgid, event.Pid, event.ChunkIdx)
 						cols := []string{
 							"id",
 							"idx",
