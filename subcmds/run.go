@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"cloud.google.com/go/spanner"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -31,11 +32,9 @@ import (
 	"github.com/flowerinthenight/vortex-agent/params"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-<<<<<<< HEAD
 	"google.golang.org/api/iterator"
-=======
-	"golang.org/x/sys/unix"
->>>>>>> 3f3921b2766e3ad2ae34e82a50c03521d782840f
+
+	"golang.org/x/sys/unix" 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -94,12 +93,6 @@ type trafficInfo struct {
 
 type eventStateT struct {
 	http2 atomic.Int32 // 0: not http2, 1: http2
-}
-
-type ContainerInfo struct {
-	Name   string
-	Image  string
-	PodUId string
 }
 
 func RunCmd() *cobra.Command {
@@ -221,7 +214,7 @@ func run(ctx context.Context, done chan error) {
 
 	// NOTE: TEST ONLY: TO BE REMOVED LATER (start).
 	cgroupPath, err := findCgroupPath()
-	if err != nil {
+		if err != nil {
 		glog.Errorf("findCgroupPath failed: %v", err)
 	} else {
 		// sockMapPath := "/sys/fs/bpf/sk_msg_sock_map"
@@ -621,7 +614,7 @@ func run(ctx context.Context, done chan error) {
 
 						internalglog.LogInfof("found lib/bin at: %s, pid=%v", lib, pid)
 						ex, err := link.OpenExecutable(lib)
-						if err != nil {
+					if err != nil {
 							glog.Errorf("OpenExecutable failed: %v", err)
 							continue
 						}
@@ -807,13 +800,13 @@ func run(ctx context.Context, done chan error) {
 			return
 		}
 		err := internal.Send("", mutBuf)
-		if err != nil {
-			glog.Errorf("failed to send vortex spanner request: %v", err)
-		} else {
-			internalglog.LogInfof("saved %d event(s) to db", true, len(mutBuf))
-		}
-		mutBuf = mutBuf[:0]
-	}
+				if err != nil {
+					glog.Errorf("failed to apply mutation batch: %v", err)
+				} else {
+					internalglog.LogInfof("saved %d event(s) to db", true, len(mutBuf))
+				}
+				mutBuf = mutBuf[:0]
+			}
 
 	tickerFlush := time.NewTicker(5 * time.Second)
 	defer tickerFlush.Stop()
@@ -1027,10 +1020,8 @@ func run(ctx context.Context, done chan error) {
 					}()
 					internalglog.LogInfo(line.String())
 
-<<<<<<< HEAD
 					if strings.Contains(fmt.Sprintf("%s", event.Comm), "python") && params.RunfSaveDb {
 						cols := []string{"id", "idx", "comm", "content", "created_at"}
-=======
 					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Buf[:]), "python")) && params.RunfSaveDb {
 						cols := []string{
 							"id",
@@ -1042,7 +1033,6 @@ func run(ctx context.Context, done chan error) {
 							"content",
 							"created_at",
 						}
->>>>>>> 3f3921b2766e3ad2ae34e82a50c03521d782840f
 						vals := []any{
 							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
 							fmt.Sprintf("%v", event.ChunkIdx),
