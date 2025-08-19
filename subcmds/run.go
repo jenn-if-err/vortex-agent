@@ -930,6 +930,9 @@ func run(ctx context.Context, done chan error) {
 				case TYPE_UPROBE_SSL_WRITE:
 
 				case TYPE_URETPROBE_SSL_WRITE:
+					fmt.Printf("[DEBUG] Event: id=%v/%v, idx=%v, chunklen=%v, buf=%s\n",
+						event.Tgid, event.Pid, event.ChunkIdx, event.ChunkLen,
+						internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 					if event.ChunkIdx == CHUNK_END_IDX {
 						continue
 					}
