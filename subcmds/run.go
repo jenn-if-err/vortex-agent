@@ -216,6 +216,70 @@ func run(ctx context.Context, done chan error) {
 	}
 
 	// NOTE: TEST ONLY: TO BE REMOVED LATER (start).
+	// Will fail most likely, as requires v6.6+.
+	func() {
+		interfaces, err := net.Interfaces()
+		if err != nil {
+			glog.Errorf("Error getting network interfaces: %v", err)
+			return
+		}
+
+		glog.Info("available network interfaces:")
+		for _, iface := range interfaces {
+			if iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagRunning == 0 {
+				continue
+			}
+
+			glog.Infof("interface: name=%s, mtu=%d, flags=%s", iface.Name, iface.MTU, iface.Flags.String())
+
+			iface, err := net.InterfaceByName(iface.Name)
+			if err != nil {
+				glog.Errorf("lookup network iface %q: %s", iface.Name, err)
+			} else {
+				le, err := link.AttachTCX(link.TCXOptions{
+					Interface: iface.Index,
+					Program:   objs.TcEgress,
+					Attach:    ebpf.AttachTCXEgress,
+				})
+
+				if err != nil {
+					glog.Errorf("attach tc_egress to iface %q failed: %v", iface.Name, err)
+				} else {
+					hostLinks = append(hostLinks, le)
+				}
+
+				li, err := link.AttachTCX(link.TCXOptions{
+					Interface: iface.Index,
+					Program:   objs.TcIngress,
+					Attach:    ebpf.AttachTCXIngress,
+				})
+
+				if err != nil {
+					glog.Errorf("attach tc_ingress to iface %q failed: %v", iface.Name, err)
+				} else {
+					hostLinks = append(hostLinks, li)
+				}
+
+				lxdp, err := link.AttachXDP(link.XDPOptions{
+					Interface: iface.Index,
+					Program:   objs.XdpProgFunc,
+				})
+
+				if err != nil {
+					glog.Errorf("attach xdp to iface %q failed: %v", iface.Name, err)
+				} else {
+					hostLinks = append(hostLinks, lxdp)
+				}
+			}
+		}
+	}()
+	// NOTE: TEST ONLY: TO BE REMOVED LATER (end).
+
+	// NOTE: TEST ONLY: TO BE REMOVED LATER (start).
 	cgroupPath, err := findCgroupPath()
 	if err != nil {
 		glog.Errorf("findCgroupPath failed: %v", err)

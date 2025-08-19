@@ -4,7 +4,7 @@
 bpf2go \
     -target amd64 \
     -tags linux \
-    -cflags "-O2 -g -Wall -Werror -Wimplicit-function-declaration" \
+    -cflags "-O2 -g -Wall -Werror" \
     -type event \
     -output-dir bpf/ \
     -go-package bpf \
