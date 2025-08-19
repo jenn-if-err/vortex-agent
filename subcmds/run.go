@@ -12,7 +12,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -31,7 +30,6 @@ import (
 	"github.com/flowerinthenight/vortex-agent/params"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-	"golang.org/x/sys/unix"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -280,9 +278,9 @@ func run(ctx context.Context, done chan error) {
 	// NOTE: TEST ONLY: TO BE REMOVED LATER (end).
 
 	// NOTE: TEST ONLY: TO BE REMOVED LATER (start).
-	cgroupPath, err := findCgroupPath()
+	cgroupPath, err := internal.FindCgroupPath()
 	if err != nil {
-		glog.Errorf("findCgroupPath failed: %v", err)
+		glog.Errorf("FindCgroupPath failed: %v", err)
 	} else {
 		// sockMapPath := "/sys/fs/bpf/sk_msg_sock_map"
 
@@ -630,7 +628,7 @@ func run(ctx context.Context, done chan error) {
 				cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 				if err != nil {
 					glog.Errorf("ReadFile failed: %v", err)
-					return
+					continue
 				}
 
 				args := bytes.Split(cmdline, []byte{0x00})
@@ -659,8 +657,6 @@ func run(ctx context.Context, done chan error) {
 					continue // TODO: remove later
 				}
 
-				// ---------------------------------------------
-				// TODO: fn is adding to list outside of goroutine!
 				func() {
 					var libs []string
 					rootPath := fmt.Sprintf("/proc/%d/root", pid)
@@ -695,12 +691,11 @@ func run(ctx context.Context, done chan error) {
 						setupUprobes(ex, &cgroupLinks, &objs)
 					}
 				}()
-				// ---------------------------------------------
 
 				cgroupb, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 				if err != nil {
 					glog.Errorf("ReadFile failed: %v", err)
-					return
+					continue
 				}
 
 				cgroup := string(cgroupb)
@@ -1300,21 +1295,4 @@ func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects)
 	} else {
 		*links = append(*links, l)
 	}
-}
-
-func findCgroupPath() (string, error) {
-	cgroupPath := "/sys/fs/cgroup"
-
-	var st syscall.Statfs_t
-	err := syscall.Statfs(cgroupPath, &st)
-	if err != nil {
-		return "", err
-	}
-
-	isCgroupV2Enabled := st.Type == unix.CGROUP2_SUPER_MAGIC
-	if !isCgroupV2Enabled {
-		cgroupPath = filepath.Join(cgroupPath, "unified")
-	}
-
-	return cgroupPath, nil
 }

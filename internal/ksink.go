@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 func ChildCtx(p context.Context) context.Context {
@@ -77,6 +81,22 @@ func GetSelfRootPid() int {
 	}
 
 	return pid
+}
+
+func FindCgroupPath() (string, error) {
+	cgroupPath := "/sys/fs/cgroup"
+	var st syscall.Statfs_t
+	err := syscall.Statfs(cgroupPath, &st)
+	if err != nil {
+		return "", err
+	}
+
+	isCgroupV2Enabled := st.Type == unix.CGROUP2_SUPER_MAGIC
+	if !isCgroupV2Enabled {
+		cgroupPath = filepath.Join(cgroupPath, "unified")
+	}
+
+	return cgroupPath, nil
 }
 
 func IsK8s() bool {
