@@ -21,7 +21,7 @@ bpf/*.go
 coverage.*
 *.coverprofile
 profile.cov
-tests/
+tests
 
 # Go workspace file
 go.work
