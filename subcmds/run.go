@@ -1004,7 +1004,7 @@ func run(ctx context.Context, done chan error) {
 					}()
 					internalglog.LogInfo(line.String())
 
-					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Buf[:]), "python")) && params.RunfSaveDb {
+					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Comm), "python")) && params.RunfSaveDb {
 						cols := []string{
 							"id",
 							"idx",
