@@ -1004,7 +1004,7 @@ func run(ctx context.Context, done chan error) {
 					}()
 					internalglog.LogInfo(line.String())
 
-					if params.RunfSaveDb {
+					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Buf[:]), "python")) && params.RunfSaveDb {
 						fmt.Printf("[DEBUG] Saving chunk to Spanner for id=%v/%v, idx=%v\n", event.Tgid, event.Pid, event.ChunkIdx)
 						cols := []string{
 							"id",
