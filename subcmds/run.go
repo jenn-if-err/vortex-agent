@@ -21,7 +21,6 @@ import (
 	"syscall"
 	"time"
 
-	"cloud.google.com/go/spanner"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -33,7 +32,6 @@ import (
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
-	"google.golang.org/api/iterator"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -1249,61 +1247,4 @@ func findCgroupPath() (string, error) {
 	}
 
 	return cgroupPath, nil
-}
-
-// temporary, to avoid import errors, move to internal
-func AssemblePrompt(ctx context.Context, client *spanner.Client, id string) (string, error) {
-	resultCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-	go AssembleSession(ctx, client, id, resultCh, errCh)
-	select {
-	case result := <-resultCh:
-		return result, nil
-	case err := <-errCh:
-		return "", err
-	}
-}
-
-func AssembleSession(ctx context.Context, client *spanner.Client, id string, resultCh chan<- string, errCh chan<- error) {
-	stmt := spanner.Statement{
-		SQL:    `SELECT idx, content FROM llm_prompts WHERE id=@id ORDER BY CAST(idx AS INT64) ASC`,
-		Params: map[string]interface{}{"id": id},
-	}
-	iter := client.Single().Query(ctx, stmt)
-	defer iter.Stop()
-
-	var assembled strings.Builder
-	for {
-		row, err := iter.Next()
-		if err != nil {
-			if err == iterator.Done {
-				break
-			}
-			errCh <- err
-			return
-		}
-		var idx string
-		var content string
-		if err := row.Columns(&idx, &content); err != nil {
-			errCh <- err
-			return
-		}
-		if strings.TrimSpace(content) == "" {
-			continue // skip empty chunk
-		}
-		assembled.WriteString(content)
-	}
-	resultCh <- assembled.String()
-}
-
-// saves the assembled prompt to llm_prompts_assembled in Spanner.
-func saveAssembledPrompt(ctx context.Context, client *spanner.Client, id, content string) {
-	m := []*spanner.Mutation{
-		spanner.InsertOrUpdate("llm_prompts_assembled", []string{"id", "content", "created_at"},
-			[]interface{}{id, content, spanner.CommitTimestamp}),
-	}
-	_, err := client.Apply(ctx, m)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to save assembled prompt to Spanner: %v\n", err)
-	}
 }
