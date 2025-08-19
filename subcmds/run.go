@@ -571,6 +571,7 @@ func run(ctx context.Context, done chan error) {
 			return
 		}
 
+		pidSelf := internal.GetSelfRootNsPid()
 		sslAttached := make(map[string]bool) // key=libssl path, value=true
 
 		ticker := time.NewTicker(time.Second * 10)
@@ -598,6 +599,11 @@ func run(ctx context.Context, done chan error) {
 			for _, f := range files {
 				pid, err := strconv.Atoi(f.Name())
 				if err != nil {
+					continue
+				}
+
+				if pidSelf > 1 && pid == pidSelf {
+					glog.Infof("skipping self, pid=%d", pid)
 					continue
 				}
 

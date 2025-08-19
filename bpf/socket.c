@@ -181,8 +181,6 @@ static __always_inline void test_sni(struct sock *sk, struct msghdr *msg, size_t
 
         return;
     }
-
-    bpf_printk("test_sni: SNI processing completed");
 }
 
 /*

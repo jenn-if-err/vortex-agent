@@ -65,6 +65,20 @@ func GetInitPidNsId() int {
 	return pid
 }
 
+func GetSelfRootNsPid() int {
+	me, err := os.Readlink("/proc/self")
+	if err != nil {
+		return -1
+	}
+
+	pid, err := strconv.Atoi(me)
+	if err != nil {
+		return -1
+	}
+
+	return pid
+}
+
 func IsK8s() bool {
 	_, exists := os.LookupEnv("KUBERNETES_SERVICE_HOST")
 	return exists
