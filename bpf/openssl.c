@@ -136,8 +136,8 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
         return BPF_OK;
     }
 
-    // event->type = TYPE_UPROBE_SSL_WRITE; TEMP FIX
-    event->type = TYPE_URETPROBE_SSL_WRITE;
+    event->type = TYPE_UPROBE_SSL_WRITE; 
+    // event->type = TYPE_URETPROBE_SSL_WRITE; //temp fix
     set_proc_info(event);
     event->total_len = orig_num;
     event->chunk_len = -1;
