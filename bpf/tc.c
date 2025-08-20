@@ -8,10 +8,15 @@
 SEC("tc")
 int tc_ingress(struct __sk_buff *skb) { return TC_ACT_OK; }
 
+#define TLS_HANDSHAKE 0x16
+#define TLS_CLIENT_HELLO 0x01
+#define TLS_EXTENSION_SNI 0x0000
+
 SEC("tc")
 int tc_egress(struct __sk_buff *skb) {
     void *data = (void *)(long)skb->data;
     void *data_end = (void *)(long)skb->data_end;
+    __u32 payload_off;
 
     struct ethhdr *eth = data;
     if ((void *)eth + sizeof(*eth) > data_end)
@@ -27,6 +32,7 @@ int tc_egress(struct __sk_buff *skb) {
     if (iph->protocol != IPPROTO_TCP && iph->protocol != IPPROTO_UDP)
         return TC_ACT_OK;
 
+    payload_off = sizeof(*eth) + (iph->ihl * 4);
     void *transport_header = (void *)iph + (iph->ihl * 4);
     __u32 saddr;
     __u32 daddr;
@@ -48,10 +54,24 @@ int tc_egress(struct __sk_buff *skb) {
         sport = tcph->source;
         dport = tcph->dest;
 
-        if (bpf_ntohs(sport) == 22) /* SSH */
+        if (bpf_ntohs(sport) == 22) /* SSH, very noisy in test */
+            return TC_ACT_OK;
+
+        if (bpf_ntohs(dport) != 443) /* TLS is usually 443 */
             return TC_ACT_OK;
 
         bpf_printk("TCP packet: src=%pI4:%u, dst=%pI4:%u", &saddr, bpf_ntohs(sport), &daddr, bpf_ntohs(dport));
+
+        payload_off += (tcph->doff * 4);
+        unsigned char tls_header[6];
+        if (bpf_skb_load_bytes(skb, payload_off, tls_header, sizeof(tls_header)) < 0)
+            return TC_ACT_OK;
+
+        /* Check for TLS Handshake Record (0x16) and Client Hello (0x01). */
+        if (tls_header[0] != TLS_HANDSHAKE || tls_header[5] != TLS_CLIENT_HELLO)
+            return TC_ACT_OK;
+
+        bpf_printk("TLS Client Hello detected, checking for SNI extension");
         break;
 
     case IPPROTO_UDP:
@@ -61,7 +81,7 @@ int tc_egress(struct __sk_buff *skb) {
 
         sport = udph->source;
         dport = udph->dest;
-        bpf_printk("UDP packet: src=%pI4:%u, dst=%pI4:%u", &saddr, bpf_ntohs(sport), &daddr, bpf_ntohs(dport));
+        /* bpf_printk("UDP packet: src=%pI4:%u, dst=%pI4:%u", &saddr, bpf_ntohs(sport), &daddr, bpf_ntohs(dport)); */
         break;
     }
 

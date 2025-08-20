@@ -135,7 +135,7 @@ struct vtx_iov_iter {
     /* ... */
 };
 
-static __always_inline char* iter_type_to_string(u8 iter_type) {
+static __always_inline char *iter_type_to_string(u8 iter_type) {
     switch (iter_type) {
     case ITER_UBUF:
         return "ITER_UBUF";
