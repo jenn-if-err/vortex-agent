@@ -1,5 +1,7 @@
 package internal
 
+// halt for now
+
 import (
 	"context"
 	"strings"
