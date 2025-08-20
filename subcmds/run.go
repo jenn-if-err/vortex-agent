@@ -213,8 +213,6 @@ func run(ctx context.Context, done chan error) {
 		hostLinks = append(hostLinks, l)
 	}
 
-	// NOTE: TEST ONLY: TO BE REMOVED LATER (start).
-	// Will fail most likely, as requires v6.6+.
 	func() {
 		interfaces, err := net.Interfaces()
 		if err != nil {
@@ -264,7 +262,7 @@ func run(ctx context.Context, done chan error) {
 
 				lxdp, err := link.AttachXDP(link.XDPOptions{
 					Interface: iface.Index,
-					Program:   objs.XdpProgFunc,
+					Program:   objs.XdpProg,
 				})
 
 				if err != nil {
@@ -275,7 +273,6 @@ func run(ctx context.Context, done chan error) {
 			}
 		}
 	}()
-	// NOTE: TEST ONLY: TO BE REMOVED LATER (end).
 
 	cgroupPath, err := internal.FindCgroupPath()
 	if err != nil {
