@@ -125,8 +125,8 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
         .dport = dport,
     };
 
-    /* Is EVENT_BUF_LEN * 1000 enough? */
-    bpf_loop(1000, do_loop_send_SSL_payload, &data, 0);
+    /* Is EVENT_BUF_LEN * 1000 enough? no*/
+    bpf_loop(4096, do_loop_send_SSL_payload, &data, 0);
 
     /* Signal previous chunked stream's end. */
     struct event *event;
@@ -137,7 +137,6 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
     }
 
     event->type = TYPE_UPROBE_SSL_WRITE; 
-    // event->type = TYPE_URETPROBE_SSL_WRITE; //temp fix
     set_proc_info(event);
     event->total_len = orig_num;
     event->chunk_len = -1;
@@ -243,8 +242,8 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
         .dport = dport,
     };
 
-    /* Is EVENT_BUF_LEN * 1000 enough? jen: no*/
-    bpf_loop(4096, do_loop_send_SSL_payload, &data, 0);
+    /* Is EVENT_BUF_LEN * 1000 enough?*/
+    bpf_loop(1000, do_loop_send_SSL_payload, &data, 0);
 
     /* Signal previous chunked stream's end. */
     struct event *event;
