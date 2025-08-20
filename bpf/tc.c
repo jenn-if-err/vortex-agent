@@ -42,14 +42,13 @@ int tc_egress(struct __sk_buff *skb) {
     switch (iph->protocol) {
     case IPPROTO_TCP:
         tcph = transport_header;
-        if ((void *)tcph + sizeof(*tcph) > data_end) {
-            return TC_ACT_OK; // Not a valid TCP packet
-        }
+        if ((void *)tcph + sizeof(*tcph) > data_end)
+            return TC_ACT_OK;
 
         sport = tcph->source;
         dport = tcph->dest;
 
-        if (bpf_ntohs(sport) == 22)
+        if (bpf_ntohs(sport) == 22) /* SSH */
             return TC_ACT_OK;
 
         bpf_printk("TCP packet: src=%pI4:%u, dst=%pI4:%u", &saddr, bpf_ntohs(sport), &daddr, bpf_ntohs(dport));
@@ -57,9 +56,9 @@ int tc_egress(struct __sk_buff *skb) {
 
     case IPPROTO_UDP:
         udph = transport_header;
-        if ((void *)udph + sizeof(*udph) > data_end) {
-            return TC_ACT_OK; // Not a valid UDP packet
-        }
+        if ((void *)udph + sizeof(*udph) > data_end)
+            return TC_ACT_OK;
+
         sport = udph->source;
         dport = udph->dest;
         bpf_printk("UDP packet: src=%pI4:%u, dst=%pI4:%u", &saddr, bpf_ntohs(sport), &daddr, bpf_ntohs(dport));
