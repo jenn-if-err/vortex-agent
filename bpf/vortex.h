@@ -29,11 +29,16 @@ enum {
 };
 
 #define EVENT_BUF_LEN 512
+#define MAX_SNI_LEN 256
 
 #define TGID_ENABLE_ALL 0xFFFFFFFF
 #define CHUNKED_END_IDX 0xFFFFFFFF
 
 #define ETH_P_IP 0x0800 /* Internet Protocol packet */
+
+#define TLS_HANDSHAKE 0x16
+#define TLS_CLIENT_HELLO 0x01
+#define TLS_EXTENSION_SNI 0x0000
 
 enum {
     VORTEX_NO_TRACE,
