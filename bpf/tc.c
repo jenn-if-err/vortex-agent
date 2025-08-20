@@ -60,7 +60,8 @@ int tc_egress(struct __sk_buff *skb) {
         if (bpf_ntohs(dport) != 443) /* TLS is usually 443 */
             return TC_ACT_OK;
 
-        bpf_printk("TCP packet: src=%pI4:%u, dst=%pI4:%u", &saddr, bpf_ntohs(sport), &daddr, bpf_ntohs(dport));
+        bpf_printk("TCP packet: src=%pI4:%u, dst=%pI4:%u, sk=%p", &saddr, bpf_ntohs(sport), &daddr, bpf_ntohs(dport),
+                   skb->sk);
 
         payload_off += (tcph->doff * 4);
         unsigned char tls_header[6];

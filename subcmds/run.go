@@ -277,71 +277,46 @@ func run(ctx context.Context, done chan error) {
 	}()
 	// NOTE: TEST ONLY: TO BE REMOVED LATER (end).
 
-	// NOTE: TEST ONLY: TO BE REMOVED LATER (start).
 	cgroupPath, err := internal.FindCgroupPath()
 	if err != nil {
 		glog.Errorf("FindCgroupPath failed: %v", err)
 	} else {
-		// sockMapPath := "/sys/fs/bpf/sk_msg_sock_map"
+		l, err = link.AttachCgroup(link.CgroupOptions{
+			Path:    cgroupPath,
+			Attach:  ebpf.AttachCGroupInetSockCreate,
+			Program: objs.CgroupSockCreate,
+		})
 
-		// Pinning the map is necessary for the sk_msg program to find it.
-		// We must remove any previous pin first.
-		// os.Remove(sockMapPath)
-		// if err := os.MkdirAll(filepath.Dir(sockMapPath), 0755); err != nil {
-		// 	glog.Errorf("MkdirAll (%v) failed: %v", sockMapPath, err)
-		// } else {
-		// 	// Pin the sock_hash map to the BPF filesystem. This is how the
-		// 	// sock_ops and sk_msg programs will share the map.
-		// 	if err := objs.SockMap.Pin(sockMapPath); err != nil {
-		// 		glog.Errorf("pinning %v failed: %v", sockMapPath, err)
-		// 	} else {
-		// 		glog.Infof("%v pinned", sockMapPath)
-		// 		defer func() {
-		// 			objs.SockMap.Unpin()
-		// 			os.Remove(sockMapPath)
-		// 		}()
-		// 	}
-		// }
+		if err != nil {
+			glog.Errorf("attaching cgroup/sock_create to %v failed: %v", cgroupPath, err)
+		} else {
+			hostLinks = append(hostLinks, l)
+		}
 
-		// The sock_ops program is attached to the cgroup.
-		// l, err = link.AttachCgroup(link.CgroupOptions{
-		// 	Path:    cgroupPath,
-		// 	Attach:  ebpf.AttachCGroupSockOps,
-		// 	Program: objs.BpfSockopsHandler,
-		// })
+		l, err = link.AttachCgroup(link.CgroupOptions{
+			Path:    cgroupPath,
+			Attach:  ebpf.AttachCgroupInetSockRelease,
+			Program: objs.CgroupSockRelease,
+		})
 
-		// if err != nil {
-		// 	glog.Errorf("attaching sock_ops to %v failed: %v", cgroupPath, err)
-		// } else {
-		// 	hostLinks = append(hostLinks, l)
-		// 	glog.Infof("sock_ops attached to %s", cgroupPath)
-		// }
+		if err != nil {
+			glog.Errorf("attaching cgroup/sock_release to %v failed: %v", cgroupPath, err)
+		} else {
+			hostLinks = append(hostLinks, l)
+		}
 
-		// The sk_msg program must be attached to the sock_hash map using a raw link.
-		// This is the general-purpose attachment function for link types that don't
-		// have a dedicated helper.
-		// err = link.RawAttachProgram(link.RawAttachProgramOptions{
-		// 	Program: objs.BpfSkMsgHandler,
-		// 	Target:  objs.SockMap.FD(),
-		// 	Attach:  ebpf.AttachSkMsgVerdict,
-		// })
+		l, err = link.AttachCgroup(link.CgroupOptions{
+			Path:    cgroupPath,
+			Attach:  ebpf.AttachCGroupInet4Connect,
+			Program: objs.CgroupConnect4,
+		})
 
-		// if err != nil {
-		// 	glog.Errorf("RawAttachProgram failed: %v", err)
-		// } else {
-		// 	glog.Infof("sk_msg program attached to sock_map")
-		// 	defer func() {
-		// 		link.RawDetachProgram(link.RawDetachProgramOptions{
-		// 			Program: objs.BpfSkMsgHandler,
-		// 			Target:  objs.SockMap.FD(),
-		// 			Attach:  ebpf.AttachSkMsgVerdict,
-		// 		})
-		// 	}()
-		// }
-
-		_ = cgroupPath
+		if err != nil {
+			glog.Errorf("attaching cgroup/connect4 to %v failed: %v", cgroupPath, err)
+		} else {
+			hostLinks = append(hostLinks, l)
+		}
 	}
-	// NOTE: TEST ONLY: TO BE REMOVED LATER (end).
 
 	isk8s := internal.IsK8s()
 	uprobeFiles := strings.Split(params.RunfUprobes, ",")
