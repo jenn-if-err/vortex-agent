@@ -1,0 +1,9 @@
+node_modules/
+tests
+daemonset.yaml
+localbuild.sh
+.git/
+.github/
+.gitignore
+.clang-format
+.clangd

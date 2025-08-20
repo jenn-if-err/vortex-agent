@@ -12,7 +12,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -31,7 +30,6 @@ import (
 	"github.com/flowerinthenight/vortex-agent/params"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-	"golang.org/x/sys/unix"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -216,9 +214,73 @@ func run(ctx context.Context, done chan error) {
 	}
 
 	// NOTE: TEST ONLY: TO BE REMOVED LATER (start).
-	cgroupPath, err := findCgroupPath()
+	// Will fail most likely, as requires v6.6+.
+	func() {
+		interfaces, err := net.Interfaces()
+		if err != nil {
+			glog.Errorf("Error getting network interfaces: %v", err)
+			return
+		}
+
+		glog.Info("available network interfaces:")
+		for _, iface := range interfaces {
+			if iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagRunning == 0 {
+				continue
+			}
+
+			glog.Infof("interface: name=%s, mtu=%d, flags=%s", iface.Name, iface.MTU, iface.Flags.String())
+
+			iface, err := net.InterfaceByName(iface.Name)
+			if err != nil {
+				glog.Errorf("lookup network iface %q: %s", iface.Name, err)
+			} else {
+				le, err := link.AttachTCX(link.TCXOptions{
+					Interface: iface.Index,
+					Program:   objs.TcEgress,
+					Attach:    ebpf.AttachTCXEgress,
+				})
+
+				if err != nil {
+					glog.Errorf("attach tc_egress to iface %q failed: %v", iface.Name, err)
+				} else {
+					hostLinks = append(hostLinks, le)
+				}
+
+				li, err := link.AttachTCX(link.TCXOptions{
+					Interface: iface.Index,
+					Program:   objs.TcIngress,
+					Attach:    ebpf.AttachTCXIngress,
+				})
+
+				if err != nil {
+					glog.Errorf("attach tc_ingress to iface %q failed: %v", iface.Name, err)
+				} else {
+					hostLinks = append(hostLinks, li)
+				}
+
+				lxdp, err := link.AttachXDP(link.XDPOptions{
+					Interface: iface.Index,
+					Program:   objs.XdpProgFunc,
+				})
+
+				if err != nil {
+					glog.Errorf("attach xdp to iface %q failed: %v", iface.Name, err)
+				} else {
+					hostLinks = append(hostLinks, lxdp)
+				}
+			}
+		}
+	}()
+	// NOTE: TEST ONLY: TO BE REMOVED LATER (end).
+
+	// NOTE: TEST ONLY: TO BE REMOVED LATER (start).
+	cgroupPath, err := internal.FindCgroupPath()
 	if err != nil {
-		glog.Errorf("findCgroupPath failed: %v", err)
+		glog.Errorf("FindCgroupPath failed: %v", err)
 	} else {
 		// sockMapPath := "/sys/fs/bpf/sk_msg_sock_map"
 
@@ -507,6 +569,7 @@ func run(ctx context.Context, done chan error) {
 			return
 		}
 
+		pidSelf := internal.GetSelfRootPid()
 		sslAttached := make(map[string]bool) // key=libssl path, value=true
 
 		ticker := time.NewTicker(time.Second * 10)
@@ -537,6 +600,11 @@ func run(ctx context.Context, done chan error) {
 					continue
 				}
 
+				if pidSelf > 1 && pid == pidSelf {
+					glog.Infof("skipping self, pid=%d", pid)
+					continue
+				}
+
 				nspidLink, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", pid))
 				if err != nil {
 					continue
@@ -560,7 +628,7 @@ func run(ctx context.Context, done chan error) {
 				cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 				if err != nil {
 					glog.Errorf("ReadFile failed: %v", err)
-					return
+					continue
 				}
 
 				args := bytes.Split(cmdline, []byte{0x00})
@@ -589,8 +657,6 @@ func run(ctx context.Context, done chan error) {
 					continue // TODO: remove later
 				}
 
-				// ---------------------------------------------
-				// TODO: fn is adding to list outside of goroutine!
 				func() {
 					var libs []string
 					rootPath := fmt.Sprintf("/proc/%d/root", pid)
@@ -625,12 +691,11 @@ func run(ctx context.Context, done chan error) {
 						setupUprobes(ex, &cgroupLinks, &objs)
 					}
 				}()
-				// ---------------------------------------------
 
 				cgroupb, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 				if err != nil {
 					glog.Errorf("ReadFile failed: %v", err)
-					return
+					continue
 				}
 
 				cgroup := string(cgroupb)
@@ -1004,7 +1069,7 @@ func run(ctx context.Context, done chan error) {
 					}()
 					internalglog.LogInfo(line.String())
 
-					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Buf[:]), "python")) && params.RunfSaveDb {
+					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Comm), "python")) && params.RunfSaveDb {
 						cols := []string{
 							"id",
 							"idx",
@@ -1230,21 +1295,4 @@ func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects)
 	} else {
 		*links = append(*links, l)
 	}
-}
-
-func findCgroupPath() (string, error) {
-	cgroupPath := "/sys/fs/cgroup"
-
-	var st syscall.Statfs_t
-	err := syscall.Statfs(cgroupPath, &st)
-	if err != nil {
-		return "", err
-	}
-
-	isCgroupV2Enabled := st.Type == unix.CGROUP2_SUPER_MAGIC
-	if !isCgroupV2Enabled {
-		cgroupPath = filepath.Join(cgroupPath, "unified")
-	}
-
-	return cgroupPath, nil
 }
