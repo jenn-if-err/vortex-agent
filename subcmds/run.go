@@ -860,8 +860,8 @@ func run(ctx context.Context, done chan error) {
 		}
 	}()
 
-	mutBuf := make([]internal.SpannerPayload, 0, 1000)
-	mutBufCh := make(chan internal.SpannerPayload, 2048)
+	mutBuf := make([]internal.SpannerPayload, 0, 4096)
+	mutBufCh := make(chan internal.SpannerPayload, 8192)
 
 	flush := func() {
 		if len(mutBuf) == 0 {
@@ -890,7 +890,7 @@ func run(ctx context.Context, done chan error) {
 					return
 				}
 				mutBuf = append(mutBuf, s)
-				if len(mutBuf) >= 1000 {
+				if len(mutBuf) >= 4096 {
 					flush()
 				}
 			case <-tickerFlush.C:

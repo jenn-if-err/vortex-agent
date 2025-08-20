@@ -243,8 +243,8 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
         .dport = dport,
     };
 
-    /* Is EVENT_BUF_LEN * 1000 enough? */
-    bpf_loop(1000, do_loop_send_SSL_payload, &data, 0);
+    /* Is EVENT_BUF_LEN * 1000 enough? jen: no*/
+    bpf_loop(4096, do_loop_send_SSL_payload, &data, 0);
 
     /* Signal previous chunked stream's end. */
     struct event *event;
