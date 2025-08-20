@@ -111,8 +111,14 @@ int tc_egress(struct __sk_buff *skb) {
         if (bpf_ntohs(dport) != 443) /* TLS is usually 443 */
             return TC_ACT_OK;
 
-        bpf_printk("TCP packet: src=%pI4:%u, dst=%pI4:%u, sk=%p", &saddr, bpf_ntohs(sport), &daddr, bpf_ntohs(dport),
-                   skb->sk);
+        __u64 pid_tgid = 0;
+        struct bpf_sock *sk = BPF_CORE_READ(skb, sk);
+        __u64 *val = bpf_map_lookup_elem(&sk_to_pid_tgid, &sk);
+        if (val)
+            pid_tgid = *val;
+
+        bpf_printk("tc_egress: TCP packet: src=%pI4:%u, dst=%pI4:%u, sk=%p, pid_tgid=%llu", &saddr, bpf_ntohs(sport),
+                   &daddr, bpf_ntohs(dport), skb->sk, pid_tgid);
 
         offset += (tcph->doff * 4);
         unsigned char tls_header[6];
@@ -174,7 +180,7 @@ int tc_egress(struct __sk_buff *skb) {
             return TC_ACT_OK;
 
         sni[sni_len] = '\0';
-        bpf_printk("SNI=%s", sni);
+        bpf_printk("tc_egress: SNI=%s", sni);
 
         break;
 
@@ -185,7 +191,9 @@ int tc_egress(struct __sk_buff *skb) {
 
         sport = udph->source;
         dport = udph->dest;
-        /* bpf_printk("UDP packet: src=%pI4:%u, dst=%pI4:%u", &saddr, bpf_ntohs(sport), &daddr, bpf_ntohs(dport)); */
+        /* bpf_printk("tc_egress: UDP packet: src=%pI4:%u, dst=%pI4:%u", &saddr, bpf_ntohs(sport), &daddr,
+         * bpf_ntohs(dport)); */
+
         break;
     }
 

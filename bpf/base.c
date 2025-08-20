@@ -146,6 +146,14 @@ struct {
     __type(value, struct fd_connect_v);
 } fd_connect SEC(".maps");
 
+/* Active on cgroup/connect4, removed on cgroup/sock_release. */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 1024);
+    __type(key, struct bpf_sock *); /* sk */
+    __type(value, __u64);           /* pid_tgid */
+} sk_to_pid_tgid SEC(".maps");
+
 /* Set process information in the event structure. */
 static __always_inline void set_proc_info(struct event *event) {
     bpf_get_current_comm(&event->comm, sizeof(event->comm));

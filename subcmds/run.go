@@ -280,12 +280,12 @@ func run(ctx context.Context, done chan error) {
 	} else {
 		l, err = link.AttachCgroup(link.CgroupOptions{
 			Path:    cgroupPath,
-			Attach:  ebpf.AttachCGroupInetSockCreate,
-			Program: objs.CgroupSockCreate,
+			Attach:  ebpf.AttachCGroupInet4Connect,
+			Program: objs.CgroupConnect4,
 		})
 
 		if err != nil {
-			glog.Errorf("attaching cgroup/sock_create to %v failed: %v", cgroupPath, err)
+			glog.Errorf("attaching cgroup/connect4 to %v failed: %v", cgroupPath, err)
 		} else {
 			hostLinks = append(hostLinks, l)
 		}
@@ -298,18 +298,6 @@ func run(ctx context.Context, done chan error) {
 
 		if err != nil {
 			glog.Errorf("attaching cgroup/sock_release to %v failed: %v", cgroupPath, err)
-		} else {
-			hostLinks = append(hostLinks, l)
-		}
-
-		l, err = link.AttachCgroup(link.CgroupOptions{
-			Path:    cgroupPath,
-			Attach:  ebpf.AttachCGroupInet4Connect,
-			Program: objs.CgroupConnect4,
-		})
-
-		if err != nil {
-			glog.Errorf("attaching cgroup/connect4 to %v failed: %v", cgroupPath, err)
 		} else {
 			hostLinks = append(hostLinks, l)
 		}
