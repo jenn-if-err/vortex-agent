@@ -101,90 +101,6 @@ static __always_inline void set_SSL_callstack_socket_info(struct ssl_callstack_k
     BPF_CORE_READ_INTO(&val->dport, sk, __sk_common.skc_dport);
 }
 
-struct vtx_t {
-    union {
-        const struct iovec *iov;
-        const struct kvec *kvec;
-        const struct bio_vec *bvec;
-        const struct folio_queue *folioq;
-        struct xarray *xarray;
-        void *ubuf;
-    };
-    size_t count;
-};
-
-struct v6_4_t {
-    union {
-        // Starting v6.14, iov became __iov.
-        const struct iovec *__iov;
-        const struct kvec *kvec;
-        const struct bio_vec *bvec;
-        const struct folio_queue *folioq;
-        struct xarray *xarray;
-        void *ubuf;
-    };
-    size_t count;
-};
-
-struct vtx_iov_iter {
-    u8 iter_type;
-    bool nofault;
-    bool data_source;
-    size_t iov_offset;
-    struct v6_4_t v6_4_t;
-    /* ... */
-};
-
-static __always_inline char *iter_type_to_string(u8 iter_type) {
-    switch (iter_type) {
-    case ITER_UBUF:
-        return "ITER_UBUF";
-    case ITER_IOVEC:
-        return "ITER_IOVEC";
-    case ITER_BVEC:
-        return "ITER_BVEC";
-    case ITER_KVEC:
-        return "ITER_KVEC";
-    case ITER_XARRAY:
-        return "ITER_XARRAY";
-    case ITER_FOLIOQ:
-        return "ITER_FOLIOQ";
-    case ITER_DISCARD:
-        return "ITER_DISCARD";
-    default:
-        return "UNKNOWN_ITER_TYPE";
-    }
-}
-
-static __always_inline void test_sni(struct sock *sk, struct msghdr *msg, size_t size, int ret) {
-    struct vtx_iov_iter *iter = (struct vtx_iov_iter *)&msg->msg_iter;
-    if (!iter)
-        return;
-
-    bpf_printk("iter_type=%s (%u), sz=%zu, ret=%d", iter_type_to_string(iter->iter_type), iter->iter_type, size, ret);
-
-    struct v6_4_t *p = (struct v6_4_t *)&iter->v6_4_t;
-    if (!p)
-        return;
-
-    struct vtx_t *vtx = (struct vtx_t *)p;
-    if (!vtx)
-        return;
-
-    /*
-    if (iter->iter_type == ITER_UBUF) {
-        char buf[2];
-        if (bpf_probe_read_user(&buf, sizeof(buf), vtx->ubuf) < 0)
-            bpf_printk("test_sni: bpf_probe_read_user failed");
-
-        char *c = (char *)&buf;
-        bpf_printk("test_sni: ubuf=%u", *c);
-
-        return;
-    }
-    */
-}
-
 /*
  * fentry/fexit hooks can be found in:
  * /sys/kernel/tracing/available_filter_functions
@@ -200,8 +116,6 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
     set_SSL_callstack_socket_info(&key, sk);
-
-    test_sni(sk, msg, size, ret);
 
     return BPF_OK;
 }
