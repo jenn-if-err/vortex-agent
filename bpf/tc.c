@@ -117,9 +117,6 @@ int tc_egress(struct __sk_buff *skb) {
         if (val)
             pid_tgid = *val;
 
-        bpf_printk("tc_egress: TCP packet: src=%pI4:%u, dst=%pI4:%u, sk=%p, pid_tgid=%llu", &saddr, bpf_ntohs(sport),
-                   &daddr, bpf_ntohs(dport), skb->sk, pid_tgid);
-
         offset += (tcph->doff * 4);
         unsigned char tls_header[6];
         if (bpf_skb_load_bytes(skb, offset, tls_header, sizeof(tls_header)) < 0)
@@ -180,7 +177,8 @@ int tc_egress(struct __sk_buff *skb) {
             return TC_ACT_OK;
 
         sni[sni_len] = '\0';
-        bpf_printk("tc_egress: SNI=%s", sni);
+        bpf_printk("tc_egress: sni=%s, src=%pI4:%u, dst=%pI4:%u, pid_tgid=%llu", sni, &saddr, bpf_ntohs(sport), &daddr,
+                   bpf_ntohs(dport), pid_tgid);
 
         break;
 
