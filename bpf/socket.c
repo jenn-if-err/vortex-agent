@@ -171,6 +171,7 @@ static __always_inline void test_sni(struct sock *sk, struct msghdr *msg, size_t
     if (!vtx)
         return;
 
+    /*
     if (iter->iter_type == ITER_UBUF) {
         char buf[2];
         if (bpf_probe_read_user(&buf, sizeof(buf), vtx->ubuf) < 0)
@@ -181,6 +182,7 @@ static __always_inline void test_sni(struct sock *sk, struct msghdr *msg, size_t
 
         return;
     }
+    */
 }
 
 /*

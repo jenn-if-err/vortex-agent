@@ -33,6 +33,8 @@ enum {
 #define TGID_ENABLE_ALL 0xFFFFFFFF
 #define CHUNKED_END_IDX 0xFFFFFFFF
 
+#define ETH_P_IP 0x0800 /* Internet Protocol packet */
+
 enum {
     VORTEX_NO_TRACE,
     VORTEX_TRACE,
