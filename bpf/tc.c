@@ -126,10 +126,8 @@ int tc_egress(struct __sk_buff *skb) {
         if (tls_header[0] != TLS_HANDSHAKE || tls_header[5] != TLS_CLIENT_HELLO)
             return TC_ACT_OK;
 
-        offset += 5;
-
-        /* u8 msg_type (already checked); u24 length; u16 version; u8 random[32]; */
-        offset += 1 + 3 + 2 + 32;
+        /* tls_header[6]; u24 length; u16 version; u8 random[32]; */
+        offset += 6 + 3 + 2 + 32;
 
         __u8 session_id_len;
         if (bpf_skb_load_bytes(skb, offset, &session_id_len, 1) < 0)
@@ -189,8 +187,6 @@ int tc_egress(struct __sk_buff *skb) {
 
         sport = udph->source;
         dport = udph->dest;
-        /* bpf_printk("tc_egress: UDP packet: src=%pI4:%u, dst=%pI4:%u", &saddr, bpf_ntohs(sport), &daddr,
-         * bpf_ntohs(dport)); */
 
         break;
     }
