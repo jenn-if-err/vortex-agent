@@ -67,4 +67,9 @@ enum {
     TC_ACT_REDIRECT = 7,
 };
 
+enum {
+    CG_SOCK_BLOCK = 0,
+    CG_SOCK_ALLOW = 1,
+};
+
 #endif /* __VORTEX_H */

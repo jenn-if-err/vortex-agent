@@ -5,83 +5,6 @@
 #ifndef __BPF_VORTEX_SOCKET_C
 #define __BPF_VORTEX_SOCKET_C
 
-static __always_inline int set_sock_sendrecv_sk_info(struct event *event, struct socket *sock, long ret) {
-    event->total_len = ret;
-    int ret_val = 0;
-
-    __s16 sk_type = 0;
-    BPF_CORE_READ_INTO(&sk_type, sock, type);
-    if (!(sk_type == SOCK_STREAM || sk_type == SOCK_DGRAM))
-        ret_val = -1;
-
-    __u16 family = 0;
-    BPF_CORE_READ_INTO(&family, sock->sk, __sk_common.skc_family);
-    if (!(family == AF_INET || family == AF_INET6))
-        ret_val = -1;
-
-    BPF_CORE_READ_INTO(&event->saddr, sock->sk, __sk_common.skc_rcv_saddr);
-    BPF_CORE_READ_INTO(&event->sport, sock->sk, __sk_common.skc_num);
-    BPF_CORE_READ_INTO(&event->daddr, sock->sk, __sk_common.skc_daddr);
-    event->dport = bpf_htons(BPF_CORE_READ(sock->sk, __sk_common.skc_dport));
-
-    return ret_val;
-}
-
-/*
- * fentry/fexit hooks can be found in:
- * /sys/kernel/tracing/available_filter_functions
- *
- * https://elixir.bootlin.com/linux/v6.1.146/source/include/linux/net.h#L261
- */
-/*
-SEC("fentry/sock_sendmsg")
-int BPF_PROG2(sock_sendmsg_fentry, struct socket *, sock, struct msghdr *, msg) {
-    int trace_all = COMM_NO_TRACE_ALL;
-    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
-        return BPF_OK;
-
-    if (trace_all == COMM_TRACE_ALL)
-        return BPF_OK;
-
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-
-    bpf_printk("sysfentry/sock_sendmsg: pid_tgid=%llu", pid_tgid);
-
-    return BPF_OK;
-}
-*/
-
-/* https://elixir.bootlin.com/linux/v6.1.146/source/include/linux/net.h#L262 */
-/*
-SEC("fexit/sock_recvmsg")
-int BPF_PROG2(sock_recvmsg_fexit, struct socket *, sock, struct msghdr *, msg, int, flags, int, ret) {
-    if (ret <= 0)
-        return 0;
-
-    struct event *e;
-    e = bpf_ringbuf_reserve(&events, sizeof(struct event), 0);
-    if (!e)
-        return 0;
-
-    e->type = TYPE_FEXIT_SOCK_RECVMSG;
-    set_proc_info(e);
-
-    if (should_trace(e->tgid) == 0) {
-        bpf_ringbuf_discard(e, 0);
-        return 0;
-    }
-
-    int discard = set_sock_sendrecv_sk_info(e, sock, ret);
-    if (discard < 0) {
-        bpf_ringbuf_discard(e, 0);
-        return 0;
-    }
-
-    bpf_ringbuf_submit(e, 0);
-    return 0;
-}
-*/
-
 static __always_inline void set_send_recv_msg_sk_info(struct event *event, struct sock *sk) {
     BPF_CORE_READ_INTO(&event->saddr, sk, __sk_common.skc_rcv_saddr);
     BPF_CORE_READ_INTO(&event->sport, sk, __sk_common.skc_num);
@@ -307,6 +230,26 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
         bpf_map_delete_elem(&fd_connect, &pid_tgid);
 
     return BPF_OK;
+}
+
+SEC("cgroup/connect4")
+int cgroup_connect4(struct bpf_sock_addr *ctx) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 17, 0))
+        return CG_SOCK_ALLOW;
+
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    struct bpf_sock *sk = BPF_CORE_READ(ctx, sk);
+    bpf_map_update_elem(&sk_to_pid_tgid, &sk, &pid_tgid, BPF_ANY);
+    return CG_SOCK_ALLOW;
+}
+
+SEC("cgroup/sock_release")
+int cgroup_sock_release(struct bpf_sock *ctx) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 10, 0))
+        return CG_SOCK_ALLOW;
+
+    bpf_map_delete_elem(&sk_to_pid_tgid, &ctx);
+    return CG_SOCK_ALLOW;
 }
 
 #endif /* __BPF_VORTEX_SOCKET_C */
