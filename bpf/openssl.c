@@ -92,10 +92,8 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
 
     int ret = (int)PT_REGS_RC(ctx);
-    if (ret <= 0) {
-        bpf_map_delete_elem(&ssl_callstack, &key);
-        return BPF_OK;
-    }
+    if (ret <= 0)
+        goto cleanup_and_exit;
 
     struct ssl_callstack_v *val;
     val = bpf_map_lookup_elem(&ssl_callstack, &key);
@@ -130,10 +128,8 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
     /* Signal previous chunked stream's end. */
     struct event *event;
     event = rb_events_reserve_with_stats();
-    if (!event) {
-        bpf_map_delete_elem(&ssl_callstack, &key);
-        return BPF_OK;
-    }
+    if (!event)
+        goto cleanup_and_exit;
 
     event->type = TYPE_UPROBE_SSL_WRITE;
     set_proc_info(event);
@@ -147,6 +143,7 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
     rb_events_submit_with_stats(event, 0);
 
+cleanup_and_exit:
     bpf_map_delete_elem(&ssl_callstack, &key);
     return BPF_OK;
 }
@@ -224,15 +221,11 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
 
     int ret = (int)PT_REGS_RC(ctx);
-    if (ret <= 0) {
-        bpf_map_delete_elem(&ssl_callstack, &key);
-        return BPF_OK;
-    }
+    if (ret <= 0)
+        goto cleanup_and_exit;
 
-    if (read <= 0) {
-        bpf_map_delete_elem(&ssl_callstack, &key);
-        return BPF_OK;
-    }
+    if (read <= 0)
+        goto cleanup_and_exit;
 
     struct ssl_callstack_v *val;
     val = bpf_map_lookup_elem(&ssl_callstack, &key);
@@ -267,7 +260,7 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
     struct event *event;
     event = rb_events_reserve_with_stats();
     if (!event)
-        return BPF_OK;
+        goto cleanup_and_exit;
 
     event->type = TYPE_UPROBE_SSL_WRITE;
     set_proc_info(event);
@@ -281,6 +274,7 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
     rb_events_submit_with_stats(event, 0);
 
+cleanup_and_exit:
     bpf_map_delete_elem(&ssl_callstack, &key);
     return BPF_OK;
 }
