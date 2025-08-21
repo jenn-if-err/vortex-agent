@@ -156,28 +156,48 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
  * int SSL_write(SSL *s, const void *buf, int num);
  */
 SEC("uprobe/SSL_write")
-int uprobe_SSL_write(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); }
+int uprobe_SSL_write(struct pt_regs *ctx) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
+        return BPF_OK;
+
+    return do_uprobe_SSL_write(ctx);
+}
 
 /*
  * Synopsis:
  * int SSL_write(SSL *s, const void *buf, int num);
  */
 SEC("uretprobe/SSL_write")
-int uretprobe_SSL_write(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx, (int)PT_REGS_RC(ctx)); }
+int uretprobe_SSL_write(struct pt_regs *ctx) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
+        return BPF_OK;
+
+    return do_uretprobe_SSL_write(ctx, (int)PT_REGS_RC(ctx));
+}
 
 /*
  * Synopsis:
  * int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written);
  */
 SEC("uprobe/SSL_write_ex")
-int uprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); }
+int uprobe_SSL_write_ex(struct pt_regs *ctx) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
+        return BPF_OK;
+
+    return do_uprobe_SSL_write(ctx);
+}
 
 /*
  * Synopsis:
  * int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written);
  */
 SEC("uretprobe/SSL_write_ex")
-int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx, (int)PT_REGS_PARM3(ctx)); }
+int uretprobe_SSL_write_ex(struct pt_regs *ctx) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
+        return BPF_OK;
+
+    return do_uretprobe_SSL_write(ctx, (int)PT_REGS_PARM3(ctx));
+}
 
 /* Shared with uprobe/SSL_read and uprobe/SSL_read_ex. */
 static __always_inline int do_uprobe_SSL_read(struct pt_regs *ctx) {
@@ -270,14 +290,24 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
  * int SSL_read(SSL *s, void *buf, int num);
  */
 SEC("uprobe/SSL_read")
-int uprobe_SSL_read(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
+int uprobe_SSL_read(struct pt_regs *ctx) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
+        return BPF_OK;
+
+    return do_uprobe_SSL_read(ctx);
+}
 
 /*
  * Synopsis:
  * int SSL_read(SSL *s, void *buf, int num);
  */
 SEC("uretprobe/SSL_read")
-int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx, (int)PT_REGS_RC(ctx)); }
+int uretprobe_SSL_read(struct pt_regs *ctx) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
+        return BPF_OK;
+
+    return do_uretprobe_SSL_read(ctx, (int)PT_REGS_RC(ctx));
+}
 
 /*
  * Synopsis:
@@ -285,6 +315,9 @@ int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx, 
  */
 SEC("uprobe/SSL_read_ex")
 int uprobe_SSL_read_ex(struct pt_regs *ctx) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
+        return BPF_OK;
+
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u64 read = (__u64)PT_REGS_PARM4(ctx);
     bpf_map_update_elem(&ssl_read_ex_p4, &pid_tgid, &read, BPF_ANY);
@@ -297,6 +330,9 @@ int uprobe_SSL_read_ex(struct pt_regs *ctx) {
  */
 SEC("uretprobe/SSL_read_ex")
 int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
+        return BPF_OK;
+
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u64 *read = bpf_map_lookup_elem(&ssl_read_ex_p4, &pid_tgid);
     if (!read)

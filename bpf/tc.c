@@ -6,7 +6,12 @@
 #define __BPF_VORTEX_TC_C
 
 SEC("tc")
-int tc_ingress(struct __sk_buff *skb) { return TC_ACT_OK; }
+int tc_ingress(struct __sk_buff *skb) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
+        return TC_ACT_OK;
+
+    return TC_ACT_OK;
+}
 
 struct sni_loop_data {
     struct __sk_buff *skb;
@@ -60,6 +65,7 @@ static int loop_parse_sni(u64 index, struct sni_loop_data *data) {
 
 SEC("tc")
 int tc_egress(struct __sk_buff *skb) {
+    /* NOTE: Temp: doesn't load with GKE's v6.6, but works with v6.12+ normal VM. */
     if (LINUX_KERNEL_VERSION < KERNEL_VERSION(6, 12, 0))
         return TC_ACT_OK;
 
