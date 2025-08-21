@@ -11,6 +11,8 @@
 #ifndef __BPF_VORTEX_COMMON_C
 #define __BPF_VORTEX_COMMON_C
 
+extern int LINUX_KERNEL_VERSION __kconfig;
+
 /* Event structure to be sent to userspace. */
 struct event {
     __u8 comm[TASK_COMM_LEN]; /* for debugging only */

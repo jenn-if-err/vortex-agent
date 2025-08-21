@@ -165,6 +165,9 @@ int tc_egress(struct __sk_buff *skb) {
         if (bpf_loop(20, loop_parse_sni, &loop_data, 0) < 0)
             return TC_ACT_OK;
 
+        if (LINUX_KERNEL_VERSION < KERNEL_VERSION(6, 12, 0))
+            return TC_ACT_OK;
+
         if (sni_len > MAX_SNI_LEN - 1)
             sni_len = MAX_SNI_LEN - 1;
 
