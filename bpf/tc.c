@@ -45,11 +45,6 @@ static int loop_parse_sni(u64 index, struct sni_loop_data *data) {
             return BPF_END_LOOP;
 
         __u16 len_to_copy = sni_name_len < MAX_SNI_LEN ? sni_name_len : MAX_SNI_LEN - 1;
-        if (len_to_copy < 1)
-            return BPF_END_LOOP;
-
-        if (len_to_copy > MAX_SNI_LEN - 1)
-            len_to_copy = MAX_SNI_LEN - 1;
 
         /* Pass back values to caller. */
         *data->sni_len = (__u32)len_to_copy;
@@ -156,7 +151,7 @@ int tc_egress(struct __sk_buff *skb) {
 
         __u32 extensions_end = offset + extensions_len;
 
-        __u32 sni_len = 0;
+        __u32 sni_len;
         char sni[MAX_SNI_LEN];
 
         struct sni_loop_data loop_data = {
@@ -166,13 +161,15 @@ int tc_egress(struct __sk_buff *skb) {
             .sni_len = &sni_len,
         };
 
-        bpf_loop(20, loop_parse_sni, &loop_data, 0);
-
-        if (sni_len < 1)
+        if (bpf_loop(20, loop_parse_sni, &loop_data, 0) < 0)
             return TC_ACT_OK;
 
-        if (bpf_skb_load_bytes(skb, offset, (void *)sni, sni_len) < 0)
-            return TC_ACT_OK;
+        if (sni_len > MAX_SNI_LEN - 1)
+            sni_len = MAX_SNI_LEN - 1;
+
+        if (sni_len > 0 && (offset + sni_len) < extensions_end)
+            if (bpf_skb_load_bytes(skb, offset, sni, sni_len) < 0)
+                return TC_ACT_OK;
 
         sni[sni_len] = '\0';
         bpf_printk("tc_egress: sni=%s, src=%pI4:%u, dst=%pI4:%u, pid_tgid=%llu", sni, &saddr, bpf_ntohs(sport), &daddr,
