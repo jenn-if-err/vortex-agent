@@ -60,6 +60,9 @@ static int loop_parse_sni(u64 index, struct sni_loop_data *data) {
 
 SEC("tc")
 int tc_egress(struct __sk_buff *skb) {
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(6, 12, 0))
+        return TC_ACT_OK;
+
     void *data = (void *)(long)skb->data;
     void *data_end = (void *)(long)skb->data_end;
     __u32 offset;
@@ -163,9 +166,6 @@ int tc_egress(struct __sk_buff *skb) {
         };
 
         if (bpf_loop(20, loop_parse_sni, &loop_data, 0) < 0)
-            return TC_ACT_OK;
-
-        if (LINUX_KERNEL_VERSION < KERNEL_VERSION(6, 12, 0))
             return TC_ACT_OK;
 
         if (sni_len > MAX_SNI_LEN - 1)
