@@ -153,6 +153,7 @@ int tc_egress(struct __sk_buff *skb) {
 
         __u32 sni_len;
         char sni[MAX_SNI_LEN];
+        __builtin_memset(sni, 0, sizeof(sni));
 
         struct sni_loop_data loop_data = {
             .skb = skb,
@@ -171,7 +172,6 @@ int tc_egress(struct __sk_buff *skb) {
             if (bpf_skb_load_bytes(skb, offset, sni, sni_len) < 0)
                 return TC_ACT_OK;
 
-        sni[sni_len] = '\0';
         bpf_printk("tc_egress: sni=%s, src=%pI4:%u, dst=%pI4:%u, pid_tgid=%llu", sni, &saddr, bpf_ntohs(sport), &daddr,
                    bpf_ntohs(dport), pid_tgid);
 
