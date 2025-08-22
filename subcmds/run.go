@@ -1030,9 +1030,10 @@ func run(ctx context.Context, done chan error) {
 					internalglog.LogInfo(line.String())
 
 					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Comm), "python")) && params.RunfSaveDb {
+						// Extract message_id and build SpannerPayload for chunked message storage
 						cols := []string{
 							"id",
-							"message_id", // for per connection msg counter
+							"message_id",
 							"idx",
 							"src_addr",
 							"dst_addr",
@@ -1042,9 +1043,9 @@ func run(ctx context.Context, done chan error) {
 							"created_at",
 						}
 						vals := []any{
-							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
-							event.MessageId, // for per connection msg counter
-							fmt.Sprintf("%v", event.ChunkIdx),
+							fmt.Sprintf("%v/%v", event.Tgid, event.Pid), // id: connection identifier
+							fmt.Sprintf("%v", event.MessageId),          // message_id: per-connection message counter
+							fmt.Sprintf("%v", event.ChunkIdx),           // idx: chunk index
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
 							containerName,
@@ -1053,7 +1054,7 @@ func run(ctx context.Context, done chan error) {
 							"COMMIT_TIMESTAMP",
 						}
 						mut := internal.SpannerPayload{
-							Table: "llm_prompts",
+							Table: "llm_prompt",
 							Cols:  cols,
 							Vals:  vals,
 						}
