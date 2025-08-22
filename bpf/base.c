@@ -27,6 +27,7 @@ struct event {
     __be32 daddr;
     __u16 sport;
     __be16 dport;
+    __u64 message_id; /* for per connection counter */
 };
 
 /* Map to store events for userspace consumption. */
@@ -155,6 +156,20 @@ struct {
     __type(key, struct bpf_sock *); /* sk */
     __type(value, __u64);           /* pid_tgid */
 } sk_to_pid_tgid SEC(".maps");
+// for per connection msg counter
+struct conn_key {
+    __be32 saddr;
+    __be32 daddr;
+    __u16 sport;
+    __be16 dport;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct conn_key);
+    __type(value, __u64); // message counter
+} conn_msg_seq_map SEC(".maps");
 
 /* Set process information in the event structure. */
 static __always_inline void set_proc_info(struct event *event) {

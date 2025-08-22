@@ -1032,6 +1032,7 @@ func run(ctx context.Context, done chan error) {
 					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Comm), "python")) && params.RunfSaveDb {
 						cols := []string{
 							"id",
+							"message_id", // for per connection msg counter
 							"idx",
 							"src_addr",
 							"dst_addr",
@@ -1042,6 +1043,7 @@ func run(ctx context.Context, done chan error) {
 						}
 						vals := []any{
 							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
+							event.MessageId, // for per connection msg counter
 							fmt.Sprintf("%v", event.ChunkIdx),
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),

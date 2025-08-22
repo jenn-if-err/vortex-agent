@@ -30,6 +30,7 @@ struct loop_data {
     __be32 daddr;
     __u16 sport;
     __be16 dport;
+    __u64 message_id; // for per connection msg counter
 };
 
 /* bpf_loop callback: send data to userspace in chunks of EVENT_BUF_LEN bytes. */
@@ -49,6 +50,7 @@ static int do_loop_send_SSL_payload(u64 index, struct loop_data *data) {
     event->sport = data->sport;
     event->daddr = data->daddr;
     event->dport = bpf_ntohs(data->dport);
+    event->message_id = data->message_id; //for per connection msg counter
     __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
 
     char *buf = *data->buf_ptr;
@@ -122,6 +124,24 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
         .sport = sport,
         .dport = dport,
     };
+
+    // for per connection msg counter
+    struct conn_key key = {
+        .saddr = saddr,
+        .daddr = daddr,
+        .sport = sport,
+        .dport = dport,
+    };
+    __u64 msg_seq = 0;
+    __u64 *pmsg_seq = bpf_map_lookup_elem(&conn_msg_seq_map, &key);
+    if (pmsg_seq) {
+        msg_seq = *pmsg_seq + 1;
+    } else {
+        msg_seq = 1;
+    }
+    bpf_map_update_elem(&conn_msg_seq_map, &key, &msg_seq, BPF_ANY);
+    data.message_id = msg_seq;
+    // for per connection msg counter
 
     bpf_loop(4096, do_loop_send_SSL_payload, &data, 0);
 
@@ -253,6 +273,24 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
         .sport = sport,
         .dport = dport,
     };
+
+    //for per connection msg counter 
+    struct conn_key key = {
+        .saddr = saddr,
+        .daddr = daddr,
+        .sport = sport,
+        .dport = dport,
+    };
+    __u64 msg_seq = 0;
+    __u64 *pmsg_seq = bpf_map_lookup_elem(&conn_msg_seq_map, &key);
+    if (pmsg_seq) {
+        msg_seq = *pmsg_seq + 1;
+    } else {
+        msg_seq = 1;
+    }
+    bpf_map_update_elem(&conn_msg_seq_map, &key, &msg_seq, BPF_ANY);
+    data.message_id = msg_seq;
+    // end
 
     bpf_loop(4096, do_loop_send_SSL_payload, &data, 0);
 
