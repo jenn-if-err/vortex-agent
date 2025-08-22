@@ -133,13 +133,13 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
         .dport = dport,
     };
     __u64 msg_seq = 0;
-    __u64 *pmsg_seq = bpf_map_lookup_elem(&conn_msg_seq_map, &key);
+    __u64 *pmsg_seq = bpf_map_lookup_elem(&conn_msg_seq_map, &conn_key);
     if (pmsg_seq) {
         msg_seq = *pmsg_seq + 1;
     } else {
         msg_seq = 1;
     }
-    bpf_map_update_elem(&conn_msg_seq_map, &key, &msg_seq, BPF_ANY);
+    bpf_map_update_elem(&conn_msg_seq_map, &conn_key, &msg_seq, BPF_ANY);
     data.message_id = msg_seq;
     // for per connection msg counter
 
@@ -282,13 +282,13 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
         .dport = dport,
     };
     __u64 msg_seq = 0;
-    __u64 *pmsg_seq = bpf_map_lookup_elem(&conn_msg_seq_map, &key);
+    __u64 *pmsg_seq = bpf_map_lookup_elem(&conn_msg_seq_map, &conn_key);
     if (pmsg_seq) {
         msg_seq = *pmsg_seq + 1;
     } else {
         msg_seq = 1;
     }
-    bpf_map_update_elem(&conn_msg_seq_map, &key, &msg_seq, BPF_ANY);
+    bpf_map_update_elem(&conn_msg_seq_map, &conn_key, &msg_seq, BPF_ANY);
     data.message_id = msg_seq;
     // end
 
