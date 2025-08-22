@@ -28,7 +28,7 @@ enum {
     F_WRITE,
 };
 
-#define EVENT_BUF_LEN 512
+#define EVENT_BUF_LEN 256
 #define MAX_SNI_LEN 256
 
 #define TGID_ENABLE_ALL 0xFFFFFFFF
