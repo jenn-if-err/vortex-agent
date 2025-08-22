@@ -307,13 +307,9 @@ func run(ctx context.Context, done chan error) {
 	uprobeFiles := strings.Split(params.RunfUprobes, ",")
 
 	if !isk8s {
-		libsslPath, err := internal.FindLibSSL("")
-		if err != nil {
-			glog.Errorf("Error finding libssl.so: %v", err)
-			return
-		}
-
+		libsslPath, _ := internal.FindLibSSL("")
 		uprobeFiles = append(uprobeFiles, libsslPath)
+		uprobeFiles = append(uprobeFiles, internal.FindHomebrewSSL("")...)
 		for _, uf := range uprobeFiles {
 			if uf == "" {
 				continue // skip empty entries
@@ -621,20 +617,16 @@ func run(ctx context.Context, done chan error) {
 					var libs []string
 					rootPath := fmt.Sprintf("/proc/%d/root", pid)
 					libsslPath, _ := internal.FindLibSSL(rootPath)
-					if libsslPath != "" {
-						libs = append(libs, libsslPath)
-					}
+					libs = append(libs, libsslPath)
+					libs = append(libs, internal.FindHomebrewSSL(rootPath)...)
 
 					nodeBinPath, _ := internal.FindNodeBin(rootPath)
-					if nodeBinPath != "" {
-						libs = append(libs, nodeBinPath)
-					}
-
-					if len(libs) == 0 {
-						return
-					}
-
+					libs = append(libs, nodeBinPath)
 					for _, lib := range libs {
+						if lib == "" {
+							continue
+						}
+
 						if _, ok := sslAttached[lib]; ok {
 							continue
 						}

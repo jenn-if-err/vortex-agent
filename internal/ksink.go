@@ -124,6 +124,24 @@ func FindLibSSL(root string) (string, error) {
 	return "", fmt.Errorf("libssl.so not found")
 }
 
+func FindHomebrewSSL(root string) []string {
+	path := fmt.Sprintf("%s/home/linuxbrew/.linuxbrew/Cellar/openssl@3", root)
+	foundFiles := []string{}
+	filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		if !info.IsDir() && strings.HasPrefix(info.Name(), "libssl.so.") {
+			foundFiles = append(foundFiles, path)
+		}
+
+		return nil
+	})
+
+	return foundFiles
+}
+
 func FindNodeBin(root string) (string, error) {
 	possiblePaths := []string{
 		"/usr/bin/node",
