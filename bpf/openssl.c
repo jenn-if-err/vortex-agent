@@ -126,7 +126,7 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
     };
 
     // for per connection msg counter
-    struct conn_key key = {
+    struct conn_key conn_key = {
         .saddr = saddr,
         .daddr = daddr,
         .sport = sport,
@@ -275,7 +275,7 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
     };
 
     //for per connection msg counter 
-    struct conn_key key = {
+    struct conn_key conn_key = {
         .saddr = saddr,
         .daddr = daddr,
         .sport = sport,
