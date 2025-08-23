@@ -29,3 +29,11 @@ $ kubectl create clusterrolebinding default-view \
 # Deploy to k8s as daemonset:
 $ kubectl create -f daemonset.yaml
 ```
+
+> [!WARNING]
+> Work-in-progress: build won't allow to load `vortex-agent` yet.
+
+```sh
+# Clone stable Linux kernel:
+$ git clone git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
+```
