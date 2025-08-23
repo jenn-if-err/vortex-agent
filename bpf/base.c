@@ -207,15 +207,11 @@ static __always_inline void *rb_events_reserve_with_stats() {
     if (!stats) {
         struct events_stats_t n_stats = {.sent = 0, .lost = 1};
         bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
-    } else {
-        struct events_stats_t n_stats = {
-            .sent = stats->sent,
-            .lost = stats->lost + 1,
-        };
-
-        bpf_printk("rb_events_reserve_with_stats: lost=%llu", n_stats.lost);
-        bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
+        return rb;
     }
+
+    __sync_fetch_and_add(&stats->lost, 1);
+    bpf_printk("rb_events_reserve_with_stats: lost=%llu", stats->lost);
 
     return rb;
 }
@@ -227,18 +223,12 @@ static __always_inline void rb_events_submit_with_stats(void *event, __u64 flags
     __u32 key = 0;
     struct events_stats_t *stats;
     stats = bpf_map_lookup_elem(&events_stats, &key);
-    if (!stats) {
-        struct events_stats_t n_stats = {.sent = 1, .lost = 0};
-        bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
+    if (stats) {
+        __sync_fetch_and_add(&stats->sent, 1);
         return;
     }
 
-    struct events_stats_t n_stats = {
-        .sent = stats->sent + 1,
-        .lost = stats->lost,
-    };
-
-    /* bpf_printk("rb_events_submit_with_stats: sent=%llu", n_stats.sent); */
+    struct events_stats_t n_stats = {.sent = 1, .lost = 0};
     bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
 }
 

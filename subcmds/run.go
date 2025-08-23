@@ -312,7 +312,7 @@ func run(ctx context.Context, done chan error) {
 		uprobeFiles = append(uprobeFiles, internal.FindHomebrewSSL("")...)
 		for _, uf := range uprobeFiles {
 			if uf == "" {
-				continue // skip empty entries
+				continue
 			}
 
 			ex, err := link.OpenExecutable(uf)

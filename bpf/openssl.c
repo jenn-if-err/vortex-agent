@@ -81,8 +81,6 @@ static __always_inline int do_uprobe_SSL_write(struct pt_regs *ctx) {
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
     bpf_map_update_elem(&ssl_callstack, &key, &val, BPF_ANY);
 
-    /* bpf_printk("do_uprobe_SSL_write: pid_tgid=%llu, num=%d", pid_tgid, cs_val.len); */
-
     return BPF_OK;
 }
 
@@ -123,7 +121,8 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
         .dport = dport,
     };
 
-    bpf_loop(4096, do_loop_send_SSL_payload, &data, 0);
+    if (bpf_loop(4096, do_loop_send_SSL_payload, &data, 0) < 1)
+        goto cleanup_and_exit;
 
     /* Signal previous chunked stream's end. */
     struct event *event;
@@ -210,8 +209,6 @@ static __always_inline int do_uprobe_SSL_read(struct pt_regs *ctx) {
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
     bpf_map_update_elem(&ssl_callstack, &key, &val, BPF_ANY);
 
-    /* bpf_printk("do_uprobe_SSL_read: pid_tgid=%llu", pid_tgid); */
-
     return BPF_OK;
 }
 
@@ -254,7 +251,8 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
         .dport = dport,
     };
 
-    bpf_loop(4096, do_loop_send_SSL_payload, &data, 0);
+    if (bpf_loop(4096, do_loop_send_SSL_payload, &data, 0) < 1)
+        goto cleanup_and_exit;
 
     /* Signal previous chunked stream's end. */
     struct event *event;
