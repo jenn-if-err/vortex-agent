@@ -30,7 +30,7 @@ $ kubectl create clusterrolebinding default-view \
 $ kubectl create -f daemonset.yaml
 ```
 
-If possible, test using cloud VMs, or k8s, but for specific kernel versions, below is a rough guide on how to setup a custom kernel with a Debian system using QEMU.
+If possible, test using cloud VMs, or k8s, but for specific kernel versions, below is a rough guide on how to setup a custom kernel with a Debian system using [QEMU](https://www.qemu.org/).
 
 (**Note**: Still incomplete; build can't load `vortex-agent` yet.)
 
