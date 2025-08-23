@@ -35,15 +35,27 @@ If possible, test using cloud VMs, or k8s, but for specific kernel versions, bel
 (**Note**: Still incomplete; build can't load `vortex-agent` yet.)
 
 ```sh
+# Install prerequisites:
+$ sudo apt update
+$ sudo apt install make gcc flex bison libncurses-dev libelf-dev libssl-dev debootstrap
+
 # Clone stable Linux kernel:
 $ cd $WORKDIR/
 $ git clone git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
 
-# Select version (tag):
+# Checkout desired version (tag):
 $ cd linux-stable/
 $ git checkout -b v6.6.102 v6.6.102
 
 # Configure kernel build:
 $ $VORTEX_ROOT/tools/kernel-build.sh
 $ make -j$(nproc)
+
+# Create a Debian Bullseye Linux image:
+$ cd ../
+$ mdkir -p debian-bullseye/
+$ cd debian-bullseye/
+$ wget https://raw.githubusercontent.com/google/syzkaller/master/tools/create-image.sh
+$ chmod +x create-image.sh
+$ ./create-image.sh --feature full
 ```
