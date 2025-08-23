@@ -55,7 +55,7 @@ $ make -j$(nproc)
 
 # Create a Debian Bullseye Linux image:
 $ cd ../
-$ mdkir -p debian-bullseye/
+$ mkdir -p debian-bullseye/
 $ cd debian-bullseye/
 $ wget https://raw.githubusercontent.com/google/syzkaller/master/tools/create-image.sh
 $ chmod +x create-image.sh
