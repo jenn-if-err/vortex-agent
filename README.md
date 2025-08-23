@@ -3,6 +3,10 @@
 > [!CAUTION]
 > Alpha-level software. Use with caution.
 
+---
+
+Setup notes:
+
 ```sh
 # If first clone:
 $ git clone --recurse-submodules https://github.com/flowerinthenight/vortex-agent
