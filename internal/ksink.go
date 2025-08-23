@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,6 +18,12 @@ import (
 
 func ChildCtx(p context.Context) context.Context {
 	return context.WithValue(p, struct{}{}, nil)
+}
+
+func Uname() string {
+	cmd := exec.Command("uname", "-a")
+	output, _ := cmd.CombinedOutput()
+	return strings.TrimRight(string(output), "\n")
 }
 
 // IsLE checks the endianness of the system

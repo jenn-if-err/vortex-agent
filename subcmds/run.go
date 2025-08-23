@@ -129,6 +129,8 @@ func RunCmd() *cobra.Command {
 func run(ctx context.Context, done chan error) {
 	defer func() { done <- nil }()
 
+	glog.Infof("Running on [%v]", internal.Uname())
+
 	sslTestOnly := false
 
 	// Allow the current process to lock memory for eBPF resources.
