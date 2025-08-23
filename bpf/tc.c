@@ -49,10 +49,7 @@ static int loop_parse_sni(u64 index, struct sni_loop_data *data) {
         if (*data->offset + 5 + sni_name_len > *data->extensions_end)
             return BPF_END_LOOP;
 
-        __u16 len_to_copy = sni_name_len < MAX_SNI_LEN ? sni_name_len : MAX_SNI_LEN - 1;
-
-        /* Pass back values to caller. */
-        *data->sni_len = (__u32)len_to_copy;
+        *data->sni_len = (__u32)sni_name_len;
         *data->offset += 5;
 
         return BPF_END_LOOP;

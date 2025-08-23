@@ -102,7 +102,6 @@ func RunCmd() *cobra.Command {
 		Short: "Run as agent (long running)",
 		Long:  `Run as agent (long running).`,
 		Run: func(cmd *cobra.Command, args []string) {
-			internalglog.LogInfof("Running vortex-agent as service (%v)", time.Now().Format(time.RFC3339))
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan error)
 
