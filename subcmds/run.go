@@ -120,7 +120,6 @@ func RunCmd() *cobra.Command {
 	}
 
 	cmd.Flags().SortFlags = false
-	cmd.Flags().StringVar(&params.RunfComm, "comm", "", "Process name to trace, max 16 bytes, default all")
 	cmd.Flags().StringVar(&params.RunfUprobes, "uprobes", "", "Lib/bin files to attach to uprobes (comma-separated)")
 	cmd.Flags().BoolVar(&params.RunfSaveDb, "savedb", false, "If set to true, save data to Spanner")
 	cmd.Flags().BoolVar(&params.RunfDisableLogs, "nologs", false, "If set to true, disable logs (for performance)")
@@ -147,17 +146,6 @@ func run(ctx context.Context, done chan error) {
 
 	defer objs.Close()
 	internalglog.LogInfo("BPF objects loaded")
-
-	if params.RunfComm != "" {
-		var comm [16]byte
-		copy(comm[:], params.RunfComm)
-		err := objs.TraceComm.Put(uint32(0), comm)
-		if err != nil {
-			glog.Errorf("objs.TraceCommSock.Put failed: %v", err)
-		} else {
-			internalglog.LogInfof("tracing only for [%s]", params.RunfComm)
-		}
-	}
 
 	hostLinks := []link.Link{}
 	defer func(list *[]link.Link) {

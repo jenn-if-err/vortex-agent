@@ -111,22 +111,6 @@ struct {
     __type(value, struct ssl_callstack_v);
 } ssl_callstack SEC(".maps");
 
-/* Optional comm (single) to trace (when provided from userspace). */
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1);
-    __type(key, __u32);                 /* always 0 */
-    __type(value, char[TASK_COMM_LEN]); /* comm to trace */
-} trace_comm SEC(".maps");
-
-/* should_trace_comm()'s buffer for getting comm instead of stack. */
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, __u32);                 /* always 0 */
-    __type(value, char[TASK_COMM_LEN]); /* buffer for comm */
-} buf_comm SEC(".maps");
-
 /* Value for the fd_connect map. */
 struct fd_connect_v {
     __u32 fd;
@@ -156,6 +140,22 @@ struct {
     __type(value, __u64);           /* pid_tgid */
 } sk_to_pid_tgid SEC(".maps");
 
+/* Indicates that our tc-based SNI trace filtering is enabled. */
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);   /* always 0 */
+    __type(value, __u32); /* unused */
+} tc_sni_trace_on SEC(".maps");
+
+/* Per PID/TGID: we found the SNI, and if tracing is allowed (AI). */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 1024);
+    __type(key, __u64);  /* pid_tgid */
+    __type(value, __u8); /* 1st bit = default, 2nd bit = SNI allowed */
+} tc_sni_trace SEC(".maps");
+
 /* Set process information in the event structure. */
 static __always_inline void set_proc_info(struct event *event) {
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
@@ -174,25 +174,18 @@ static __always_inline int should_trace_tgid(__u32 tgid) {
     return VORTEX_TRACE;
 }
 
-/* Are we tracing this comm? */
-static __always_inline int should_trace_comm(int *all) {
-    *all = COMM_NO_TRACE_ALL;
+/* Check if tracing is allowed through our tc-based SNI filter. */
+static __always_inline int should_sni_trace(__u64 pid_tgid) {
     __u32 key = 0;
-    char *comm_tr = bpf_map_lookup_elem(&trace_comm, &key);
-    if (!comm_tr) {
-        *all = COMM_TRACE_ALL;
-        return VORTEX_TRACE;
-    }
-
-    char *comm = bpf_map_lookup_elem(&buf_comm, &key);
-    if (!comm)
+    if (bpf_map_lookup_elem(&tc_sni_trace_on, &key) == NULL)
         return VORTEX_TRACE;
 
-    __builtin_memset(comm, 0, TASK_COMM_LEN);
-    bpf_get_current_comm(comm, sizeof(comm));
-    int cmp = __builtin_memcmp(comm_tr, comm, TASK_COMM_LEN);
+    __u8 *trace = bpf_map_lookup_elem(&tc_sni_trace, &pid_tgid);
+    if (trace)
+        if ((*trace & 0x2) != 0x2)
+            return VORTEX_NO_TRACE;
 
-    return cmp == 0 ? VORTEX_TRACE : VORTEX_NO_TRACE;
+    return VORTEX_TRACE;
 }
 
 /* Our wrapper to bpf_ringbuf_reserve() to track lost packets. */

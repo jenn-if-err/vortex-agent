@@ -68,6 +68,10 @@ static int do_loop_send_SSL_payload(u64 index, struct loop_data *data) {
 
 /* Shared with uprobe/SSL_write and uprobe/SSL_write_ex. */
 static __always_inline int do_uprobe_SSL_write(struct pt_regs *ctx) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    if (should_sni_trace(pid_tgid) == VORTEX_NO_TRACE)
+        return BPF_OK;
+
     struct ssl_callstack_v val;
     val.buf = (uintptr_t)PT_REGS_PARM2(ctx);
     val.len = (int)PT_REGS_PARM3(ctx);
@@ -76,7 +80,6 @@ static __always_inline int do_uprobe_SSL_write(struct pt_regs *ctx) {
     val.sport = 0;
     val.dport = 0;
 
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
     bpf_map_update_elem(&ssl_callstack, &key, &val, BPF_ANY);
 
@@ -196,6 +199,10 @@ int uretprobe_SSL_write_ex(struct pt_regs *ctx) {
 
 /* Shared with uprobe/SSL_read and uprobe/SSL_read_ex. */
 static __always_inline int do_uprobe_SSL_read(struct pt_regs *ctx) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    if (should_sni_trace(pid_tgid) == VORTEX_NO_TRACE)
+        return BPF_OK;
+
     struct ssl_callstack_v val;
     val.buf = (uintptr_t)PT_REGS_PARM2(ctx);
     val.len = (int)PT_REGS_PARM3(ctx);
@@ -204,7 +211,6 @@ static __always_inline int do_uprobe_SSL_read(struct pt_regs *ctx) {
     val.sport = 0;
     val.dport = 0;
 
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
     bpf_map_update_elem(&ssl_callstack, &key, &val, BPF_ANY);
 

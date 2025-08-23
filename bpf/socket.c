@@ -35,10 +35,6 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
     if (LINUX_KERNEL_VERSION < KERNEL_VERSION(5, 5, 0))
         return BPF_OK;
 
-    int trace_all = COMM_NO_TRACE_ALL;
-    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
-        return BPF_OK;
-
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
     set_SSL_callstack_socket_info(&key, sk);
@@ -58,10 +54,6 @@ int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
         return BPF_OK;
 
     if (ret <= 0)
-        return BPF_OK;
-
-    int trace_all = COMM_NO_TRACE_ALL;
-    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -118,10 +110,6 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
 SEC("tp/syscalls/sys_enter_connect")
 int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
     if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 7, 0))
-        return BPF_OK;
-
-    int trace_all = COMM_NO_TRACE_ALL;
-    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
     int fd = (int)BPF_CORE_READ(ctx, args[0]);
@@ -205,10 +193,6 @@ const char *tcp_state_to_string(int state) {
 SEC("tp/sock/inet_sock_set_state")
 int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
     if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 7, 0))
-        return BPF_OK;
-
-    int trace_all = COMM_NO_TRACE_ALL;
-    if (should_trace_comm(&trace_all) == VORTEX_NO_TRACE)
         return BPF_OK;
 
     __u16 family = (int)BPF_CORE_READ(ctx, family);
