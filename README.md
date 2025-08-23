@@ -81,4 +81,7 @@ $ scp -i debian-bullseye/bullseye.id_rsa -P 10021 \
 
 $ ssh -i debian-bullseye/bullseye.id_rsa -p 10021 \
       -o "StrictHostKeyChecking no" root@localhost
+
+# Close the VM (from ssh terminal):
+$ poweroff
 ```
