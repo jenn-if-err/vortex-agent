@@ -30,9 +30,18 @@ $ kubectl create clusterrolebinding default-view \
 $ kubectl create -f daemonset.yaml
 ```
 
-If possible, test using cloud VMs, or k8s, but for specific kernel versions, below is a rough guide on how to setup a custom kernel with a Debian system using Qemu.
+If possible, test using cloud VMs, or k8s, but for specific kernel versions, below is a rough guide on how to setup a custom kernel with a Debian system using QEMU.
 
 ```sh
 # Clone stable Linux kernel:
+$ cd $WORKDIR/
 $ git clone git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
+
+# Select version (tag):
+$ cd linux-stable/
+$ git checkout -b v6.6.102 v6.6.102
+
+# Configure kernel build:
+$ $VORTEX_ROOT/tools/kernel-build.sh
+$ make -j$(nproc)
 ```
