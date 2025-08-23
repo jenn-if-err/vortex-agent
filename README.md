@@ -3,7 +3,7 @@
 > [!CAUTION]
 > Alpha-level software. Use with caution.
 
-### Setup
+## Setup
 
 ```sh
 # If first clone:
@@ -30,7 +30,7 @@ $ kubectl create clusterrolebinding default-view \
 $ kubectl create -f daemonset.yaml
 ```
 
-### Testing
+## Testing
 
 > [!NOTE]
 > Still incomplete; build can't load `vortex-agent` yet. If you can make it work, update this guide.
