@@ -55,10 +55,10 @@ static int do_loop_send_SSL_payload(u64 index, struct loop_data *data) {
     if (bpf_probe_read_user(&event->buf, len, buf) == 0)
         rb_events_submit_with_stats(event, 0);
     else
-        bpf_ringbuf_discard(event, 0); /* discard but still adjust values? */
+        bpf_ringbuf_discard(event, 0);
 
-    *data->buf_ptr = *data->buf_ptr + len; /* forward buffer pointer */
 
+    *data->buf_ptr = *data->buf_ptr + len;
     int sub = *data->len <= EVENT_BUF_LEN ? *data->len : EVENT_BUF_LEN;
     *data->len = *data->len - sub;
     if (*data->len <= 0)
