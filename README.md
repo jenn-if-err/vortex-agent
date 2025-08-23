@@ -60,6 +60,7 @@ $ chmod +x create-image.sh
 $ ./create-image.sh --feature full
 
 # Run the image:
+$ cd ../
 $ qemu-system-x86_64 \
       -m 2G \
       -smp 2 \
