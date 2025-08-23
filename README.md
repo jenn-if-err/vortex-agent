@@ -3,7 +3,7 @@
 > [!CAUTION]
 > Alpha-level software. Use with caution.
 
-Setup notes:
+### Setup
 
 ```sh
 # If first clone:
@@ -30,23 +30,27 @@ $ kubectl create clusterrolebinding default-view \
 $ kubectl create -f daemonset.yaml
 ```
 
-If possible, test using cloud VMs, or k8s, but for specific kernel versions, below is a rough guide on how to setup a custom kernel with a Debian system using [QEMU](https://www.qemu.org/).
+### Testing
 
 > [!NOTE]
 > Still incomplete; build can't load `vortex-agent` yet. If you can make it work, update this guide.
 
-```sh
-# Can also use a cloud VM with KVM enabled (i.e. in GCP):
-# $ gcloud compute instances create bpf-kvm \
-#     --enable-nested-virtualization \
-#     --zone {zone} \
-#     --min-cpu-platform "AUTOMATIC" \
-#     --machine-type n2-standard-4 \
-#     --image-project ubuntu-os-cloud \
-#     --image-family ubuntu-2404-lts-amd64 \
-#     --boot-disk-size 50 \
-#     --project {project}
+If possible, test using cloud VMs, or k8s, but for specific kernel versions, below is a rough guide on how to setup a custom kernel with a Debian system using [QEMU](https://www.qemu.org/).
 
+> [!NOTE]
+> To use a cloud VM with KVM enabled (i.e. in GCP):
+> ```sh
+> $ gcloud compute instances create bpf-kvm \
+>       --enable-nested-virtualization \
+>       --zone {zone} \
+>       --min-cpu-platform "AUTOMATIC" \
+>       --machine-type n2-standard-4 \
+>       --image-project ubuntu-os-cloud \
+>       --image-family ubuntu-2404-lts-amd64 \
+>       --boot-disk-size 50 \
+>       --project {project}
+
+```sh
 # Install prerequisites:
 $ sudo apt update
 $ sudo apt install make gcc flex bison libncurses-dev libelf-dev libssl-dev \
