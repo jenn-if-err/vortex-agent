@@ -1,6 +1,7 @@
 #!/bin/sh
 
 make defconfig
+make kvm_guest.config
 
 # Coverage collection:
 ./scripts/config --set-val CONFIG_KCOV y

@@ -48,7 +48,7 @@ $ cd linux-stable/
 $ git checkout -b v6.6.102 v6.6.102
 
 # Configure kernel build:
-$ $VORTEX_ROOT/tools/kernel-build.sh
+$ $VORTEX_ROOT/tools/config-kernel.sh
 $ make -j$(nproc)
 
 # Create a Debian Bullseye Linux image:
@@ -58,4 +58,25 @@ $ cd debian-bullseye/
 $ wget https://raw.githubusercontent.com/google/syzkaller/master/tools/create-image.sh
 $ chmod +x create-image.sh
 $ ./create-image.sh --feature full
+
+# Run the image:
+$ qemu-system-x86_64 \
+      -m 2G \
+      -smp 2 \
+      -kernel linux-stable/arch/x86/boot/bzImage \
+      -append "console=ttyS0 root=/dev/sda earlyprintk=serial net.ifnames=0" \
+      -drive file=debian-bullseye/bullseye.img,format=raw \
+      -net user,host=10.0.2.10,hostfwd=tcp:127.0.0.1:10021-:22 \
+      -net nic,model=e1000 \
+      -enable-kvm \
+      -nographic \
+      -pidfile vm.pid \
+      2>&1 | tee vm.log
+
+# On another terminal, you can use scp and ssh:
+$ scp -i debian-bullseye/bullseye.id_rsa -P 10021 -o "StrictHostKeyChecking no" \
+      vortex-agent/bin/vortex-agent \
+      root@localhost:~/
+
+$ ssh -i debian-bullseye/bullseye.id_rsa -p 10021 -o "StrictHostKeyChecking no" root@localhost
 ```
