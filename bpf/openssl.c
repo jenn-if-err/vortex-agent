@@ -57,7 +57,6 @@ static int do_loop_send_SSL_payload(u64 index, struct loop_data *data) {
     else
         bpf_ringbuf_discard(event, 0);
 
-
     *data->buf_ptr = *data->buf_ptr + len;
     int sub = *data->len <= EVENT_BUF_LEN ? *data->len : EVENT_BUF_LEN;
     *data->len = *data->len - sub;

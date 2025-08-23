@@ -65,8 +65,7 @@ static int loop_parse_sni(u64 index, struct sni_loop_data *data) {
 
 SEC("tc")
 int tc_egress(struct __sk_buff *skb) {
-    /* NOTE: Temp: doesn't load with GKE's v6.6, but works with v6.12+ normal VM. */
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(6, 12, 0))
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
         return TC_ACT_OK;
 
     void *data = (void *)(long)skb->data;
@@ -177,9 +176,12 @@ int tc_egress(struct __sk_buff *skb) {
         if (sni_len > MAX_SNI_LEN - 1)
             sni_len = MAX_SNI_LEN - 1;
 
-        if (sni_len > 0 && (offset + sni_len) < extensions_end)
-            if (bpf_skb_load_bytes(skb, offset, sni, sni_len) < 0)
-                return TC_ACT_OK;
+        /* This makes verifier happy, which somehow always get [0,255] range for sni_len (GKE v6.6). */
+        __u32 sni_copy_len = 1;
+        if (sni_len > 1)
+            sni_copy_len += sni_len - 1;
+
+        bpf_skb_load_bytes(skb, offset, sni, sni_copy_len);
 
         bpf_printk("tc_egress: sni=%s, src=%pI4:%u, dst=%pI4:%u, pid_tgid=%llu", sni, &saddr, bpf_ntohs(sport), &daddr,
                    bpf_ntohs(dport), pid_tgid);
