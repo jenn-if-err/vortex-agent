@@ -30,8 +30,7 @@ $ kubectl create clusterrolebinding default-view \
 $ kubectl create -f daemonset.yaml
 ```
 
-> [!WARNING]
-> Work-in-progress: build won't allow to load `vortex-agent` yet.
+If possible, test using cloud VMs, or k8s, but for specific kernel versions, below is a rough guide on how to setup a custom kernel with a Debian system using Qemu.
 
 ```sh
 # Clone stable Linux kernel:
