@@ -1,7 +1,7 @@
 [![main](https://github.com/flowerinthenight/vortex-agent/actions/workflows/main.yml/badge.svg)](https://github.com/flowerinthenight/vortex-agent/actions/workflows/main.yml)
 
 > [!CAUTION]
-> Alpha-level software. Use with caution.
+> Alpha-level software, which requires root access. Use with caution.
 
 ## Setup
 
