@@ -131,8 +131,6 @@ func run(ctx context.Context, done chan error) {
 
 	glog.Infof("Running on [%v]", internal.Uname())
 
-	sslTestOnly := false
-
 	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
 		glog.Errorf("RemoveMemlock failed: %v", err)
@@ -868,7 +866,7 @@ func run(ctx context.Context, done chan error) {
 						continue
 					}
 
-					if !isk8s && !sslTestOnly {
+					if !isk8s {
 						if !strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "node") {
 							continue
 						}
@@ -916,7 +914,7 @@ func run(ctx context.Context, done chan error) {
 					}
 
 				case TYPE_FEXIT_TCP_RECVMSG:
-					if !isk8s && !sslTestOnly {
+					if !isk8s {
 						if !strings.HasPrefix(fmt.Sprintf("%s", event.Comm), "node") {
 							continue
 						}
