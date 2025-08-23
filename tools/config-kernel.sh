@@ -3,13 +3,6 @@
 make defconfig
 make kvm_guest.config
 
-# Coverage collection:
-./scripts/config --set-val CONFIG_KCOV y
-# Debug info for symbolization:
-./scripts/config --set-val CONFIG_DEBUG_INFO_DWARF4 y
-# Memory bug detector:
-./scripts/config --set-val CONFIG_KASAN y
-./scripts/config --set-val CONFIG_KASAN_INLINE y
 # Required for Debian Stretch and later:
 ./scripts/config --set-val CONFIG_CONFIGFS_FS y
 ./scripts/config --set-val CONFIG_SECURITYFS y

@@ -38,7 +38,7 @@ If possible, test using cloud VMs, or k8s, but for specific kernel versions, bel
 ```sh
 # Install prerequisites:
 $ sudo apt update
-$ sudo apt install make gcc flex bison libncurses-dev libelf-dev libssl-dev debootstrap
+$ sudo apt install make gcc flex bison libncurses-dev libelf-dev libssl-dev debootstrap dwarves
 
 # Clone stable Linux kernel:
 $ cd $WORKDIR/
