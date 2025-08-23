@@ -74,9 +74,11 @@ $ qemu-system-x86_64 \
       2>&1 | tee vm.log
 
 # On another terminal, you can use scp and ssh:
-$ scp -i debian-bullseye/bullseye.id_rsa -P 10021 -o "StrictHostKeyChecking no" \
+$ scp -i debian-bullseye/bullseye.id_rsa -P 10021 \
+      -o "StrictHostKeyChecking no" \
       vortex-agent/bin/vortex-agent \
       root@localhost:~/
 
-$ ssh -i debian-bullseye/bullseye.id_rsa -p 10021 -o "StrictHostKeyChecking no" root@localhost
+$ ssh -i debian-bullseye/bullseye.id_rsa -p 10021 \
+      -o "StrictHostKeyChecking no" root@localhost
 ```
