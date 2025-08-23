@@ -3,8 +3,6 @@
 > [!CAUTION]
 > Alpha-level software. Use with caution.
 
----
-
 Setup notes:
 
 ```sh
