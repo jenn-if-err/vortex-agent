@@ -50,7 +50,7 @@ If possible, test using cloud VMs, or k8s, but for specific kernel versions, bel
 >       --boot-disk-size 50 \
 >       --project {project}
 > ```
-> (But if you can run local, try local first.)
+> But if you can run local, try local first.
 
 ```sh
 # Install prerequisites:
