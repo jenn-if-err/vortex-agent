@@ -24,10 +24,13 @@ make kvm_guest.config
 ./scripts/config --set-val CONFIG_HAVE_BPF_JIT y
 ./scripts/config --set-val CONFIG_CGROUP_BPF y
 ./scripts/config --set-val CONFIG_KPROBES y
+./scripts/config --set-val CONFIG_HAVE_KPROBES y
 ./scripts/config --set-val CONFIG_KPROBE_EVENTS y
 ./scripts/config --set-val CONFIG_KPROBES_ON_FTRACE y
 ./scripts/config --set-val CONFIG_UPROBES y
 ./scripts/config --set-val CONFIG_UPROBE_EVENTS y
+./scripts/config --set-val CONFIG_ARCH_SUPPORTS_UPROBES y
+./scripts/config --set-val CONFIG_MMU y
 ./scripts/config --set-val CONFIG_TRACEPOINTS y
 ./scripts/config --set-val CONFIG_HAVE_SYSCALL_TRACEPOINTS y
 ./scripts/config --set-val CONFIG_FTRACE y
