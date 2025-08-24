@@ -18,6 +18,7 @@ make kvm_guest.config
 ./scripts/config --set-val CONFIG_DEBUG_INFO y
 ./scripts/config --set-val CONFIG_DEBUG_INFO_BTF y
 ./scripts/config --set-val CONFIG_NET_CLS_BPF y
+./scripts/config --set-val CONFIG_NET_ACT_BPF y
 ./scripts/config --set-val CONFIG_NET_SCH_INGRESS y
 ./scripts/config --set-val CONFIG_BPF_JIT y
 ./scripts/config --set-val CONFIG_HAVE_BPF_JIT y
