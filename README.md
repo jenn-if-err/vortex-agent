@@ -40,6 +40,7 @@ If possible, test using cloud VMs, or k8s, but for specific kernel versions, bel
 > [!NOTE]
 > To use a cloud VM with KVM enabled for the build setup below (i.e. in GCP):
 > ```sh
+> # Ubuntu has a newer kernel than Debian.
 > $ gcloud compute instances create bpf-kvm \
 >       --enable-nested-virtualization \
 >       --zone {zone} \
