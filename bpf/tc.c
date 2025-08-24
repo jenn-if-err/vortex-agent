@@ -6,12 +6,7 @@
 #define __BPF_VORTEX_TC_C
 
 SEC("tc")
-int tc_ingress(struct __sk_buff *skb) {
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
-        return TC_ACT_OK;
-
-    return TC_ACT_OK;
-}
+int tc_ingress(struct __sk_buff *skb) { return TC_ACT_OK; }
 
 struct sni_loop_data {
     struct __sk_buff *skb;
@@ -76,9 +71,6 @@ static __always_inline void set_sni_trace(__u64 pid_tgid, __u8 allowed) {
 
 SEC("tc")
 int tc_egress(struct __sk_buff *skb) {
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 1, 0))
-        return TC_ACT_OK;
-
     __u64 pid_tgid = 0;
     struct bpf_sock *sk = BPF_CORE_READ(skb, sk);
     __u64 *val = bpf_map_lookup_elem(&sk_to_pid_tgid, &sk);

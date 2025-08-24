@@ -32,9 +32,6 @@ static __always_inline void set_SSL_callstack_socket_info(struct ssl_callstack_k
  */
 SEC("fexit/tcp_sendmsg")
 int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t, size, int, ret) {
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(5, 5, 0))
-        return BPF_OK;
-
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
     set_SSL_callstack_socket_info(&key, sk);
@@ -50,9 +47,6 @@ int BPF_PROG2(tcp_sendmsg_fexit, struct sock *, sk, struct msghdr *, msg, size_t
  */
 SEC("fexit/tcp_recvmsg")
 int BPF_PROG(tcp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len, int ret) {
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(5, 5, 0))
-        return BPF_OK;
-
     if (ret <= 0)
         return BPF_OK;
 
@@ -109,9 +103,6 @@ int BPF_PROG(udp_recvmsg_fexit, struct sock *sk, struct msghdr *msg, size_t len,
  */
 SEC("tp/syscalls/sys_enter_connect")
 int sys_enter_connect(struct trace_event_raw_sys_enter *ctx) {
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 7, 0))
-        return BPF_OK;
-
     int fd = (int)BPF_CORE_READ(ctx, args[0]);
     void *usr_addr = (void *)BPF_CORE_READ(ctx, args[1]);
     int usr_addrlen = (int)BPF_CORE_READ(ctx, args[2]);
@@ -192,9 +183,6 @@ const char *tcp_state_to_string(int state) {
  */
 SEC("tp/sock/inet_sock_set_state")
 int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 7, 0))
-        return BPF_OK;
-
     __u16 family = (int)BPF_CORE_READ(ctx, family);
     if (family != AF_INET)
         return BPF_OK;
@@ -218,9 +206,6 @@ int inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
 
 SEC("cgroup/connect4")
 int cgroup_connect4(struct bpf_sock_addr *ctx) {
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 17, 0))
-        return CG_SOCK_ALLOW;
-
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct bpf_sock *sk = BPF_CORE_READ(ctx, sk);
     bpf_map_update_elem(&sk_to_pid_tgid, &sk, &pid_tgid, BPF_ANY);
@@ -229,9 +214,6 @@ int cgroup_connect4(struct bpf_sock_addr *ctx) {
 
 SEC("cgroup/sock_release")
 int cgroup_sock_release(struct bpf_sock *ctx) {
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 10, 0))
-        return CG_SOCK_ALLOW;
-
     bpf_map_delete_elem(&sk_to_pid_tgid, &ctx);
     return CG_SOCK_ALLOW;
 }
