@@ -68,7 +68,7 @@ $ cd linux-stable/
 $ git checkout -b v6.6.102 v6.6.102
 
 # Configure kernel build:
-$ $VORTEX_ROOT/tools/config-kernel.sh
+$ $VORTEX_AGENT_ROOT/tools/config-kernel.sh
 $ make -j$(nproc)
 
 # Create a Debian Bullseye Linux image:
