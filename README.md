@@ -97,7 +97,7 @@ $ qemu-system-x86_64 \
 # On another terminal, you can use scp and ssh:
 $ scp -i debian-bullseye/bullseye.id_rsa -P 10021 \
       -o "StrictHostKeyChecking no" \
-      vortex-agent/bin/vortex-agent \
+      $VORTEX_AGENT_ROOT/bin/vortex-agent \
       root@localhost:~/
 
 $ ssh -i debian-bullseye/bullseye.id_rsa -p 10021 \
