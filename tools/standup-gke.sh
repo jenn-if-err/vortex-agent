@@ -1,4 +1,4 @@
-gcloud container clusters create bpf-ch \
+gcloud container clusters create bpf-vm \
        --workload-pool=alphaus-dashboard.svc.id.goog \
        --project=alphaus-dashboard \
        --zone=asia-northeast1-b \
