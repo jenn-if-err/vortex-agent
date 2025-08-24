@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 make defconfig
 make kvm_guest.config

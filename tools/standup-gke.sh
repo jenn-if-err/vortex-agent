@@ -1,3 +1,5 @@
+#!/bin/bash
+
 gcloud container clusters create bpf-vm \
        --workload-pool=alphaus-dashboard.svc.id.goog \
        --project=alphaus-dashboard \
