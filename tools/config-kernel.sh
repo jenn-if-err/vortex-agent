@@ -14,6 +14,7 @@ make kvm_guest.config
 ./scripts/config --set-val CONFIG_BPF_EVENTS y
 ./scripts/config --set-val CONFIG_PERF_EVENTS y
 ./scripts/config --set-val CONFIG_HAVE_PERF_EVENTS y
+./scripts/config --set-val CONFIG_FUNCTION_TRACER y
 ./scripts/config --set-val CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT y
 ./scripts/config --set-val CONFIG_DEBUG_INFO y
 ./scripts/config --set-val CONFIG_DEBUG_INFO_BTF y
