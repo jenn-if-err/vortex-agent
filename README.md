@@ -21,7 +21,7 @@ $ make
 # Run:
 $ [sudo] ./bin/vortex-agent run --logtostderr
 
-# To be able to list pods:
+# To be able to list pods (if deployed to k8s):
 $ kubectl create clusterrolebinding default-view \
   --clusterrole=view \
   --serviceaccount=default:default
