@@ -32,9 +32,6 @@ $ kubectl create -f daemonset.yaml
 
 ## Testing
 
-> [!NOTE]
-> Still incomplete; setup can't load `vortex-agent` yet. If you can make it work, update this guide.
-
 If possible, test using cloud VMs, or k8s, but for specific kernel versions, below is a rough guide on how to setup a custom kernel with a Debian system using [QEMU](https://www.qemu.org/).
 
 ```sh
