@@ -87,7 +87,7 @@ $ ssh -i debian-bullseye/bullseye.id_rsa -p 10021 \
       -o "StrictHostKeyChecking no" root@localhost
 
 # and run the binary:
-$ ./vortex run --logtostderr
+$ ./vortex-agent run --logtostderr
 
 # You can close the VM by running (within the VM):
 $ poweroff
