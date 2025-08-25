@@ -5,6 +5,16 @@
 #ifndef __BPF_VORTEX_OPENSSL_C
 #define __BPF_VORTEX_OPENSSL_C
 
+#define H2_FRAME_HEADER_SIZE 9
+#define H2_FRAME_TYPE_DATA 0x0
+#define H2_FLAG_PADDED 0x8
+
+// Max data to capture from a single DATA frame
+#define DATA_MAX_SIZE 1024
+
+// Max frames to parse in a single SSL_write call to satisfy the verifier
+#define MAX_FRAMES_PER_WRITE 3
+
 static __always_inline void set_fdc_sock(__u64 pid_tgid, __be32 *saddr, __be32 *daddr, __u16 *sport, __be16 *dport) {
     struct fd_connect_v *val;
     val = bpf_map_lookup_elem(&fd_connect, &pid_tgid);
@@ -111,6 +121,69 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
     char *buf = (char *)val->buf;
     int num = val->len;
     int orig_num = num;
+
+    /* Preface: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" */
+    char preface[3];
+    bpf_probe_read_user(preface, sizeof(preface), buf);
+    if (preface[0] == 'P' && preface[1] == 'R' && preface[2] == 'I')
+        goto cleanup_and_exit;
+
+    __u32 cursor = 0;
+
+#pragma unroll
+    for (int i = 0; i < MAX_FRAMES_PER_WRITE; i++) {
+        if (cursor + H2_FRAME_HEADER_SIZE > written)
+            break;
+
+        // Read the 9-byte frame header
+        u8 h2_hdr[H2_FRAME_HEADER_SIZE];
+        if (bpf_probe_read_user(&h2_hdr, sizeof(h2_hdr), buf + cursor) != 0)
+            break;
+
+        __u32 frame_len = ((u32)h2_hdr[0] << 16) | ((u32)h2_hdr[1] << 8) | (u32)h2_hdr[2];
+        __u8 frame_type = h2_hdr[3];
+        __u8 flags = h2_hdr[4];
+        if (frame_type <= 0x9) {
+            // The Stream ID has the top bit reserved, clear it.
+            u32 stream_id_raw =
+                ((u32)h2_hdr[5] << 24) | ((u32)h2_hdr[6] << 16) | ((u32)h2_hdr[7] << 8) | ((u32)h2_hdr[8]);
+            u32 stream_id = stream_id_raw & 0x7FFFFFFF; // Clear the reserved bit
+            bpf_printk("HTTP2 frame: type=0x%x frame_len=%u, stream_id=%u, flags=0x%x", frame_type, frame_len,
+                       stream_id, flags);
+        }
+
+        // We only care about DATA frames
+        if (frame_type <= 0x9 && frame_type == H2_FRAME_TYPE_DATA && frame_len > 0) {
+            u32 payload_offset = cursor + H2_FRAME_HEADER_SIZE;
+            u32 data_len = frame_len;
+
+            // Check if the PADDED flag is set
+            if (flags & H2_FLAG_PADDED) {
+                u8 pad_len = 0;
+                if (bpf_probe_read_user(&pad_len, 1, buf + payload_offset) != 0)
+                    break;
+
+                payload_offset += 1;        // The payload starts after the pad length byte
+                if (data_len < pad_len + 1) // Sanity check
+                    break;
+
+                data_len -= (pad_len + 1);
+            }
+
+            // Ensure we don't read past the end of the SSL_write buffer
+            if (payload_offset + data_len > written)
+                break;
+
+            // Read the actual data
+            u32 read_size = (data_len < DATA_MAX_SIZE) ? data_len : DATA_MAX_SIZE;
+            bpf_printk("HTTP2 DATA payload: data_len=%u, read_size=%u", data_len, read_size);
+        }
+
+        // Move cursor to the next frame
+        cursor += H2_FRAME_HEADER_SIZE + frame_len;
+    }
+
+    bpf_printk("SSL_write: total written=%d, parsed bytes=%u", written, cursor);
 
     struct loop_data data = {
         .type = TYPE_URETPROBE_SSL_WRITE,

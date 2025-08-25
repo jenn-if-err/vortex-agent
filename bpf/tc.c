@@ -190,7 +190,10 @@ int tc_egress(struct __sk_buff *skb) {
 
         if (bpf_strncmp(sni, MAX_SNI_LEN, "generativelanguage.googleapis.com") == 0 /* Gemini */ ||
             bpf_strncmp(sni, MAX_SNI_LEN, "api.openai.com") == 0 /* ChatGPT */ ||
-            bpf_strncmp(sni, MAX_SNI_LEN, "alphaus.cloud") == 0 /* test */)
+            bpf_strncmp(sni, MAX_SNI_LEN, "google.com") == 0 /* test:google */ ||
+            bpf_strncmp(sni, MAX_SNI_LEN, "github.com") == 0 /* test:github */ ||
+            bpf_strncmp(sni, MAX_SNI_LEN, "jsonplaceholder.typicode.com") == 0 /* test:node */ ||
+            bpf_strncmp(sni, MAX_SNI_LEN, "alphaus.cloud") == 0 /* test:alphaus */)
             trace = VORTEX_TRACE;
 
         bpf_printk("tc_egress: sni=%s, src=%pI4:%u, dst=%pI4:%u, pid_tgid=%llu", sni, &saddr, bpf_ntohs(sport), &daddr,

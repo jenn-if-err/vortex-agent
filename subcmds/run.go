@@ -246,17 +246,6 @@ func run(ctx context.Context, done chan error) {
 				} else {
 					hostLinks = append(hostLinks, li)
 				}
-
-				lxdp, err := link.AttachXDP(link.XDPOptions{
-					Interface: iface.Index,
-					Program:   objs.XdpProg,
-				})
-
-				if err != nil {
-					glog.Errorf("attach xdp to iface %q failed: %v", iface.Name, err)
-				} else {
-					hostLinks = append(hostLinks, lxdp)
-				}
 			}
 		}
 	}()
