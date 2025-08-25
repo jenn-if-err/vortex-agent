@@ -32,7 +32,7 @@ $ kubectl create -f daemonset.yaml
 
 ## Testing
 
-If possible, test using k8s, or cloud VMs. But for specific kernel versions, however, below is a rough guide on how to setup a specific kernel version with a Debian system using [QEMU](https://www.qemu.org/).
+If possible, test using k8s, or cloud VMs. But to test for specific kernel versions, however, below is a rough guide on how to setup a specific kernel version with a Debian system using [QEMU](https://www.qemu.org/).
 
 ```sh
 # Install prerequisites:
