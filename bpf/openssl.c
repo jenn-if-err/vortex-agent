@@ -128,6 +128,7 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
     if (preface[0] == 'P' && preface[1] == 'R' && preface[2] == 'I')
         goto cleanup_and_exit;
 
+    // NOTE: WIP parse H2 frames in the SSL_write buffer
     __u32 cursor = 0;
 
 #pragma unroll
@@ -148,7 +149,7 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
             u32 stream_id_raw =
                 ((u32)h2_hdr[5] << 24) | ((u32)h2_hdr[6] << 16) | ((u32)h2_hdr[7] << 8) | ((u32)h2_hdr[8]);
             u32 stream_id = stream_id_raw & 0x7FFFFFFF; // Clear the reserved bit
-            bpf_printk("HTTP2 frame: type=0x%x frame_len=%u, stream_id=%u, flags=0x%x", frame_type, frame_len,
+            bpf_printk("[%d] H2 frame: type=0x%x frame_len=%u, stream_id=%u, flags=0x%x", i, frame_type, frame_len,
                        stream_id, flags);
         }
 
@@ -176,7 +177,7 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
 
             // Read the actual data
             u32 read_size = (data_len < DATA_MAX_SIZE) ? data_len : DATA_MAX_SIZE;
-            bpf_printk("HTTP2 DATA payload: data_len=%u, read_size=%u", data_len, read_size);
+            bpf_printk("[%d] H2 DATA payload: data_len=%u, read_size=%u", i, data_len, read_size);
         }
 
         // Move cursor to the next frame
