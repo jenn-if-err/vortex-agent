@@ -37,7 +37,7 @@ If possible, test using k8s, or cloud VMs. But to test for specific kernel versi
 ```sh
 # Install prerequisites:
 $ sudo apt update
-$ sudo apt install make gcc flex bison libncurses-dev libelf-dev libssl-dev \
+$ sudo apt git install make gcc flex bison libncurses-dev libelf-dev libssl-dev \
       debootstrap dwarves qemu-system -y
 
 # Clone stable Linux kernel:
