@@ -93,5 +93,5 @@ $ ./vortex-agent run --logtostderr
 $ poweroff
 
 # or from outside the VM:
-$ kill -9 $(cat vm.pid)
+$ kill [-9] $(cat vm.pid)
 ```
