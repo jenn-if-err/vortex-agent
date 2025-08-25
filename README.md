@@ -75,15 +75,23 @@ $ qemu-system-x86_64 \
       -pidfile vm.pid \
       2>&1 | tee vm.log
 
-# On another terminal, you can use scp and ssh:
+# On another terminal, you can use scp and ssh.
+# Copy vortex-agent binary to the VM using scp:
 $ scp -i debian-bullseye/bullseye.id_rsa -P 10021 \
       -o "StrictHostKeyChecking no" \
       $VORTEX_AGENT_ROOT/bin/vortex-agent \
       root@localhost:~/
 
+# ssh to the VM using the forwarded port:
 $ ssh -i debian-bullseye/bullseye.id_rsa -p 10021 \
       -o "StrictHostKeyChecking no" root@localhost
 
-# Close the VM (from ssh terminal):
+# and run the binary:
+$ ./vortex run --logtostderr
+
+# You can close the VM by running (within the VM):
 $ poweroff
+
+# or from outside the VM:
+$ kill -9 $(cat vm.pid)
 ```
