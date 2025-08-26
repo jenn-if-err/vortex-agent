@@ -332,6 +332,7 @@ func run(ctx context.Context, done chan error) {
 	ipToDomainCtx := internal.ChildCtx(ctx)
 
 	var wg sync.WaitGroup
+	var globalMessageID uint64 // unique message ID for each event
 
 	// TODO: This doesn't work properly. Need to figure out another way.
 	wg.Add(1)
@@ -1000,6 +1001,7 @@ func run(ctx context.Context, done chan error) {
 					if strings.Contains(fmt.Sprintf("%s", event.Comm), "node") || (strings.Contains(fmt.Sprintf("%s", event.Comm), "python")) && params.RunfSaveDb {
 						cols := []string{
 							"id",
+							"message_id",
 							"idx",
 							"src_addr",
 							"dst_addr",
@@ -1010,6 +1012,7 @@ func run(ctx context.Context, done chan error) {
 						}
 						vals := []any{
 							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
+							fmt.Sprintf("%v", event.MessageId),
 							fmt.Sprintf("%v", event.ChunkIdx),
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
@@ -1019,7 +1022,7 @@ func run(ctx context.Context, done chan error) {
 							"COMMIT_TIMESTAMP",
 						}
 						mut := internal.SpannerPayload{
-							Table: "llm_prompts",
+							Table: "llm_prompt",
 							Cols:  cols,
 							Vals:  vals,
 						}
@@ -1144,6 +1147,8 @@ func run(ctx context.Context, done chan error) {
 			glog.Errorf("parsing ringbuf event failed: %v", err)
 			continue
 		}
+		// Increment and assign the global message_id
+		event.MessageId = atomic.AddUint64(&globalMessageID, 1)
 
 		count++
 		if count%1000 == 0 {

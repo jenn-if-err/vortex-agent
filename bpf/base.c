@@ -27,6 +27,7 @@ struct event {
     __be32 daddr;
     __u16 sport;
     __be16 dport;
+    __u64 message_id;
 };
 
 /* Map to store events for userspace consumption. */
