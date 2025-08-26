@@ -8,8 +8,8 @@
 
 #include "vortex.h"
 
-#ifndef __BPF_VORTEX_COMMON_C
-#define __BPF_VORTEX_COMMON_C
+#ifndef __BPF_VORTEX_BASE_C
+#define __BPF_VORTEX_BASE_C
 
 extern int LINUX_KERNEL_VERSION __kconfig;
 
@@ -226,4 +226,4 @@ static __always_inline void rb_events_submit_with_stats(void *event, __u64 flags
     bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
 }
 
-#endif /* __BPF_VORTEX_COMMON_C */
+#endif /* __BPF_VORTEX_BASE_C */
