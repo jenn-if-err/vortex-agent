@@ -96,6 +96,63 @@ static __always_inline int do_uprobe_SSL_write(struct pt_regs *ctx) {
     return BPF_OK;
 }
 
+struct h2_loop_data_t {
+    __u32 *cursor;
+    char *buf;
+    int written;
+};
+
+/* Reference: https://httpwg.org/specs/rfc7540.html */
+static int loop_h2_parse(u64 index, struct h2_loop_data_t *data) {
+    if (*data->cursor + H2_FRAME_HEADER_SIZE > data->written)
+        return BPF_END_LOOP;
+
+    // Read the 9-byte frame header
+    u8 h2_hdr[H2_FRAME_HEADER_SIZE];
+    if (bpf_probe_read_user(&h2_hdr, sizeof(h2_hdr), data->buf + *data->cursor) != 0)
+        return BPF_END_LOOP;
+
+    __u32 frame_len = ((u32)h2_hdr[0] << 16) | ((u32)h2_hdr[1] << 8) | (u32)h2_hdr[2];
+    __u8 frame_type = h2_hdr[3];
+    __u8 flags = h2_hdr[4];
+    if (frame_type <= 0x9) {
+        u32 stream_id_raw = ((u32)h2_hdr[5] << 24) | ((u32)h2_hdr[6] << 16) | ((u32)h2_hdr[7] << 8) | ((u32)h2_hdr[8]);
+        u32 stream_id = stream_id_raw & 0x7FFFFFFF;
+        bpf_printk("[%d] H2 frame: type=0x%x frame_len=%u, stream_id=%u, flags=0x%x", index, frame_type, frame_len,
+                   stream_id, flags);
+    }
+
+    if (frame_type <= 0x9 && frame_type == H2_FRAME_TYPE_DATA && frame_len > 0) {
+        u32 payload_offset = *data->cursor + H2_FRAME_HEADER_SIZE;
+        u32 data_len = frame_len;
+
+        // Check if the PADDED flag is set
+        if (flags & H2_FLAG_PADDED) {
+            u8 pad_len = 0;
+            if (bpf_probe_read_user(&pad_len, 1, data->buf + payload_offset) != 0)
+                return BPF_END_LOOP;
+
+            payload_offset += 1;        // The payload starts after the pad length byte
+            if (data_len < pad_len + 1) // Sanity check
+                return BPF_END_LOOP;
+
+            data_len -= (pad_len + 1);
+        }
+
+        // Ensure we don't read past the end of the SSL_write buffer
+        if (payload_offset + data_len > data->written)
+            return BPF_END_LOOP;
+
+        // Read the actual data
+        u32 read_size = (data_len < DATA_MAX_SIZE) ? data_len : DATA_MAX_SIZE;
+        bpf_printk("[%d] H2 DATA payload: data_len=%u, read_size=%u", index, data_len, read_size);
+    }
+
+    *data->cursor += H2_FRAME_HEADER_SIZE + frame_len;
+
+    return BPF_CONTINUE_LOOP;
+}
+
 /* Shared with uretprobe/SSL_write and uretprobe/SSL_write_ex. */
 static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int written) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -128,61 +185,15 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
     if (preface[0] == 'P' && preface[1] == 'R' && preface[2] == 'I')
         goto cleanup_and_exit;
 
-    // NOTE: WIP parse H2 frames in the SSL_write buffer
     __u32 cursor = 0;
 
-#pragma unroll
-    for (int i = 0; i < MAX_FRAMES_PER_WRITE; i++) {
-        if (cursor + H2_FRAME_HEADER_SIZE > written)
-            break;
+    struct h2_loop_data_t h2_loop_data = {
+        .cursor = &cursor,
+        .buf = buf,
+        .written = written,
+    };
 
-        // Read the 9-byte frame header
-        u8 h2_hdr[H2_FRAME_HEADER_SIZE];
-        if (bpf_probe_read_user(&h2_hdr, sizeof(h2_hdr), buf + cursor) != 0)
-            break;
-
-        __u32 frame_len = ((u32)h2_hdr[0] << 16) | ((u32)h2_hdr[1] << 8) | (u32)h2_hdr[2];
-        __u8 frame_type = h2_hdr[3];
-        __u8 flags = h2_hdr[4];
-        if (frame_type <= 0x9) {
-            // The Stream ID has the top bit reserved, clear it.
-            u32 stream_id_raw =
-                ((u32)h2_hdr[5] << 24) | ((u32)h2_hdr[6] << 16) | ((u32)h2_hdr[7] << 8) | ((u32)h2_hdr[8]);
-            u32 stream_id = stream_id_raw & 0x7FFFFFFF; // Clear the reserved bit
-            bpf_printk("[%d] H2 frame: type=0x%x frame_len=%u, stream_id=%u, flags=0x%x", i, frame_type, frame_len,
-                       stream_id, flags);
-        }
-
-        // We only care about DATA frames
-        if (frame_type <= 0x9 && frame_type == H2_FRAME_TYPE_DATA && frame_len > 0) {
-            u32 payload_offset = cursor + H2_FRAME_HEADER_SIZE;
-            u32 data_len = frame_len;
-
-            // Check if the PADDED flag is set
-            if (flags & H2_FLAG_PADDED) {
-                u8 pad_len = 0;
-                if (bpf_probe_read_user(&pad_len, 1, buf + payload_offset) != 0)
-                    break;
-
-                payload_offset += 1;        // The payload starts after the pad length byte
-                if (data_len < pad_len + 1) // Sanity check
-                    break;
-
-                data_len -= (pad_len + 1);
-            }
-
-            // Ensure we don't read past the end of the SSL_write buffer
-            if (payload_offset + data_len > written)
-                break;
-
-            // Read the actual data
-            u32 read_size = (data_len < DATA_MAX_SIZE) ? data_len : DATA_MAX_SIZE;
-            bpf_printk("[%d] H2 DATA payload: data_len=%u, read_size=%u", i, data_len, read_size);
-        }
-
-        // Move cursor to the next frame
-        cursor += H2_FRAME_HEADER_SIZE + frame_len;
-    }
+    bpf_loop(16, loop_h2_parse, &h2_loop_data, 0);
 
     bpf_printk("SSL_write: total written=%d, parsed bytes=%u", written, cursor);
 
@@ -206,7 +217,7 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
     if (!event)
         goto cleanup_and_exit;
 
-    event->type = TYPE_UPROBE_SSL_WRITE;
+    event->type = TYPE_URETPROBE_SSL_WRITE;
     set_proc_info(event);
     event->total_len = orig_num;
     event->chunk_len = -1;
@@ -319,7 +330,7 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
     if (!event)
         goto cleanup_and_exit;
 
-    event->type = TYPE_UPROBE_SSL_WRITE;
+    event->type = TYPE_URETPROBE_SSL_READ;
     set_proc_info(event);
     event->total_len = orig_len;
     event->chunk_len = -1;
