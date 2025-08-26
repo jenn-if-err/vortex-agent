@@ -17,13 +17,15 @@ spec:
       hostPID: true
       containers:
       - name: vortex-agent
-        image: asia-docker.pkg.dev/mobingi-main/asia-pub/vortex-agent:1907beb3-cdc4-4de7-b185-fa30bd0a72ae
+        image: asia-docker.pkg.dev/mobingi-main/asia-pub/vortex-agent:bab7f0c3-b5c7-439e-84dd-b912ea1e30f4
         imagePullPolicy: Always
         env:
         - name: MY_NODE_NAME
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        - name: ORG_ID
+          value: "${ORG_ID}"
         ports:
         - containerPort: 8080
         securityContext:
