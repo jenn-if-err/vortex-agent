@@ -43,7 +43,7 @@ struct loop_data {
 };
 
 /* bpf_loop callback: send data to userspace in chunks of EVENT_BUF_LEN bytes. */
-static int do_loop_send_SSL_payload(u64 index, struct loop_data *data) {
+static int do_loop_send_ssl_payload(u64 index, struct loop_data *data) {
     struct event *event;
     event = rb_events_reserve_with_stats();
     if (!event)
@@ -77,7 +77,7 @@ static int do_loop_send_SSL_payload(u64 index, struct loop_data *data) {
 }
 
 /* Shared with uprobe/SSL_write and uprobe/SSL_write_ex. */
-static __always_inline int do_uprobe_SSL_write(struct pt_regs *ctx) {
+static __always_inline int do_uprobe_ssl_write(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     if (should_sni_trace(pid_tgid) == VORTEX_NO_TRACE)
         return BPF_OK;
@@ -154,7 +154,7 @@ static int loop_h2_parse(u64 index, struct h2_loop_data_t *data) {
 }
 
 /* Shared with uretprobe/SSL_write and uretprobe/SSL_write_ex. */
-static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int written) {
+static __always_inline int do_uretprobe_ssl_write(struct pt_regs *ctx, int written) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
 
@@ -208,7 +208,7 @@ static __always_inline int do_uretprobe_SSL_write(struct pt_regs *ctx, int writt
         .dport = dport,
     };
 
-    if (bpf_loop(4096, do_loop_send_SSL_payload, &data, 0) < 1)
+    if (bpf_loop(4096, do_loop_send_ssl_payload, &data, 0) < 1)
         goto cleanup_and_exit;
 
     /* Signal previous chunked stream's end. */
@@ -239,31 +239,31 @@ cleanup_and_exit:
  * int SSL_write(SSL *s, const void *buf, int num);
  */
 SEC("uprobe/SSL_write")
-int uprobe_SSL_write(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); }
+int uprobe_ssl_write(struct pt_regs *ctx) { return do_uprobe_ssl_write(ctx); }
 
 /*
  * Synopsis:
  * int SSL_write(SSL *s, const void *buf, int num);
  */
 SEC("uretprobe/SSL_write")
-int uretprobe_SSL_write(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx, (int)PT_REGS_RC(ctx)); }
+int uretprobe_ssl_write(struct pt_regs *ctx) { return do_uretprobe_ssl_write(ctx, (int)PT_REGS_RC(ctx)); }
 
 /*
  * Synopsis:
  * int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written);
  */
 SEC("uprobe/SSL_write_ex")
-int uprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uprobe_SSL_write(ctx); }
+int uprobe_ssl_write_ex(struct pt_regs *ctx) { return do_uprobe_ssl_write(ctx); }
 
 /*
  * Synopsis:
  * int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written);
  */
 SEC("uretprobe/SSL_write_ex")
-int uretprobe_SSL_write_ex(struct pt_regs *ctx) { return do_uretprobe_SSL_write(ctx, (int)PT_REGS_PARM3(ctx)); }
+int uretprobe_ssl_write_ex(struct pt_regs *ctx) { return do_uretprobe_ssl_write(ctx, (int)PT_REGS_PARM3(ctx)); }
 
 /* Shared with uprobe/SSL_read and uprobe/SSL_read_ex. */
-static __always_inline int do_uprobe_SSL_read(struct pt_regs *ctx) {
+static __always_inline int do_uprobe_ssl_read(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     if (should_sni_trace(pid_tgid) == VORTEX_NO_TRACE)
         return BPF_OK;
@@ -283,7 +283,7 @@ static __always_inline int do_uprobe_SSL_read(struct pt_regs *ctx) {
 }
 
 /* Shared with uretprobe/SSL_read and uretprobe/SSL_read_ex. */
-static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) {
+static __always_inline int do_uretprobe_ssl_read(struct pt_regs *ctx, int read) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
 
@@ -321,7 +321,7 @@ static __always_inline int do_uretprobe_SSL_read(struct pt_regs *ctx, int read) 
         .dport = dport,
     };
 
-    if (bpf_loop(4096, do_loop_send_SSL_payload, &data, 0) < 1)
+    if (bpf_loop(4096, do_loop_send_ssl_payload, &data, 0) < 1)
         goto cleanup_and_exit;
 
     /* Signal previous chunked stream's end. */
@@ -352,25 +352,25 @@ cleanup_and_exit:
  * int SSL_read(SSL *s, void *buf, int num);
  */
 SEC("uprobe/SSL_read")
-int uprobe_SSL_read(struct pt_regs *ctx) { return do_uprobe_SSL_read(ctx); }
+int uprobe_ssl_read(struct pt_regs *ctx) { return do_uprobe_ssl_read(ctx); }
 
 /*
  * Synopsis:
  * int SSL_read(SSL *s, void *buf, int num);
  */
 SEC("uretprobe/SSL_read")
-int uretprobe_SSL_read(struct pt_regs *ctx) { return do_uretprobe_SSL_read(ctx, (int)PT_REGS_RC(ctx)); }
+int uretprobe_ssl_read(struct pt_regs *ctx) { return do_uretprobe_ssl_read(ctx, (int)PT_REGS_RC(ctx)); }
 
 /*
  * Synopsis:
  * int SSL_read_ex(SSL *s, void *buf, size_t num, size_t *read);
  */
 SEC("uprobe/SSL_read_ex")
-int uprobe_SSL_read_ex(struct pt_regs *ctx) {
+int uprobe_ssl_read_ex(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u64 read = (__u64)PT_REGS_PARM4(ctx);
     bpf_map_update_elem(&ssl_read_ex_p4, &pid_tgid, &read, BPF_ANY);
-    return do_uprobe_SSL_read(ctx);
+    return do_uprobe_ssl_read(ctx);
 }
 
 /*
@@ -378,7 +378,7 @@ int uprobe_SSL_read_ex(struct pt_regs *ctx) {
  * int SSL_read_ex(SSL *s, void *buf, size_t num, size_t *read);
  */
 SEC("uretprobe/SSL_read_ex")
-int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
+int uretprobe_ssl_read_ex(struct pt_regs *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u64 *read = bpf_map_lookup_elem(&ssl_read_ex_p4, &pid_tgid);
     if (!read)
@@ -387,7 +387,7 @@ int uretprobe_SSL_read_ex(struct pt_regs *ctx) {
     size_t len = 0;
     bpf_probe_read_user(&len, sizeof(len), (void *)*read);
     bpf_map_delete_elem(&ssl_read_ex_p4, &pid_tgid);
-    return do_uretprobe_SSL_read(ctx, (int)len);
+    return do_uretprobe_ssl_read(ctx, (int)len);
 }
 
 #endif /* __BPF_VORTEX_OPENSSL_C */

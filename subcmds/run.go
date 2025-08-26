@@ -1173,56 +1173,56 @@ func run(ctx context.Context, done chan error) {
 }
 
 func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects) {
-	l, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
+	l, err := ex.Uprobe("SSL_write", objs.UprobeSslWrite, nil)
 	if err != nil {
 		glog.Errorf("uprobe/SSL_write failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+	l, err = ex.Uretprobe("SSL_write", objs.UretprobeSslWrite, nil)
 	if err != nil {
 		glog.Errorf("uretprobe/SSL_write failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
+	l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSslWriteEx, nil)
 	if err != nil {
 		glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
+	l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSslWriteEx, nil)
 	if err != nil {
 		glog.Errorf("uretprobe/SSL_write_ex failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+	l, err = ex.Uprobe("SSL_read", objs.UprobeSslRead, nil)
 	if err != nil {
 		glog.Errorf("uprobe/SSL_read failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
+	l, err = ex.Uretprobe("SSL_read", objs.UretprobeSslRead, nil)
 	if err != nil {
 		glog.Errorf("uretprobe/SSL_read failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
+	l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSslReadEx, nil)
 	if err != nil {
 		glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
+	l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSslReadEx, nil)
 	if err != nil {
 		glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
 	} else {
