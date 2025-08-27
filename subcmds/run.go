@@ -1022,7 +1022,7 @@ func run(ctx context.Context, done chan error) {
 							"COMMIT_TIMESTAMP",
 						}
 						mut := internal.SpannerPayload{
-							Table: "llm_prompt",
+							Table: "llm_prompts",
 							Cols:  cols,
 							Vals:  vals,
 						}
