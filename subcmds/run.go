@@ -1072,8 +1072,9 @@ func run(ctx context.Context, done chan error) {
 						}
 					}()
 					internalglog.LogInfo(line.String())
-					// Use id/message_id as the key
-					respKey := fmt.Sprintf("%v/%v/%v", event.Tgid, event.Pid, event.MessageId)
+
+					// use connection-based key (without message_id) to group all chunks for this response
+					respKey := fmt.Sprintf("%v/%v/%v/%v/%v/%v", event.Tgid, event.Pid, event.Saddr, event.Daddr, event.Sport, event.Dport)
 					bucketAny, _ := responseMap.LoadOrStore(respKey, &responseBucket{total: int(event.TotalLen)})
 					bucket := bucketAny.(*responseBucket)
 					bucket.chunks = append(bucket.chunks, event.Buf[:event.ChunkLen])
