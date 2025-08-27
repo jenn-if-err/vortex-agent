@@ -4,10 +4,12 @@ package subcmds
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"os"
@@ -94,6 +96,12 @@ type ContainerInfo struct {
 	Name   string
 	Image  string
 	PodUId string
+}
+
+type responseBucket struct {
+	chunks   [][]byte
+	received int
+	total    int
 }
 
 func RunCmd() *cobra.Command {
@@ -333,6 +341,7 @@ func run(ctx context.Context, done chan error) {
 
 	var wg sync.WaitGroup
 	var globalMessageID uint64 // unique message ID for each event
+	var responseMap sync.Map   // key: respKey, value: *responseBucket
 
 	// TODO: This doesn't work properly. Need to figure out another way.
 	wg.Add(1)
@@ -1063,6 +1072,95 @@ func run(ctx context.Context, done chan error) {
 						}
 					}()
 					internalglog.LogInfo(line.String())
+					// Use id/message_id as the key
+					respKey := fmt.Sprintf("%v/%v/%v", event.Tgid, event.Pid, event.MessageId)
+					bucketAny, _ := responseMap.LoadOrStore(respKey, &responseBucket{total: int(event.TotalLen)})
+					bucket := bucketAny.(*responseBucket)
+					bucket.chunks = append(bucket.chunks, event.Buf[:event.ChunkLen])
+					bucket.received += int(event.ChunkLen)
+
+					// If not complete, wait for more chunks
+					if bucket.received < bucket.total {
+						break
+					}
+
+					// Combine all chunks
+					full := bytes.Join(bucket.chunks, nil)
+
+					// Separate headers and body
+					i := bytes.Index(full, []byte("\r\n\r\n"))
+					var headers string
+					var body []byte
+					if i > 0 {
+						headers = string(full[:i])
+						body = full[i+4:]
+					} else {
+						body = full
+					}
+
+					// Check for gzip encoding
+					if strings.Contains(headers, "Content-Encoding: gzip") {
+						reader, err := gzip.NewReader(bytes.NewReader(body))
+						if err == nil {
+							decompressed, err := io.ReadAll(reader)
+							reader.Close()
+							if err == nil {
+								body = decompressed
+							}
+						}
+					}
+
+					// Save to Spanner (llm_response)
+					if params.RunfSaveDb {
+						var containerName, containerImage string
+						func() {
+							if !isk8s {
+								return
+							}
+							ipToContainerMtx.Lock()
+							defer ipToContainerMtx.Unlock()
+							info, ok := ipToContainer[internal.IntToIp(event.Saddr).String()]
+							if ok {
+								containerName = info.Name
+								containerImage = info.Image
+							}
+						}()
+
+						cols := []string{
+							"id",
+							"message_id",
+							"idx",
+							"comm",
+							"src_addr",
+							"dst_addr",
+							"container_name",
+							"container_image",
+							"content",
+							"created_at",
+						}
+						vals := []any{
+							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
+							fmt.Sprintf("%v", event.MessageId),
+							fmt.Sprintf("%v", event.ChunkIdx),
+							fmt.Sprintf("%s", event.Comm),
+							fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
+							fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
+							containerName,
+							containerImage,
+							string(body),
+							"COMMIT_TIMESTAMP",
+						}
+						mut := internal.SpannerPayload{
+							Table: "llm_response",
+							Cols:  cols,
+							Vals:  vals,
+						}
+						mutBufCh <- mut
+					}
+
+					// Clean up
+					responseMap.Delete(respKey)
+					break
 
 				case TYPE_REPORT_READ_SOCKET_INFO:
 					fmt.Fprintf(&line, "[TYPE_REPORT_READ_SOCKET_INFO] key=%v, ", key)
