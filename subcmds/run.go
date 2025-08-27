@@ -990,7 +990,7 @@ func run(ctx context.Context, done chan error) {
 							"COMMIT_TIMESTAMP",
 						}
 						mut := internal.SpannerPayload{
-							Table: "llm_prompts",
+							Table: "llm_prompt",
 							Cols:  cols,
 							Vals:  vals,
 						}
@@ -1129,6 +1129,7 @@ func run(ctx context.Context, done chan error) {
 						cols := []string{
 							"id",
 							"message_id",
+							"org_id",
 							"idx",
 							"comm",
 							"src_addr",
@@ -1158,7 +1159,6 @@ func run(ctx context.Context, done chan error) {
 						mutBufCh <- mut
 					}
 
-					// Clean up
 					responseMap.Delete(respKey)
 					break
 
