@@ -1110,10 +1110,13 @@ func run(ctx context.Context, done chan error) {
 						headers = string(full[:i])
 						rawBody = full[i+4:]
 						if strings.Contains(headers, "Transfer-Encoding: chunked") {
+							internalglog.LogInfof("llm_response: decoding chunked body, rawBody size=%d", len(rawBody))
 							decoded, err := decodeChunkedBody(rawBody)
 							if err == nil {
 								body = decoded
+								internalglog.LogInfof("llm_response: chunked decoding successful, decoded size=%d", len(body))
 							} else {
+								internalglog.LogInfof("llm_response: chunked decoding failed: %v", err)
 								body = rawBody // fallback
 							}
 						} else {
@@ -1125,13 +1128,19 @@ func run(ctx context.Context, done chan error) {
 
 					// Check for gzip encoding
 					if strings.Contains(headers, "Content-Encoding: gzip") {
+						internalglog.LogInfof("llm_response: gzip detected, body size before decompression=%d", len(body))
 						reader, err := gzip.NewReader(bytes.NewReader(body))
 						if err == nil {
 							decompressed, err := io.ReadAll(reader)
 							reader.Close()
 							if err == nil {
 								body = decompressed
+								internalglog.LogInfof("llm_response: gzip decompression successful, decompressed size=%d", len(body))
+							} else {
+								internalglog.LogInfof("llm_response: gzip read failed: %v", err)
 							}
+						} else {
+							internalglog.LogInfof("llm_response: gzip reader creation failed: %v", err)
 						}
 					}
 					internalglog.LogInfof("llm_response: headers=%q", headers)
@@ -1168,8 +1177,8 @@ func run(ctx context.Context, done chan error) {
 						vals := []any{
 							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
 							fmt.Sprintf("%v", event.MessageId),
-							fmt.Sprintf("%v", event.ChunkIdx),
-							"",
+							"",  // org_id
+							"0", // idx
 							fmt.Sprintf("%s", event.Comm),
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
