@@ -1103,13 +1103,55 @@ func run(ctx context.Context, done chan error) {
 						}
 					}
 
-					// use connection-based key (without message_id) to group all chunks for this response
-					respKey := fmt.Sprintf("%v/%v/%v/%v/%v/%v", event.Tgid, event.Pid, event.Saddr, event.Daddr, event.Sport, event.Dport)
+					// Detect if this chunk starts a new HTTP response
+					chunkData := string(event.Buf[:event.ChunkLen])
+					isNewResponse := strings.HasPrefix(chunkData, "HTTP/1.1")
+
+					// use connection-based key, but add a sequence number for multiple responses
+					baseKey := fmt.Sprintf("%v/%v/%v/%v/%v/%v", event.Tgid, event.Pid, event.Saddr, event.Daddr, event.Sport, event.Dport)
+
+					// If this is a new HTTP response, we need to find or create a new bucket
+					var respKey string
+					var bucket *responseBucket
+
+					if isNewResponse {
+						// This is a new HTTP response - clean up any existing bucket for this connection
+						// and create a new one with a timestamp
+						responseMap.Range(func(key, value interface{}) bool {
+							if strings.HasPrefix(key.(string), baseKey) {
+								internalglog.LogInfof("llm_response: cleaning up previous response bucket for new HTTP response")
+								responseMap.Delete(key)
+							}
+							return true
+						})
+
+						respKey = fmt.Sprintf("%s/t%d", baseKey, time.Now().UnixNano())
+						internalglog.LogInfof("llm_response: new HTTP response detected, key=%s", respKey)
+					} else {
+						// This is a continuation of an existing response - find the existing bucket
+						var foundKey string
+						responseMap.Range(func(key, value interface{}) bool {
+							if strings.HasPrefix(key.(string), baseKey) {
+								foundKey = key.(string)
+								return false // stop iteration
+							}
+							return true
+						})
+
+						if foundKey != "" {
+							respKey = foundKey
+						} else {
+							// No existing bucket found, create one (shouldn't happen normally)
+							respKey = fmt.Sprintf("%s/t%d", baseKey, time.Now().UnixNano())
+							internalglog.LogInfof("llm_response: no existing bucket found, creating new one")
+						}
+					}
+
 					bucketAny, _ := responseMap.LoadOrStore(respKey, &responseBucket{
 						total:      int(event.TotalLen),
 						lastUpdate: time.Now(),
 					})
-					bucket := bucketAny.(*responseBucket)
+					bucket = bucketAny.(*responseBucket)
 
 					// Update last activity time
 					bucket.lastUpdate = time.Now()
