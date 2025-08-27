@@ -35,7 +35,7 @@ struct loop_data {
     __u32 type;
     char **buf_ptr;
     int *len;
-    int *orig_len;
+    int orig_len;
     __be32 saddr;
     __be32 daddr;
     __u16 sport;
@@ -52,7 +52,7 @@ static int do_loop_send_ssl_payload(u64 index, struct loop_data *data) {
     __u32 len = (__u32)*data->len > EVENT_BUF_LEN ? EVENT_BUF_LEN : (__u32)*data->len;
     set_proc_info(event);
     event->type = data->type;
-    event->total_len = *data->orig_len;
+    event->total_len = data->orig_len;
     event->chunk_len = len;
     event->chunk_idx = index;
     event->saddr = data->saddr;
@@ -108,27 +108,27 @@ static int loop_h2_parse(u64 index, struct h2_loop_data_t *data) {
         return BPF_END_LOOP;
 
     // Read the 9-byte frame header
-    u8 h2_hdr[H2_FRAME_HEADER_SIZE];
-    if (bpf_probe_read_user(&h2_hdr, sizeof(h2_hdr), data->buf + *data->cursor) != 0)
+    __u8 hdr[H2_FRAME_HEADER_SIZE];
+    if (bpf_probe_read_user(&hdr, sizeof(hdr), data->buf + *data->cursor) != 0)
         return BPF_END_LOOP;
 
-    __u32 frame_len = ((u32)h2_hdr[0] << 16) | ((u32)h2_hdr[1] << 8) | (u32)h2_hdr[2];
-    __u8 frame_type = h2_hdr[3];
-    __u8 flags = h2_hdr[4];
+    __u32 frame_len = ((__u32)hdr[0] << 16) | ((__u32)hdr[1] << 8) | (__u32)hdr[2];
+    __u8 frame_type = hdr[3];
+    __u8 flags = hdr[4];
     if (frame_type <= 0x9) {
-        u32 stream_id_raw = ((u32)h2_hdr[5] << 24) | ((u32)h2_hdr[6] << 16) | ((u32)h2_hdr[7] << 8) | ((u32)h2_hdr[8]);
-        u32 stream_id = stream_id_raw & 0x7FFFFFFF;
+        __u32 stream_id = ((__u32)hdr[5] << 24) | ((__u32)hdr[6] << 16) | ((__u32)hdr[7] << 8) | ((__u32)hdr[8]);
+        stream_id = stream_id & 0x7FFFFFFF;
         bpf_printk("[%d] H2 frame: type=0x%x frame_len=%u, stream_id=%u, flags=0x%x", index, frame_type, frame_len,
                    stream_id, flags);
     }
 
     if (frame_type <= 0x9 && frame_type == H2_FRAME_TYPE_DATA && frame_len > 0) {
-        u32 payload_offset = *data->cursor + H2_FRAME_HEADER_SIZE;
-        u32 data_len = frame_len;
+        __u32 payload_offset = *data->cursor + H2_FRAME_HEADER_SIZE;
+        __u32 data_len = frame_len;
 
         // Check if the PADDED flag is set
         if (flags & H2_FLAG_PADDED) {
-            u8 pad_len = 0;
+            __u8 pad_len = 0;
             if (bpf_probe_read_user(&pad_len, 1, data->buf + payload_offset) != 0)
                 return BPF_END_LOOP;
 
@@ -144,12 +144,11 @@ static int loop_h2_parse(u64 index, struct h2_loop_data_t *data) {
             return BPF_END_LOOP;
 
         // Read the actual data
-        u32 read_size = (data_len < DATA_MAX_SIZE) ? data_len : DATA_MAX_SIZE;
+        __u32 read_size = (data_len < DATA_MAX_SIZE) ? data_len : DATA_MAX_SIZE;
         bpf_printk("[%d] H2 DATA payload: data_len=%u, read_size=%u", index, data_len, read_size);
     }
 
     *data->cursor += H2_FRAME_HEADER_SIZE + frame_len;
-
     return BPF_CONTINUE_LOOP;
 }
 
@@ -158,8 +157,7 @@ static __always_inline int do_uretprobe_ssl_write(struct pt_regs *ctx, int writt
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_WRITE};
 
-    int ret = (int)PT_REGS_RC(ctx);
-    if (ret <= 0)
+    if (written <= 0)
         goto cleanup_and_exit;
 
     struct ssl_callstack_v *val;
@@ -176,32 +174,42 @@ static __always_inline int do_uretprobe_ssl_write(struct pt_regs *ctx, int writt
         set_fdc_sock(pid_tgid, &saddr, &daddr, &sport, &dport);
 
     char *buf = (char *)val->buf;
-    int num = val->len;
-    int orig_num = num;
+    int num = written;
+
+    struct h2_k h2_key = {
+        .pid_tgid = pid_tgid,
+        .saddr = saddr,
+        .daddr = daddr,
+        .sport = sport,
+        .dport = dport,
+    };
 
     /* Preface: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" */
     char preface[3];
     bpf_probe_read_user(preface, sizeof(preface), buf);
-    if (preface[0] == 'P' && preface[1] == 'R' && preface[2] == 'I')
+    if (preface[0] == 'P' && preface[1] == 'R' && preface[2] == 'I') {
+        __u8 val = 1;
+        bpf_map_update_elem(&is_h2, &h2_key, &val, BPF_ANY);
         goto cleanup_and_exit;
+    }
 
-    __u32 cursor = 0;
+    __u8 *unused = bpf_map_lookup_elem(&is_h2, &h2_key);
+    if (unused) {
+        __u32 cursor = 0;
+        struct h2_loop_data_t h2_loop_data = {
+            .cursor = &cursor,
+            .buf = buf,
+            .written = written,
+        };
 
-    struct h2_loop_data_t h2_loop_data = {
-        .cursor = &cursor,
-        .buf = buf,
-        .written = written,
-    };
-
-    bpf_loop(16, loop_h2_parse, &h2_loop_data, 0);
-
-    bpf_printk("SSL_write: total written=%d, parsed bytes=%u", written, cursor);
+        bpf_loop(4096, loop_h2_parse, &h2_loop_data, 0);
+    }
 
     struct loop_data data = {
         .type = TYPE_URETPROBE_SSL_WRITE,
         .buf_ptr = &buf,
         .len = &num,
-        .orig_len = &orig_num,
+        .orig_len = written,
         .saddr = saddr,
         .daddr = daddr,
         .sport = sport,
@@ -219,7 +227,7 @@ static __always_inline int do_uretprobe_ssl_write(struct pt_regs *ctx, int writt
 
     event->type = TYPE_URETPROBE_SSL_WRITE;
     set_proc_info(event);
-    event->total_len = orig_num;
+    event->total_len = written;
     event->chunk_len = -1;
     event->chunk_idx = CHUNKED_END_IDX;
     event->saddr = saddr;
@@ -253,14 +261,29 @@ int uretprobe_ssl_write(struct pt_regs *ctx) { return do_uretprobe_ssl_write(ctx
  * int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written);
  */
 SEC("uprobe/SSL_write_ex")
-int uprobe_ssl_write_ex(struct pt_regs *ctx) { return do_uprobe_ssl_write(ctx); }
+int uprobe_ssl_write_ex(struct pt_regs *ctx) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u64 written = (__u64)PT_REGS_PARM4(ctx);
+    bpf_map_update_elem(&ssl_write_ex_p4, &pid_tgid, &written, BPF_ANY);
+    return do_uprobe_ssl_write(ctx);
+}
 
 /*
  * Synopsis:
  * int SSL_write_ex(SSL *s, const void *buf, size_t num, size_t *written);
  */
 SEC("uretprobe/SSL_write_ex")
-int uretprobe_ssl_write_ex(struct pt_regs *ctx) { return do_uretprobe_ssl_write(ctx, (int)PT_REGS_PARM3(ctx)); }
+int uretprobe_ssl_write_ex(struct pt_regs *ctx) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u64 *written = bpf_map_lookup_elem(&ssl_write_ex_p4, &pid_tgid);
+    if (!written)
+        return BPF_OK;
+
+    size_t len = 0;
+    bpf_probe_read_user(&len, sizeof(len), (void *)*written);
+    bpf_map_delete_elem(&ssl_write_ex_p4, &pid_tgid);
+    return do_uretprobe_ssl_write(ctx, (int)len);
+}
 
 /* Shared with uprobe/SSL_read and uprobe/SSL_read_ex. */
 static __always_inline int do_uprobe_ssl_read(struct pt_regs *ctx) {
@@ -308,13 +331,12 @@ static __always_inline int do_uretprobe_ssl_read(struct pt_regs *ctx, int read) 
         set_fdc_sock(pid_tgid, &saddr, &daddr, &sport, &dport);
 
     char *buf = (char *)val->buf;
-    int orig_len = read;
 
     struct loop_data data = {
         .type = TYPE_URETPROBE_SSL_READ,
         .buf_ptr = &buf,
         .len = &read,
-        .orig_len = &orig_len,
+        .orig_len = read,
         .saddr = saddr,
         .daddr = daddr,
         .sport = sport,
@@ -332,7 +354,7 @@ static __always_inline int do_uretprobe_ssl_read(struct pt_regs *ctx, int read) 
 
     event->type = TYPE_URETPROBE_SSL_READ;
     set_proc_info(event);
-    event->total_len = orig_len;
+    event->total_len = read;
     event->chunk_len = -1;
     event->chunk_idx = CHUNKED_END_IDX;
     event->saddr = saddr;
