@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -1145,6 +1147,17 @@ func run(ctx context.Context, done chan error) {
 					}
 					internalglog.LogInfof("llm_response: headers=%q", headers)
 					internalglog.LogInfof("llm_response: body=%q", body)
+
+					// Validate content before saving - ensure it's valid UTF-8 text
+					contentToSave := string(body)
+					if !utf8.Valid(body) {
+						internalglog.LogInfof("llm_response: invalid UTF-8 content, storing as base64")
+						contentToSave = base64.StdEncoding.EncodeToString(body)
+					} else if len(body) == 0 {
+						internalglog.LogInfof("llm_response: empty body, skipping save")
+						continue
+					}
+
 					// Save to Spanner (llm_response)
 					if params.RunfSaveDb {
 						var containerName, containerImage string
@@ -1184,7 +1197,7 @@ func run(ctx context.Context, done chan error) {
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
 							containerName,
 							containerImage,
-							string(body),
+							contentToSave,
 							"COMMIT_TIMESTAMP",
 						}
 						mut := internal.SpannerPayload{
