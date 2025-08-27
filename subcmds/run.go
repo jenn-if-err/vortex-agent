@@ -1109,7 +1109,8 @@ func run(ctx context.Context, done chan error) {
 							}
 						}
 					}
-
+					internalglog.LogInfof("llm_response: headers=%q", headers)
+					internalglog.LogInfof("llm_response: body=%q", body)
 					// Save to Spanner (llm_response)
 					if params.RunfSaveDb {
 						var containerName, containerImage string
