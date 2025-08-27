@@ -87,7 +87,10 @@ static __always_inline int do_uprobe_ssl_write(struct pt_regs *ctx) {
     return BPF_OK;
 }
 
-/* Reference: https://httpwg.org/specs/rfc7540.html */
+/*
+ * bpf_loop callback: parse HTTP2 frames and attempt to extract plaintext.
+ * Reference: https://httpwg.org/specs/rfc7540.html
+ */
 static int loop_h2_parse(u64 index, struct loop_data *data) {
     if (*data->cursor + H2_FRAME_HEADER_SIZE > data->orig_len)
         return BPF_END_LOOP;
