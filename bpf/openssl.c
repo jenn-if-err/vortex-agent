@@ -305,6 +305,19 @@ static __always_inline int do_uretprobe_ssl_read(struct pt_regs *ctx, int read) 
 
     char *buf = (char *)val->buf;
 
+    struct h2_k h2_key = {
+        .pid_tgid = pid_tgid,
+        .saddr = saddr,
+        .daddr = daddr,
+        .sport = sport,
+        .dport = dport,
+    };
+
+    __u8 *unused = bpf_map_lookup_elem(&is_h2, &h2_key);
+    if (unused) {
+        bpf_printk("Detected H2 read");
+    }
+
     struct loop_data data = {
         .type = TYPE_URETPROBE_SSL_READ,
         .buf_ptr = &buf,
