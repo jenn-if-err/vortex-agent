@@ -102,7 +102,7 @@ type ContainerInfo struct {
 
 type responseBucket struct {
 	chunks     [][]byte
-	chunkOrder []int     // track the order of chunks based on idx
+	chunkOrder []int // track the order of chunks based on idx
 	received   int
 	total      int
 	lastUpdate time.Time
@@ -820,11 +820,11 @@ func run(ctx context.Context, done chan error) {
 
 	tickerFlush := time.NewTicker(5 * time.Second)
 	defer tickerFlush.Stop()
-	
+
 	// Cleanup stale response buckets
 	tickerCleanup := time.NewTicker(30 * time.Second)
 	defer tickerCleanup.Stop()
-	
+
 	go func() {
 		for range tickerCleanup.C {
 			now := time.Now()
@@ -1110,13 +1110,13 @@ func run(ctx context.Context, done chan error) {
 						lastUpdate: time.Now(),
 					})
 					bucket := bucketAny.(*responseBucket)
-					
+
 					// Update last activity time
 					bucket.lastUpdate = time.Now()
-					
+
 					// Add chunk with its index for ordering
 					bucket.chunks = append(bucket.chunks, event.Buf[:event.ChunkLen])
-					bucket.chunkOrder = append(bucket.chunkOrder, int(event.Idx))
+					bucket.chunkOrder = append(bucket.chunkOrder, int(event.ChunkIdx))
 					bucket.received += int(event.ChunkLen)
 
 					// Check if we should process (either complete or timeout)
@@ -1144,7 +1144,7 @@ func run(ctx context.Context, done chan error) {
 						}
 						internalglog.LogInfof("llm_response: chunk %d (order=%d) size=%d", idx, order, len(chunk))
 					}
-					
+
 					// Combine all chunks
 					full := bytes.Join(bucket.chunks, nil)
 					internalglog.LogInfof("llm_response: combined full response size=%d", len(full))
