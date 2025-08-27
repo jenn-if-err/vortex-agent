@@ -107,14 +107,14 @@ static int loop_h2_parse(u64 index, struct h2_loop_data_t *data) {
     if (*data->cursor + H2_FRAME_HEADER_SIZE > data->written)
         return BPF_END_LOOP;
 
-    // Read the 9-byte frame header
+    /* Read the 9-byte frame header. */
     __u8 hdr[H2_FRAME_HEADER_SIZE];
     if (bpf_probe_read_user(&hdr, sizeof(hdr), data->buf + *data->cursor) != 0)
         return BPF_END_LOOP;
 
     __u32 frame_len = ((__u32)hdr[0] << 16) | ((__u32)hdr[1] << 8) | (__u32)hdr[2];
-    __u8 frame_type = hdr[3];
-    __u8 flags = hdr[4];
+    __u8 frame_type = hdr[3], flags = hdr[4];
+
     if (frame_type <= 0x9) {
         __u32 stream_id = ((__u32)hdr[5] << 24) | ((__u32)hdr[6] << 16) | ((__u32)hdr[7] << 8) | ((__u32)hdr[8]);
         stream_id = stream_id & 0x7FFFFFFF;
@@ -126,7 +126,6 @@ static int loop_h2_parse(u64 index, struct h2_loop_data_t *data) {
         __u32 payload_offset = *data->cursor + H2_FRAME_HEADER_SIZE;
         __u32 data_len = frame_len;
 
-        // Check if the PADDED flag is set
         if (flags & H2_FLAG_PADDED) {
             __u8 pad_len = 0;
             if (bpf_probe_read_user(&pad_len, 1, data->buf + payload_offset) != 0)
@@ -139,13 +138,10 @@ static int loop_h2_parse(u64 index, struct h2_loop_data_t *data) {
             data_len -= (pad_len + 1);
         }
 
-        // Ensure we don't read past the end of the SSL_write buffer
         if (payload_offset + data_len > data->written)
             return BPF_END_LOOP;
 
-        // Read the actual data
-        __u32 read_size = (data_len < DATA_MAX_SIZE) ? data_len : DATA_MAX_SIZE;
-        bpf_printk("[%d] H2 DATA payload: data_len=%u, read_size=%u", index, data_len, read_size);
+        bpf_printk("[%d] H2 DATA payload: data_len=%u", index, data_len);
     }
 
     *data->cursor += H2_FRAME_HEADER_SIZE + frame_len;
