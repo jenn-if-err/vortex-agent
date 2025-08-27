@@ -1073,6 +1073,14 @@ func run(ctx context.Context, done chan error) {
 					}()
 					internalglog.LogInfo(line.String())
 
+					// Skip chunked end marker
+					if event.TotalLen == 5 && event.ChunkLen == 5 {
+						content := string(event.Buf[:event.ChunkLen])
+						if content == "0\r\n\r\n" {
+							break
+						}
+					}
+
 					// use connection-based key (without message_id) to group all chunks for this response
 					respKey := fmt.Sprintf("%v/%v/%v/%v/%v/%v", event.Tgid, event.Pid, event.Saddr, event.Daddr, event.Sport, event.Dport)
 					bucketAny, _ := responseMap.LoadOrStore(respKey, &responseBucket{total: int(event.TotalLen)})
