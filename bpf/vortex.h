@@ -40,6 +40,10 @@ enum {
 #define TLS_CLIENT_HELLO 0x01
 #define TLS_EXTENSION_SNI 0x0000
 
+#define H2_FRAME_HEADER_SIZE 9
+#define H2_FRAME_TYPE_DATA 0x0
+#define H2_FLAG_PADDED 0x8
+
 enum {
     VORTEX_NO_TRACE,
     VORTEX_TRACE,
