@@ -287,10 +287,6 @@ static __always_inline int do_uretprobe_ssl_read(struct pt_regs *ctx, int read) 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
 
-    int ret = (int)PT_REGS_RC(ctx);
-    if (ret <= 0)
-        goto cleanup_and_exit;
-
     if (read <= 0)
         goto cleanup_and_exit;
 
