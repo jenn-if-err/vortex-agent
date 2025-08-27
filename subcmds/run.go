@@ -1086,6 +1086,7 @@ func run(ctx context.Context, done chan error) {
 
 					// Combine all chunks
 					full := bytes.Join(bucket.chunks, nil)
+					internalglog.LogInfof("llm_response: full=%q", full)
 
 					// Separate headers and body
 					i := bytes.Index(full, []byte("\r\n\r\n"))
