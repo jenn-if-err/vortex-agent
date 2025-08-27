@@ -1092,9 +1092,20 @@ func run(ctx context.Context, done chan error) {
 					i := bytes.Index(full, []byte("\r\n\r\n"))
 					var headers string
 					var body []byte
+					var rawBody []byte
 					if i > 0 {
 						headers = string(full[:i])
-						body = full[i+4:]
+						rawBody = full[i+4:]
+						if strings.Contains(headers, "Transfer-Encoding: chunked") {
+							decoded, err := decodeChunkedBody(rawBody)
+							if err == nil {
+								body = decoded
+							} else {
+								body = rawBody // fallback
+							}
+						} else {
+							body = rawBody
+						}
 					} else {
 						body = full
 					}
@@ -1288,4 +1299,45 @@ func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects)
 	} else {
 		*links = append(*links, l)
 	}
+}
+
+func decodeChunkedBody(chunked []byte) ([]byte, error) {
+	var body bytes.Buffer
+	r := bytes.NewReader(chunked)
+	for {
+		// read chunk size line
+		var sizeLine []byte
+		for {
+			b, err := r.ReadByte()
+			if err != nil {
+				return nil, err
+			}
+			if b == '\n' {
+				break
+			}
+			sizeLine = append(sizeLine, b)
+		}
+		sizeStr := strings.TrimSpace(string(sizeLine))
+		if sizeStr == "" {
+			continue
+		}
+		size, err := strconv.ParseInt(sizeStr, 16, 64)
+		if err != nil {
+			return nil, err
+		}
+		if size == 0 {
+			break
+		}
+		// read chunk data
+		chunk := make([]byte, size)
+		_, err = io.ReadFull(r, chunk)
+		if err != nil {
+			return nil, err
+		}
+		body.Write(chunk)
+		// read the trailing \r\n
+		r.ReadByte()
+		r.ReadByte()
+	}
+	return body.Bytes(), nil
 }
