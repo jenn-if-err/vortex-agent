@@ -190,37 +190,24 @@ static __always_inline int do_uretprobe_ssl_write(struct pt_regs *ctx, int writt
         goto cleanup_and_exit;
     }
 
+    struct loop_data data = {
+        .type = TYPE_URETPROBE_SSL_WRITE,
+        .buf_ptr = &buf,
+        .len = &num,
+        .orig_len = written,
+        .saddr = saddr,
+        .daddr = daddr,
+        .sport = sport,
+        .dport = dport,
+    };
+
     __u8 *unused = bpf_map_lookup_elem(&is_h2, &h2_key);
     if (unused) {
         __u32 cursor = 0;
-        struct loop_data data = {
-            .type = TYPE_URETPROBE_SSL_WRITE,
-            .buf_ptr = &buf,
-            .cursor = &cursor,
-            .len = &num,
-            .orig_len = written,
-            .saddr = saddr,
-            .daddr = daddr,
-            .sport = sport,
-            .dport = dport,
-        };
-
-        if (bpf_loop(4096, loop_h2_parse, &data, 0) < 1)
-            goto cleanup_and_exit;
+        data.cursor = &cursor;
+        bpf_loop(4096, loop_h2_parse, &data, 0);
     } else {
-        struct loop_data data = {
-            .type = TYPE_URETPROBE_SSL_WRITE,
-            .buf_ptr = &buf,
-            .len = &num,
-            .orig_len = written,
-            .saddr = saddr,
-            .daddr = daddr,
-            .sport = sport,
-            .dport = dport,
-        };
-
-        if (bpf_loop(4096, do_loop_send_ssl_payload, &data, 0) < 1)
-            goto cleanup_and_exit;
+        bpf_loop(4096, do_loop_send_ssl_payload, &data, 0);
     }
 
     /* Signal previous chunked stream's end. */
