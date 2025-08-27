@@ -88,7 +88,7 @@ static __always_inline int do_uprobe_ssl_write(struct pt_regs *ctx) {
 }
 
 /*
- * bpf_loop callback: parse HTTP2 frames and attempt to extract plaintext.
+ * bpf_loop callback: parse HTTP/2 frames and attempt to extract the data frame.
  * Reference: https://httpwg.org/specs/rfc7540.html
  */
 static int loop_h2_parse(u64 index, struct loop_data *data) {
@@ -205,31 +205,14 @@ static __always_inline int do_uretprobe_ssl_write(struct pt_regs *ctx, int writt
     };
 
     __u8 *unused = bpf_map_lookup_elem(&is_h2, &h2_key);
-    if (unused) {
-        __u32 cursor = 0;
-        data.cursor = &cursor;
-        bpf_loop(4096, loop_h2_parse, &data, 0);
-    } else {
+    if (!unused) {
         bpf_loop(4096, do_loop_send_ssl_payload, &data, 0);
+        goto cleanup_and_exit;
     }
 
-    /* Signal previous chunked stream's end. */
-    struct event *event;
-    event = rb_events_reserve_with_stats();
-    if (!event)
-        goto cleanup_and_exit;
-
-    event->type = TYPE_URETPROBE_SSL_WRITE;
-    set_proc_info(event);
-    event->total_len = written;
-    event->chunk_len = -1;
-    event->chunk_idx = CHUNKED_END_IDX;
-    event->saddr = saddr;
-    event->sport = sport;
-    event->daddr = daddr;
-    event->dport = bpf_ntohs(dport);
-    __builtin_memset(event->buf, 0, EVENT_BUF_LEN);
-    rb_events_submit_with_stats(event, 0);
+    __u32 cursor = 0;
+    data.cursor = &cursor;
+    bpf_loop(4096, loop_h2_parse, &data, 0);
 
 cleanup_and_exit:
     bpf_map_delete_elem(&ssl_callstack, &key);
