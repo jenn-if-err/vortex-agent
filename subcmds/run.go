@@ -1084,6 +1084,10 @@ func run(ctx context.Context, done chan error) {
 						break
 					}
 
+					// Debug: log each chunk's index and size
+					for idx, chunk := range bucket.chunks {
+						internalglog.LogInfof("llm_response: chunk %d size=%d", idx, len(chunk))
+					}
 					// Combine all chunks
 					full := bytes.Join(bucket.chunks, nil)
 					internalglog.LogInfof("llm_response: full=%q", full)
