@@ -1143,6 +1143,7 @@ func run(ctx context.Context, done chan error) {
 							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
 							fmt.Sprintf("%v", event.MessageId),
 							fmt.Sprintf("%v", event.ChunkIdx),
+							"",
 							fmt.Sprintf("%s", event.Comm),
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
 							fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
