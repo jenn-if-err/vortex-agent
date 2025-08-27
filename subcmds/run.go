@@ -1326,40 +1326,70 @@ func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects)
 func decodeChunkedBody(chunked []byte) ([]byte, error) {
 	var body bytes.Buffer
 	r := bytes.NewReader(chunked)
+
 	for {
-		// read chunk size line
+		// Read chunk size line until \r\n
 		var sizeLine []byte
 		for {
 			b, err := r.ReadByte()
+			if err == io.EOF {
+				// End of data
+				return body.Bytes(), nil
+			}
 			if err != nil {
 				return nil, err
 			}
-			if b == '\n' {
-				break
+			if b == '\r' {
+				// Look for \n after \r
+				next, err := r.ReadByte()
+				if err == nil && next == '\n' {
+					break
+				}
+				// Put back the byte if it wasn't \n
+				if err == nil {
+					r.Seek(-1, io.SeekCurrent)
+				}
+				sizeLine = append(sizeLine, b)
+			} else {
+				sizeLine = append(sizeLine, b)
 			}
-			sizeLine = append(sizeLine, b)
 		}
+
 		sizeStr := strings.TrimSpace(string(sizeLine))
 		if sizeStr == "" {
 			continue
 		}
+
 		size, err := strconv.ParseInt(sizeStr, 16, 64)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("invalid chunk size '%s': %v", sizeStr, err)
 		}
+
 		if size == 0 {
+			// End of chunks, consume final \r\n if present
+			r.ReadByte()
+			r.ReadByte()
 			break
 		}
-		// read chunk data
+
+		// Read chunk data
 		chunk := make([]byte, size)
-		_, err = io.ReadFull(r, chunk)
-		if err != nil {
-			return nil, err
+		n, err := io.ReadFull(r, chunk)
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			// Partial read at end
+			body.Write(chunk[:n])
+			break
 		}
+		if err != nil {
+			return nil, fmt.Errorf("reading chunk data: %v", err)
+		}
+
 		body.Write(chunk)
-		// read the trailing \r\n
-		r.ReadByte()
-		r.ReadByte()
+
+		// Read trailing \r\n after chunk data
+		r.ReadByte() // \r
+		r.ReadByte() // \n
 	}
+
 	return body.Bytes(), nil
 }
