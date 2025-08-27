@@ -8,8 +8,8 @@
 
 #include "vortex.h"
 
-#ifndef __BPF_VORTEX_COMMON_C
-#define __BPF_VORTEX_COMMON_C
+#ifndef __BPF_VORTEX_BASE_C
+#define __BPF_VORTEX_BASE_C
 
 extern int LINUX_KERNEL_VERSION __kconfig;
 
@@ -63,8 +63,19 @@ struct {
 } tgids_to_trace SEC(".maps");
 
 /*
- * Map to store the read pointer for SSL_read_ex. The key is the PID/TGID,
+ * Map to store the written pointer for SSL_write_ex. The key is the PID/TGID,
  * and the value is a pointer to the "bytes written" value.
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key, __u64);
+    __type(value, __u64);
+} ssl_write_ex_p4 SEC(".maps");
+
+/*
+ * Map to store the read pointer for SSL_read_ex. The key is the PID/TGID,
+ * and the value is a pointer to the "bytes read" value.
  */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -157,6 +168,21 @@ struct {
     __type(value, __u8); /* 1st bit = default, 2nd bit = SNI allowed */
 } tc_sni_trace SEC(".maps");
 
+struct h2_k {
+    __u64 pid_tgid;
+    __be32 saddr;
+    __be32 daddr;
+    __u16 sport;
+    __be16 dport;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 1024);
+    __type(key, struct h2_k);
+    __type(value, __u8); /* unused */
+} is_h2 SEC(".maps");
+
 /* Set process information in the event structure. */
 static __always_inline void set_proc_info(struct event *event) {
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
@@ -226,4 +252,4 @@ static __always_inline void rb_events_submit_with_stats(void *event, __u64 flags
     bpf_map_update_elem(&events_stats, &key, &n_stats, BPF_ANY);
 }
 
-#endif /* __BPF_VORTEX_COMMON_C */
+#endif /* __BPF_VORTEX_BASE_C */

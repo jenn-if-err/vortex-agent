@@ -924,47 +924,6 @@ func run(ctx context.Context, done chan error) {
 				case TYPE_UPROBE_SSL_WRITE:
 
 				case TYPE_URETPROBE_SSL_WRITE:
-					if event.ChunkIdx == CHUNK_END_IDX {
-						continue
-					}
-
-					if strings.HasPrefix(internal.Readable(event.Buf[:15], 15), "PRI * HTTP/2.0") {
-						eventState[key].http2.Store(1)
-					}
-
-					if eventState[key].http2.Load() == 1 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
-						buf := bytes.NewReader(event.Buf[:])
-						header := make([]byte, 9)
-						_, err = buf.Read(header)
-						if err != nil {
-							glog.Errorf("[uretprobe/SSL_write] incomplete frame header: %v", err)
-							continue
-						}
-
-						// Parse header: length is 24 bits (3 bytes), big-endian.
-						length := uint32(header[0])<<16 | uint32(header[1])<<8 | uint32(header[2])
-						frameType := header[3]
-						flags := header[4]
-						streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
-
-						switch frameType {
-						case FrameData:
-						case FrameHeaders:
-						default:
-							if frameType >= FramePriority && frameType <= FrameContinuation {
-								continue
-							}
-						}
-
-						if frameType <= FrameContinuation {
-							var h strings.Builder
-							fmt.Fprintf(&h, "[uretprobe/SSL_write{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
-							fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
-							fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
-							internalglog.LogInfof(h.String())
-						}
-					}
-
 					fmt.Fprintf(&line, "[uretprobe/SSL_write{_ex}] idx=%v, ", event.ChunkIdx)
 					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v, ", key, event.TotalLen, event.ChunkLen)
@@ -1173,56 +1132,56 @@ func run(ctx context.Context, done chan error) {
 }
 
 func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects) {
-	l, err := ex.Uprobe("SSL_write", objs.UprobeSSL_write, nil)
+	l, err := ex.Uprobe("SSL_write", objs.UprobeSslWrite, nil)
 	if err != nil {
 		glog.Errorf("uprobe/SSL_write failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uretprobe("SSL_write", objs.UretprobeSSL_write, nil)
+	l, err = ex.Uretprobe("SSL_write", objs.UretprobeSslWrite, nil)
 	if err != nil {
 		glog.Errorf("uretprobe/SSL_write failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSSL_writeEx, nil)
+	l, err = ex.Uprobe("SSL_write_ex", objs.UprobeSslWriteEx, nil)
 	if err != nil {
 		glog.Errorf("uprobe/SSL_write_ex failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSSL_writeEx, nil)
+	l, err = ex.Uretprobe("SSL_write_ex", objs.UretprobeSslWriteEx, nil)
 	if err != nil {
 		glog.Errorf("uretprobe/SSL_write_ex failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uprobe("SSL_read", objs.UprobeSSL_read, nil)
+	l, err = ex.Uprobe("SSL_read", objs.UprobeSslRead, nil)
 	if err != nil {
 		glog.Errorf("uprobe/SSL_read failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uretprobe("SSL_read", objs.UretprobeSSL_read, nil)
+	l, err = ex.Uretprobe("SSL_read", objs.UretprobeSslRead, nil)
 	if err != nil {
 		glog.Errorf("uretprobe/SSL_read failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSSL_readEx, nil)
+	l, err = ex.Uprobe("SSL_read_ex", objs.UprobeSslReadEx, nil)
 	if err != nil {
 		glog.Errorf("uprobe/SSL_read_ex failed: %v", err)
 	} else {
 		*links = append(*links, l)
 	}
 
-	l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSSL_readEx, nil)
+	l, err = ex.Uretprobe("SSL_read_ex", objs.UretprobeSslReadEx, nil)
 	if err != nil {
 		glog.Errorf("uretprobe/SSL_read_ex failed: %v", err)
 	} else {
