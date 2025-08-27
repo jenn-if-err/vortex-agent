@@ -101,9 +101,11 @@ type ContainerInfo struct {
 }
 
 type responseBucket struct {
-	chunks   [][]byte
-	received int
-	total    int
+	chunks     [][]byte
+	chunkOrder []int     // track the order of chunks based on idx
+	received   int
+	total      int
+	lastUpdate time.Time
 }
 
 func RunCmd() *cobra.Command {
@@ -818,6 +820,24 @@ func run(ctx context.Context, done chan error) {
 
 	tickerFlush := time.NewTicker(5 * time.Second)
 	defer tickerFlush.Stop()
+	
+	// Cleanup stale response buckets
+	tickerCleanup := time.NewTicker(30 * time.Second)
+	defer tickerCleanup.Stop()
+	
+	go func() {
+		for range tickerCleanup.C {
+			now := time.Now()
+			responseMap.Range(func(key, value interface{}) bool {
+				bucket := value.(*responseBucket)
+				if now.Sub(bucket.lastUpdate) > 60*time.Second {
+					internalglog.LogInfof("llm_response: cleaning up stale bucket for key %v", key)
+					responseMap.Delete(key)
+				}
+				return true
+			})
+		}
+	}()
 
 	wg.Add(1)
 	go func() {
@@ -1085,23 +1105,49 @@ func run(ctx context.Context, done chan error) {
 
 					// use connection-based key (without message_id) to group all chunks for this response
 					respKey := fmt.Sprintf("%v/%v/%v/%v/%v/%v", event.Tgid, event.Pid, event.Saddr, event.Daddr, event.Sport, event.Dport)
-					bucketAny, _ := responseMap.LoadOrStore(respKey, &responseBucket{total: int(event.TotalLen)})
+					bucketAny, _ := responseMap.LoadOrStore(respKey, &responseBucket{
+						total:      int(event.TotalLen),
+						lastUpdate: time.Now(),
+					})
 					bucket := bucketAny.(*responseBucket)
+					
+					// Update last activity time
+					bucket.lastUpdate = time.Now()
+					
+					// Add chunk with its index for ordering
 					bucket.chunks = append(bucket.chunks, event.Buf[:event.ChunkLen])
+					bucket.chunkOrder = append(bucket.chunkOrder, int(event.Idx))
 					bucket.received += int(event.ChunkLen)
 
-					// If not complete, wait for more chunks
-					if bucket.received < bucket.total {
+					// Check if we should process (either complete or timeout)
+					shouldProcess := false
+					if bucket.received >= bucket.total {
+						shouldProcess = true
+						internalglog.LogInfof("llm_response: complete response received (%d/%d bytes)", bucket.received, bucket.total)
+					} else if time.Since(bucket.lastUpdate) > 5*time.Second {
+						shouldProcess = true
+						internalglog.LogInfof("llm_response: timeout reached, processing partial response (%d/%d bytes)", bucket.received, bucket.total)
+					} else {
+						internalglog.LogInfof("llm_response: waiting for more chunks (%d/%d bytes)", bucket.received, bucket.total)
+						break
+					}
+
+					if !shouldProcess {
 						break
 					}
 
 					// Debug: log each chunk's index and size
 					for idx, chunk := range bucket.chunks {
-						internalglog.LogInfof("llm_response: chunk %d size=%d", idx, len(chunk))
+						order := -1
+						if idx < len(bucket.chunkOrder) {
+							order = bucket.chunkOrder[idx]
+						}
+						internalglog.LogInfof("llm_response: chunk %d (order=%d) size=%d", idx, order, len(chunk))
 					}
+					
 					// Combine all chunks
 					full := bytes.Join(bucket.chunks, nil)
-					internalglog.LogInfof("llm_response: full=%q", full)
+					internalglog.LogInfof("llm_response: combined full response size=%d", len(full))
 
 					// Separate headers and body
 					i := bytes.Index(full, []byte("\r\n\r\n"))
@@ -1346,11 +1392,14 @@ func decodeChunkedBody(chunked []byte) ([]byte, error) {
 		for {
 			b, err := r.ReadByte()
 			if err == io.EOF {
-				// End of data
-				return body.Bytes(), nil
+				// End of data - this is normal for final chunk
+				if body.Len() > 0 {
+					return body.Bytes(), nil
+				}
+				return nil, fmt.Errorf("unexpected EOF while reading chunk size")
 			}
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("error reading chunk size: %v", err)
 			}
 			if b == '\r' {
 				// Look for \n after \r
@@ -1360,7 +1409,8 @@ func decodeChunkedBody(chunked []byte) ([]byte, error) {
 				}
 				// Put back the byte if it wasn't \n
 				if err == nil {
-					r.Seek(-1, io.SeekCurrent)
+					pos, _ := r.Seek(0, io.SeekCurrent)
+					r.Seek(pos-1, io.SeekStart)
 				}
 				sizeLine = append(sizeLine, b)
 			} else {
@@ -1373,15 +1423,34 @@ func decodeChunkedBody(chunked []byte) ([]byte, error) {
 			continue
 		}
 
+		// Handle potential extensions after semicolon (chunk-extensions)
+		if idx := strings.Index(sizeStr, ";"); idx >= 0 {
+			sizeStr = sizeStr[:idx]
+		}
+
 		size, err := strconv.ParseInt(sizeStr, 16, 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid chunk size '%s': %v", sizeStr, err)
 		}
 
 		if size == 0 {
-			// End of chunks, consume final \r\n if present
-			r.ReadByte()
-			r.ReadByte()
+			// End of chunks - consume any trailing headers and final \r\n
+			for {
+				line, err := r.ReadByte()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					break
+				}
+				if line == '\r' {
+					next, err := r.ReadByte()
+					if err == nil && next == '\n' {
+						// Found final \r\n, we're done
+						break
+					}
+				}
+			}
 			break
 		}
 
@@ -1389,19 +1458,31 @@ func decodeChunkedBody(chunked []byte) ([]byte, error) {
 		chunk := make([]byte, size)
 		n, err := io.ReadFull(r, chunk)
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			// Partial read at end
-			body.Write(chunk[:n])
-			break
+			// Partial read at end - this can happen with incomplete data
+			if n > 0 {
+				body.Write(chunk[:n])
+			}
+			return body.Bytes(), nil
 		}
 		if err != nil {
-			return nil, fmt.Errorf("reading chunk data: %v", err)
+			return nil, fmt.Errorf("reading chunk data (expected %d bytes): %v", size, err)
 		}
 
 		body.Write(chunk)
 
-		// Read trailing \r\n after chunk data
-		r.ReadByte() // \r
-		r.ReadByte() // \n
+		// Read trailing \r\n after chunk data - be more tolerant
+		trailer1, err1 := r.ReadByte()
+		trailer2, err2 := r.ReadByte()
+		if err1 == io.EOF || err2 == io.EOF {
+			// End of data after chunk - might be incomplete
+			return body.Bytes(), nil
+		}
+		if err1 != nil || err2 != nil {
+			return nil, fmt.Errorf("reading chunk trailer: %v, %v", err1, err2)
+		}
+		if trailer1 != '\r' || trailer2 != '\n' {
+			return nil, fmt.Errorf("expected \\r\\n after chunk, got %02x%02x", trailer1, trailer2)
+		}
 	}
 
 	return body.Bytes(), nil
