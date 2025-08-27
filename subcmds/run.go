@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1187,11 +1188,39 @@ func run(ctx context.Context, done chan error) {
 						internalglog.LogInfof("llm_response: chunk %d (order=%d) size=%d", idx, order, len(chunk))
 					}
 
-					// Combine all chunks
-					full := bytes.Join(bucket.chunks, nil)
-					internalglog.LogInfof("llm_response: combined full response size=%d", len(full))
+					// Sort chunks by their order before combining
+					type chunkWithOrder struct {
+						data  []byte
+						order int
+					}
 
-					// Separate headers and body
+					orderedChunks := make([]chunkWithOrder, len(bucket.chunks))
+					for i := 0; i < len(bucket.chunks); i++ {
+						order := i // default order if chunkOrder is missing
+						if i < len(bucket.chunkOrder) {
+							order = bucket.chunkOrder[i]
+						}
+						orderedChunks[i] = chunkWithOrder{
+							data:  bucket.chunks[i],
+							order: order,
+						}
+					}
+
+					// Sort by order
+					sort.Slice(orderedChunks, func(i, j int) bool {
+						return orderedChunks[i].order < orderedChunks[j].order
+					})
+
+					// Extract sorted chunks
+					sortedChunks := make([][]byte, len(orderedChunks))
+					for i, chunk := range orderedChunks {
+						sortedChunks[i] = chunk.data
+						internalglog.LogInfof("llm_response: sorted chunk %d (original order=%d) size=%d", i, chunk.order, len(chunk.data))
+					}
+
+					// Combine all chunks in correct order
+					full := bytes.Join(sortedChunks, nil)
+					internalglog.LogInfof("llm_response: combined full response size=%d", len(full)) // Separate headers and body
 					i := bytes.Index(full, []byte("\r\n\r\n"))
 					var headers string
 					var body []byte
