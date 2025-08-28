@@ -1309,29 +1309,20 @@ func run(ctx context.Context, done chan error) {
 						bucket.received += int(event.ChunkLen)
 						internalglog.LogInfof("llm_response: stored terminator chunk at index %d, size=%d", terminatorIdx, event.ChunkLen)
 					} else if isSSLFragmentation {
-						// For SSL fragmentation, append data to existing chunks instead of creating new chunks
+						// For SSL fragmentation, append data to the chunk with the same index from the SSL event
 						internalglog.LogInfof("llm_response: SSL fragmentation detected (bucket.total=%d, event.TotalLen=%d), appending data", bucket.total, event.TotalLen)
 
-						// Find the last chunk and append data to it
-						if len(bucket.chunkMap) > 0 {
-							// Get the highest chunk index
-							maxIdx := -1
-							for idx := range bucket.chunkMap {
-								if idx > maxIdx {
-									maxIdx = idx
-								}
-							}
-
-							// Append new data to the last chunk
-							existingData := bucket.chunkMap[maxIdx]
+						// Check if a chunk with this index already exists
+						if existingData, exists := bucket.chunkMap[chunkIdx]; exists {
+							// Append new data to the existing chunk with the same index
 							combinedData := make([]byte, len(existingData)+int(event.ChunkLen))
 							copy(combinedData, existingData)
 							copy(combinedData[len(existingData):], event.Buf[:event.ChunkLen])
-							bucket.chunkMap[maxIdx] = combinedData
+							bucket.chunkMap[chunkIdx] = combinedData
 							bucket.received += int(event.ChunkLen)
-							internalglog.LogInfof("llm_response: appended %d bytes to chunk %d, new size=%d, total received=%d", event.ChunkLen, maxIdx, len(combinedData), bucket.received)
+							internalglog.LogInfof("llm_response: appended %d bytes to chunk %d, new size=%d, total received=%d", event.ChunkLen, chunkIdx, len(combinedData), bucket.received)
 						} else {
-							// No existing chunks, create new one
+							// No existing chunk with this index, create new one
 							bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
 							bucket.received += int(event.ChunkLen)
 							internalglog.LogInfof("llm_response: created new chunk %d for fragmented data, size=%d, total received=%d", chunkIdx, event.ChunkLen, bucket.received)
