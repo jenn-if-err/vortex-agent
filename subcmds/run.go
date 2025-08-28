@@ -1852,6 +1852,9 @@ func isChunkedResponseComplete(bucket *responseBucket) bool {
 
 	// Parse chunked encoding to see if we have complete chunks
 	r := bytes.NewReader(body)
+	totalExpectedBytes := int64(0)
+	totalReceivedBytes := int64(0)
+
 	for {
 		// Read chunk size line until \r\n
 		var sizeLine []byte
@@ -1903,17 +1906,35 @@ func isChunkedResponseComplete(bucket *responseBucket) bool {
 			if len(remaining) >= 2 {
 				// Look for final \r\n in the remaining data
 				if bytes.Contains(remaining, []byte("\r\n")) {
+					fmt.Printf("Chunked response complete: total expected=%d, received=%d bytes\n", totalExpectedBytes, totalReceivedBytes)
 					return true // Complete chunked response
 				}
 			}
+			fmt.Printf("Final chunk found but missing termination: expected=%d, received=%d bytes\n", totalExpectedBytes, totalReceivedBytes)
 			return false // Final chunk found but no proper termination
+		}
+
+		totalExpectedBytes += size
+
+		// Get current position before attempting to skip
+		currentPos, _ := r.Seek(0, io.SeekCurrent)
+		remainingData := int64(len(body)) - currentPos
+
+		// Check if we have enough data for this chunk + \r\n
+		if remainingData < size+2 {
+			fmt.Printf("Chunk incomplete: expected %d bytes + 2 (\\r\\n), but only %d bytes remaining (chunk size: %s = %d bytes)\n", size, remainingData, sizeStr, size)
+			return false // Not enough data for this chunk
 		}
 
 		// Skip chunk data and trailing \r\n
 		toSkip := size + 2 // chunk data + \r\n
-		skipped, err := r.Seek(toSkip, io.SeekCurrent)
-		if err != nil || skipped != toSkip {
-			return false // Not enough data for this chunk
+		_, err = r.Seek(toSkip, io.SeekCurrent)
+		if err != nil {
+			fmt.Printf("Error seeking in chunk data: %v\n", err)
+			return false
 		}
+
+		totalReceivedBytes += size
+		fmt.Printf("Processed chunk: size=%s hex (%d bytes), total progress: %d/%d bytes\n", sizeStr, size, totalReceivedBytes, totalExpectedBytes)
 	}
 }
