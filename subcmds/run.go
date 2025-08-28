@@ -1176,6 +1176,24 @@ func run(ctx context.Context, done chan error) {
 								internalglog.LogInfof("llm_response: chunked response incomplete, reusing key=%s", foundKey)
 								return false // stop iteration
 							}
+
+							// Special case: check if the current data might be a final terminator chunk
+							// for an existing chunked response (like "0\r\n\r\n")
+							readableLen := int(event.ChunkLen)
+							if readableLen < 0 {
+								readableLen = 0
+							}
+							if readableLen > len(event.Buf) {
+								readableLen = len(event.Buf)
+							}
+							bufStr := string(event.Buf[:readableLen])
+							if readableLen <= 10 && (strings.Contains(bufStr, "0\r\n") || strings.Contains(bufStr, "0\n")) {
+								foundKey = key.(string)
+								existingBucket = bucket
+								internalglog.LogInfof("llm_response: detected potential terminator chunk (%d bytes), reusing key=%s", readableLen, foundKey)
+								return false // stop iteration
+							}
+
 							internalglog.LogInfof("llm_response: bucket appears complete, continuing search")
 						}
 						return true
