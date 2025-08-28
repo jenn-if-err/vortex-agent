@@ -1830,9 +1830,78 @@ func isChunkedResponseComplete(bucket *responseBucket) bool {
 		return false // No complete headers yet
 	}
 
+	headers := combinedData[:headerEndIndex]
 	body := combinedData[headerEndIndex+4:]
 
-	// Check if the chunked body ends with the final chunk marker
-	// A complete chunked response ends with: "0\r\n\r\n"
-	return bytes.HasSuffix(body, []byte("0\r\n\r\n"))
+	// Check if Transfer-Encoding is chunked
+	if !bytes.Contains(headers, []byte("Transfer-Encoding: chunked")) {
+		return true // Not chunked, consider complete
+	}
+
+	// Parse chunked encoding to see if we have complete chunks
+	r := bytes.NewReader(body)
+	for {
+		// Read chunk size line until \r\n
+		var sizeLine []byte
+		foundCRLF := false
+
+		for {
+			b, err := r.ReadByte()
+			if err == io.EOF {
+				return false // Incomplete - no chunk size found
+			}
+			if err != nil {
+				return false
+			}
+
+			sizeLine = append(sizeLine, b)
+
+			// Check for \r\n at the end of sizeLine
+			if len(sizeLine) >= 2 && sizeLine[len(sizeLine)-2] == '\r' && sizeLine[len(sizeLine)-1] == '\n' {
+				// Remove the \r\n from sizeLine
+				sizeLine = sizeLine[:len(sizeLine)-2]
+				foundCRLF = true
+				break
+			}
+		}
+
+		if !foundCRLF {
+			return false
+		}
+
+		sizeStr := strings.TrimSpace(string(sizeLine))
+		if sizeStr == "" {
+			continue
+		}
+
+		// Handle chunk extensions
+		if idx := strings.Index(sizeStr, ";"); idx >= 0 {
+			sizeStr = sizeStr[:idx]
+		}
+
+		size, err := strconv.ParseInt(sizeStr, 16, 64)
+		if err != nil {
+			return false // Invalid chunk size
+		}
+
+		if size == 0 {
+			// Found final chunk, now check for final \r\n
+			// Skip any trailing headers and look for final \r\n
+			remaining, _ := io.ReadAll(r)
+			if len(remaining) >= 2 {
+				// Look for final \r\n in the remaining data
+				if bytes.Contains(remaining, []byte("\r\n")) {
+					return true // Complete chunked response
+				}
+			}
+			return false // Final chunk found but no proper termination
+		}
+
+		// Skip chunk data and trailing \r\n
+		toSkip := size + 2 // chunk data + \r\n
+		skipped, err := r.Seek(toSkip, io.SeekCurrent)
+		if err != nil || skipped != toSkip {
+			return false // Not enough data for this chunk
+		}
+	}
 }
