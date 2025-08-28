@@ -1298,14 +1298,21 @@ func run(ctx context.Context, done chan error) {
 					// Check if we should process (complete chunked response or timeout)
 					shouldProcess := false
 
-					// For chunked responses, check if we have a complete chunked stream
+					// First, check if we have all the expected SSL bytes
+					hasAllSSLBytes := bucket.received >= bucket.total
+
+					// For chunked responses, only check completion if we have all SSL bytes
 					if isChunkedResponse(bucket) {
-						if isChunkedResponseComplete(bucket) {
+						if hasAllSSLBytes && isChunkedResponseComplete(bucket) {
 							shouldProcess = true
 							internalglog.LogInfof("llm_response: complete chunked response detected")
 						} else if time.Since(bucket.lastUpdate) > 30*time.Second {
 							shouldProcess = true
 							internalglog.LogInfof("llm_response: timeout reached, processing partial chunked response")
+						} else if hasAllSSLBytes {
+							internalglog.LogInfof("llm_response: waiting for more chunks (have all SSL bytes but chunked response incomplete)")
+							bucket.mu.Unlock()
+							break // Wait for more chunks
 						} else {
 							internalglog.LogInfof("llm_response: waiting for more chunks (chunked response incomplete)")
 							bucket.mu.Unlock()
