@@ -1053,10 +1053,12 @@ func run(ctx context.Context, done chan error) {
 						event.ChunkIdx, event.ChunkLen, event.TotalLen)
 
 					// Check for final terminator chunk (like "0\r\n\r\n")
+					isTerminatorChunk := false
 					if event.TotalLen <= 10 && event.ChunkLen <= 10 {
 						content := string(event.Buf[:event.ChunkLen])
 						if strings.Contains(content, "0\r\n") || strings.Contains(content, "0\n") || strings.TrimSpace(content) == "0" {
 							internalglog.LogInfof("llm_response: detected final terminator chunk, processing to complete response")
+							isTerminatorChunk = true
 						}
 					}
 
@@ -1188,6 +1190,19 @@ func run(ctx context.Context, done chan error) {
 								return false // stop iteration
 							}
 
+							// Special handling for terminator chunks - they should be added to any existing chunked response
+							if isTerminatorChunk {
+								bucket.mu.Lock()
+								isChunkedResp := isChunkedResponse(bucket)
+								bucket.mu.Unlock()
+								if isChunkedResp {
+									foundKey = key.(string)
+									existingBucket = bucket
+									internalglog.LogInfof("llm_response: terminator chunk found existing chunked response, reusing key=%s", foundKey)
+									return false // stop iteration
+								}
+							}
+
 							// Special case: check if the current data might be a final terminator chunk
 							// for an existing chunked response (like "0\r\n\r\n")
 							readableLen := int(event.ChunkLen)
@@ -1303,9 +1318,13 @@ func run(ctx context.Context, done chan error) {
 
 					// For chunked responses, only check completion if we have all SSL bytes
 					if isChunkedResponse(bucket) {
-						if hasAllSSLBytes && isChunkedResponseComplete(bucket) {
+						if (hasAllSSLBytes && isChunkedResponseComplete(bucket)) || isTerminatorChunk {
 							shouldProcess = true
-							internalglog.LogInfof("llm_response: complete chunked response detected")
+							if isTerminatorChunk {
+								internalglog.LogInfof("llm_response: complete chunked response detected (terminator chunk received)")
+							} else {
+								internalglog.LogInfof("llm_response: complete chunked response detected")
+							}
 						} else if time.Since(bucket.lastUpdate) > 30*time.Second {
 							shouldProcess = true
 							internalglog.LogInfof("llm_response: timeout reached, processing partial chunked response")
