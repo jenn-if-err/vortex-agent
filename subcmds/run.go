@@ -1297,9 +1297,15 @@ func run(ctx context.Context, done chan error) {
 					}
 
 					// Only add chunk if we haven't seen this index before (prevent duplicates)
-					if _, exists := bucket.chunkMap[chunkIdx]; !exists {
+					// Exception: allow terminator chunks even if index exists
+					if _, exists := bucket.chunkMap[chunkIdx]; !exists || isTerminatorChunk {
+						if exists && isTerminatorChunk {
+							internalglog.LogInfof("llm_response: overriding duplicate chunk %d with terminator data", chunkIdx)
+						}
 						bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
-						bucket.received += int(event.ChunkLen)
+						if !exists {
+							bucket.received += int(event.ChunkLen)
+						}
 						internalglog.LogInfof("llm_response: added chunk %d, size=%d, total received=%d/%d", chunkIdx, event.ChunkLen, bucket.received, bucket.total)
 
 						// Debug: Always log the processing check decision
