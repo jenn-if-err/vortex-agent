@@ -1044,6 +1044,10 @@ func run(ctx context.Context, done chan error) {
 						internalglog.LogInfof("llm_response: warning - suspicious chunk length: %d", event.ChunkLen)
 					}
 
+					// Debug: Log raw event data to check for corruption
+					internalglog.LogInfof("llm_response: debug - event.ChunkIdx=%d, event.ChunkLen=%d, event.TotalLen=%d", 
+						event.ChunkIdx, event.ChunkLen, event.TotalLen)
+
 					if eventState[key].http2.Load() == 1 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
 						buf := bytes.NewReader(event.Buf[:])
 						header := make([]byte, 9)
@@ -1077,11 +1081,20 @@ func run(ctx context.Context, done chan error) {
 						}
 					}
 
-					fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v, ", event.ChunkIdx)
-					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
-					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v, ", key, event.TotalLen, event.ChunkLen)
-					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
-					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Saddr), event.Sport)
+					// Build log line more defensively to prevent corruption
+					line.Reset()
+					logMsg := fmt.Sprintf("-> [uretprobe/SSL_read{_ex}] idx=%v, buf=%s, key=%v, totalLen=%v, chunkLen=%v, src=%v:%v, dst=%v:%v", 
+						event.ChunkIdx,
+						internal.Readable(event.Buf[:], max(event.ChunkLen, 0)),
+						key, 
+						event.TotalLen, 
+						event.ChunkLen,
+						internal.IntToIp(event.Daddr), 
+						event.Dport,
+						internal.IntToIp(event.Saddr), 
+						event.Sport)
+					
+					fmt.Fprint(&line, logMsg)
 					func() {
 						if !isk8s {
 							return
@@ -1176,6 +1189,14 @@ func run(ctx context.Context, done chan error) {
 
 					chunkIdx := int(event.ChunkIdx)
 
+					// Handle potentially corrupted chunk indices
+					if chunkIdx < 0 || chunkIdx > 1000 {
+						internalglog.LogInfof("llm_response: corrupted chunk index %d, using fallback ordering", chunkIdx)
+						// Use arrival order as fallback for corrupted indices
+						chunkIdx = len(bucket.chunkMap)
+						internalglog.LogInfof("llm_response: assigned fallback index %d", chunkIdx)
+					}
+
 					// Only add chunk if we haven't seen this index before (prevent duplicates)
 					if _, exists := bucket.chunkMap[chunkIdx]; !exists {
 						bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
@@ -1249,15 +1270,56 @@ func run(ctx context.Context, done chan error) {
 							}
 						}
 
-						// Combine chunks in CORRECT order using the chunk map
-						var combinedChunks [][]byte
-						for order := minOrder; order <= maxOrder; order++ {
-							if chunk, exists := chunkMap[order]; exists {
-								combinedChunks = append(combinedChunks, chunk)
+						// Enhanced chunk ordering with content-based validation
+						// First, try to use the eBPF indices if they seem reasonable
+						var orderedChunks [][]byte
+						hasValidIndices := true
+						
+						// Check if all indices are reasonable (0 to total_chunks-1)
+						for idx := range chunkMap {
+							if idx < 0 || idx >= len(chunkMap) {
+								hasValidIndices = false
+								break
+							}
+						}
+						
+						if hasValidIndices {
+							// Use eBPF indices
+							for order := minOrder; order <= maxOrder; order++ {
+								if chunk, exists := chunkMap[order]; exists {
+									orderedChunks = append(orderedChunks, chunk)
+								}
+							}
+						} else {
+							// Fallback: Use content-based ordering
+							internalglog.LogInfof("llm_response: using content-based chunk ordering due to invalid indices")
+							
+							// Find the chunk that starts with HTTP/1.1 (should be first)
+							var httpChunk []byte
+							var otherChunks [][]byte
+							
+							for _, chunk := range chunkMap {
+								if len(chunk) >= 8 && string(chunk[:8]) == "HTTP/1.1" {
+									httpChunk = chunk
+								} else {
+									otherChunks = append(otherChunks, chunk)
+								}
+							}
+							
+							// Combine: HTTP chunk first, then others in original order
+							if httpChunk != nil {
+								orderedChunks = append(orderedChunks, httpChunk)
+								orderedChunks = append(orderedChunks, otherChunks...)
+							} else {
+								// No HTTP chunk found, use chunks as-is
+								for _, chunk := range chunkMap {
+									orderedChunks = append(orderedChunks, chunk)
+								}
 							}
 						}
 
-						full := bytes.Join(combinedChunks, nil)
+						// Combine chunks in the determined order
+						full := bytes.Join(orderedChunks, nil)
 						internalglog.LogInfof("llm_response: combined full response size=%d", len(full))
 
 						// Validate the HTTP structure before processing
