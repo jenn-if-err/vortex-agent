@@ -1151,20 +1151,28 @@ func run(ctx context.Context, done chan error) {
 
 					// Always try to find existing bucket first, regardless of whether this looks like HTTP headers
 					var foundKey string
+					internalglog.LogInfof("llm_response: starting bucket search for baseKey=%s", baseKey)
+
 					responseMap.Range(func(key, value interface{}) bool {
+						internalglog.LogInfof("llm_response: checking existing key=%s", key.(string))
 						if strings.HasPrefix(key.(string), baseKey) {
+							internalglog.LogInfof("llm_response: found matching key=%s", key.(string))
 							bucket := value.(*responseBucket)
 							bucket.mu.Lock()
 							// Only reuse if bucket is not yet complete
 							if bucket.received < bucket.total {
 								foundKey = key.(string)
+								internalglog.LogInfof("llm_response: bucket is incomplete, reusing key=%s", foundKey)
 								bucket.mu.Unlock()
 								return false // stop iteration
 							}
+							internalglog.LogInfof("llm_response: bucket is complete, continuing search")
 							bucket.mu.Unlock()
 						}
 						return true
 					})
+
+					internalglog.LogInfof("llm_response: bucket search completed, foundKey=%s", foundKey)
 
 					if foundKey != "" {
 						respKey = foundKey
