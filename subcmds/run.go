@@ -1506,25 +1506,54 @@ func run(ctx context.Context, done chan error) {
 								}
 							}
 						} else {
-							// Fallback: Use content-based ordering
+							// Fallback: Use content-based ordering for SSL fragmentation
 							internalglog.LogInfof("llm_response: using content-based chunk ordering due to invalid indices")
 
 							// Find the chunk that starts with HTTP/1.1 (should be first)
 							var httpChunk []byte
 							var otherChunks [][]byte
+							var httpChunkIndex int = -1
 
-							for _, chunk := range chunkMap {
+							for idx, chunk := range chunkMap {
+								if idx == 9999 { // Skip terminator
+									continue
+								}
 								if len(chunk) >= 8 && string(chunk[:8]) == "HTTP/1.1" {
 									httpChunk = chunk
+									httpChunkIndex = idx
 								} else {
 									otherChunks = append(otherChunks, chunk)
 								}
 							}
 
-							// Combine: HTTP chunk first, then others in original order
 							if httpChunk != nil {
+								// For SSL fragmentation cases, combine all chunks sequentially
+								// Start with the HTTP headers chunk
 								orderedChunks = append(orderedChunks, httpChunk)
-								orderedChunks = append(orderedChunks, otherChunks...)
+
+								// Add other chunks in order of their indices (excluding the HTTP chunk)
+								var sortedIndices []int
+								for idx := range chunkMap {
+									if idx != 9999 && idx != httpChunkIndex { // Skip terminator and HTTP chunk
+										sortedIndices = append(sortedIndices, idx)
+									}
+								}
+
+								// Sort indices to maintain proper order
+								for i := 0; i < len(sortedIndices); i++ {
+									for j := i + 1; j < len(sortedIndices); j++ {
+										if sortedIndices[i] > sortedIndices[j] {
+											sortedIndices[i], sortedIndices[j] = sortedIndices[j], sortedIndices[i]
+										}
+									}
+								}
+
+								// Add chunks in sorted index order
+								for _, idx := range sortedIndices {
+									if chunk, exists := chunkMap[idx]; exists {
+										orderedChunks = append(orderedChunks, chunk)
+									}
+								}
 							} else {
 								// No HTTP chunk found, use chunks as-is
 								for _, chunk := range chunkMap {
