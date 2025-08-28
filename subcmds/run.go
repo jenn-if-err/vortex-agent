@@ -1324,13 +1324,16 @@ func run(ctx context.Context, done chan error) {
 
 					// For chunked responses, only check completion if we have all SSL bytes
 					if isChunkedResponse(bucket) {
-						if (hasAllSSLBytes && isChunkedResponseComplete(bucket)) || isTerminatorChunk {
+						isComplete := isChunkedResponseComplete(bucket)
+						if (hasAllSSLBytes && isComplete) || (isTerminatorChunk && isComplete) {
 							shouldProcess = true
 							if isTerminatorChunk {
 								internalglog.LogInfof("llm_response: complete chunked response detected (terminator chunk received)")
 							} else {
 								internalglog.LogInfof("llm_response: complete chunked response detected")
 							}
+						} else if isTerminatorChunk && !isComplete {
+							internalglog.LogInfof("llm_response: terminator received but chunked response still incomplete, waiting for more data")
 						} else if time.Since(bucket.lastUpdate) > 30*time.Second {
 							shouldProcess = true
 							internalglog.LogInfof("llm_response: timeout reached, processing partial chunked response")
