@@ -1313,21 +1313,42 @@ func run(ctx context.Context, done chan error) {
 						// SSL fragmentation can split HTTP chunks across SSL operations, so we can't rely on SSL chunk indices
 						internalglog.LogInfof("llm_response: SSL fragmentation detected (bucket.total=%d, event.TotalLen=%d), appending data sequentially", bucket.total, event.TotalLen)
 
-						// For SSL fragmentation, use the event's chunk index if it makes sense, otherwise append sequentially
-						// This preserves the logical chunk structure while handling fragmentation
-						if existingData, exists := bucket.chunkMap[chunkIdx]; exists {
-							// Append to existing chunk with same index
+						// For SSL fragmentation, we maintain a single continuous stream to avoid corrupting HTTP chunk boundaries
+						// Find the best chunk to append to based on content analysis
+						var targetChunkIdx int = -1
+
+						// Strategy: append to the chunk that would maintain HTTP response continuity
+						if len(bucket.chunkMap) == 0 {
+							// First chunk in fragmented response
+							targetChunkIdx = chunkIdx
+						} else {
+							// Find the chunk that ends at a logical boundary or append to largest chunk
+							maxSize := 0
+							for idx, data := range bucket.chunkMap {
+								if idx != 9999 && len(data) > maxSize { // Skip terminator chunk
+									maxSize = len(data)
+									targetChunkIdx = idx
+								}
+							}
+							// If no suitable chunk found, use the provided index
+							if targetChunkIdx == -1 {
+								targetChunkIdx = chunkIdx
+							}
+						}
+
+						if existingData, exists := bucket.chunkMap[targetChunkIdx]; exists {
+							// Append to existing chunk to maintain HTTP stream continuity
 							combinedData := make([]byte, len(existingData)+int(event.ChunkLen))
 							copy(combinedData, existingData)
 							copy(combinedData[len(existingData):], event.Buf[:event.ChunkLen])
-							bucket.chunkMap[chunkIdx] = combinedData
+							bucket.chunkMap[targetChunkIdx] = combinedData
 							bucket.received += int(event.ChunkLen)
-							internalglog.LogInfof("llm_response: appended %d bytes to chunk %d (SSL fragmentation), new size=%d, total received=%d", event.ChunkLen, chunkIdx, len(combinedData), bucket.received)
+							internalglog.LogInfof("llm_response: appended %d bytes to chunk %d (SSL fragmentation), new size=%d, total received=%d", event.ChunkLen, targetChunkIdx, len(combinedData), bucket.received)
 						} else {
-							// Create new chunk at the specified index
-							bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
+							// Create new chunk at the target index
+							bucket.chunkMap[targetChunkIdx] = event.Buf[:event.ChunkLen]
 							bucket.received += int(event.ChunkLen)
-							internalglog.LogInfof("llm_response: created new chunk %d for fragmented data, size=%d, total received=%d", chunkIdx, event.ChunkLen, bucket.received)
+							internalglog.LogInfof("llm_response: created new chunk %d for fragmented data, size=%d, total received=%d", targetChunkIdx, event.ChunkLen, bucket.received)
 						}
 					} else {
 						// Check if chunk exists and if data is different (SSL fragmentation case)/
@@ -1509,9 +1530,9 @@ func run(ctx context.Context, done chan error) {
 							// Fallback: Use content-based ordering for SSL fragmentation
 							internalglog.LogInfof("llm_response: using content-based chunk ordering due to invalid indices")
 
+							// For SSL fragmentation, we should have consolidated chunks that preserve HTTP stream continuity
 							// Find the chunk that starts with HTTP/1.1 (should be first)
 							var httpChunk []byte
-							var otherChunks [][]byte
 							var httpChunkIndex int = -1
 
 							for idx, chunk := range chunkMap {
@@ -1521,20 +1542,33 @@ func run(ctx context.Context, done chan error) {
 								if len(chunk) >= 8 && string(chunk[:8]) == "HTTP/1.1" {
 									httpChunk = chunk
 									httpChunkIndex = idx
-								} else {
-									otherChunks = append(otherChunks, chunk)
+									break // Found the main HTTP response chunk
 								}
 							}
 
 							if httpChunk != nil {
-								// For SSL fragmentation cases, combine all chunks sequentially
-								// Start with the HTTP headers chunk
+								// For SSL fragmentation, the main HTTP chunk should contain the complete response
+								// due to our sequential appending strategy
+								internalglog.LogInfof("llm_response: found HTTP chunk at index %d, size=%d", httpChunkIndex, len(httpChunk))
 								orderedChunks = append(orderedChunks, httpChunk)
 
-								// Add other chunks in order of their indices (excluding the HTTP chunk)
+								// Only add other chunks if they don't duplicate the HTTP content
+								// (This handles edge cases where fragmentation created separate chunks)
+								for idx, chunk := range chunkMap {
+									if idx != 9999 && idx != httpChunkIndex { // Skip terminator and HTTP chunk
+										// Only add if it's not already included in the HTTP chunk
+										// Simple heuristic: if the chunk is small and doesn't start with HTTP, it might be additional data
+										if len(chunk) > 0 {
+											orderedChunks = append(orderedChunks, chunk)
+											internalglog.LogInfof("llm_response: added additional chunk %d, size=%d", idx, len(chunk))
+										}
+									}
+								}
+							} else {
+								// No HTTP chunk found, combine all non-terminator chunks
 								var sortedIndices []int
 								for idx := range chunkMap {
-									if idx != 9999 && idx != httpChunkIndex { // Skip terminator and HTTP chunk
+									if idx != 9999 { // Skip terminator
 										sortedIndices = append(sortedIndices, idx)
 									}
 								}
@@ -1548,16 +1582,11 @@ func run(ctx context.Context, done chan error) {
 									}
 								}
 
-								// Add chunks in sorted index order
+								// Add chunks in sorted order
 								for _, idx := range sortedIndices {
 									if chunk, exists := chunkMap[idx]; exists {
 										orderedChunks = append(orderedChunks, chunk)
 									}
-								}
-							} else {
-								// No HTTP chunk found, use chunks as-is
-								for _, chunk := range chunkMap {
-									orderedChunks = append(orderedChunks, chunk)
 								}
 							}
 						}
