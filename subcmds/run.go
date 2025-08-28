@@ -1130,11 +1130,12 @@ func run(ctx context.Context, done chan error) {
 					}()
 					internalglog.LogInfo(line.String())
 
-					// Skip chunked end marker
+					// Handle chunked end marker - don't skip it, process it to complete the response
 					if event.TotalLen == 5 && event.ChunkLen == 5 {
 						content := string(event.Buf[:event.ChunkLen])
 						if content == "0\r\n\r\n" {
-							break
+							internalglog.LogInfof("llm_response: detected final terminator chunk, processing to complete response")
+							// Don't break here - let it fall through to bucket processing
 						}
 					}
 
