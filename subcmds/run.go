@@ -4,6 +4,7 @@ package subcmds
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
 	"context"
 	"encoding/base64"
@@ -1035,6 +1036,14 @@ func run(ctx context.Context, done chan error) {
 						continue
 					}
 
+					// Add validation logging for chunk index and length
+					if event.ChunkIdx < 0 || event.ChunkIdx > 1000 {
+						internalglog.LogInfof("llm_response: warning - suspicious chunk index: %d", event.ChunkIdx)
+					}
+					if event.ChunkLen < 0 || event.ChunkLen > 65536 {
+						internalglog.LogInfof("llm_response: warning - suspicious chunk length: %d", event.ChunkLen)
+					}
+
 					if eventState[key].http2.Load() == 1 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
 						buf := bytes.NewReader(event.Buf[:])
 						header := make([]byte, 9)
@@ -1295,41 +1304,45 @@ func run(ctx context.Context, done chan error) {
 							body = full
 						}
 
-						// Enhanced gzip handling with buffering
+						// Enhanced compression handling with multiple methods
+						contentEncoding := ""
 						if strings.Contains(headers, "Content-Encoding: gzip") {
-							internalglog.LogInfof("llm_response: gzip detected, body size before decompression=%d", len(body))
+							contentEncoding = "gzip"
+						} else if strings.Contains(headers, "Content-Encoding: deflate") {
+							contentEncoding = "deflate"
+						} else if strings.Contains(headers, "Content-Encoding: br") {
+							contentEncoding = "br"
+						}
 
-							// Log gzip header and trailer
+						if contentEncoding != "" {
+							internalglog.LogInfof("llm_response: %s compression detected, body size before decompression=%d", contentEncoding, len(body))
+
+							// Log compression header and trailer
 							if len(body) >= 10 {
-								internalglog.LogInfof("llm_response: gzip header (first 32 bytes): % x", body[:min(32, len(body))])
+								internalglog.LogInfof("llm_response: compression header (first 32 bytes): % x", body[:min(32, len(body))])
 							}
 							if len(body) >= 8 {
-								internalglog.LogInfof("llm_response: gzip trailer (last 8 bytes): % x", body[len(body)-8:])
+								internalglog.LogInfof("llm_response: compression trailer (last 8 bytes): % x", body[len(body)-8:])
 							}
 
-							// Check if gzip stream looks valid
-							if len(body) < 10 || body[0] != 0x1f || body[1] != 0x8b {
-								internalglog.LogInfof("llm_response: warning - gzip stream does not start with valid header (1f 8b)")
-							}
-
-							reader, err := gzip.NewReader(bytes.NewReader(body))
+							// Try decompression based on detected type
+							decompressed, err := decompressData(body, contentEncoding)
 							if err == nil {
-								decompressed, err := io.ReadAll(reader)
-								reader.Close()
-								if err == nil {
-									body = decompressed
-									internalglog.LogInfof("llm_response: gzip decompression successful, decompressed size=%d", len(body))
-								} else {
-									internalglog.LogInfof("llm_response: gzip read failed: %v", err)
+								body = decompressed
+								internalglog.LogInfof("llm_response: %s decompression successful, decompressed size=%d", contentEncoding, len(body))
+							} else {
+								internalglog.LogInfof("llm_response: %s decompression failed: %v", contentEncoding, err)
 
-									// Handle incomplete gzip streams
-									if strings.Contains(err.Error(), "unexpected EOF") {
-										internalglog.LogInfof("llm_response: gzip stream incomplete, skipping buffering attempt")
-										// For now, just store as base64 instead of trying to buffer
+								// Try alternative methods if primary fails
+								if contentEncoding == "gzip" {
+									internalglog.LogInfof("llm_response: trying deflate as fallback")
+									if decompressed, err := decompressData(body, "deflate"); err == nil {
+										body = decompressed
+										internalglog.LogInfof("llm_response: deflate fallback successful, decompressed size=%d", len(body))
+									} else {
+										internalglog.LogInfof("llm_response: deflate fallback failed: %v", err)
 									}
 								}
-							} else {
-								internalglog.LogInfof("llm_response: gzip reader creation failed: %v", err)
 							}
 						}
 
@@ -1627,4 +1640,28 @@ func decodeChunkedBody(chunked []byte) ([]byte, error) {
 	}
 
 	return body.Bytes(), nil
+}
+
+// decompressData decompresses data using the specified compression method
+func decompressData(data []byte, method string) ([]byte, error) {
+	switch method {
+	case "gzip":
+		if len(data) < 10 || data[0] != 0x1f || data[1] != 0x8b {
+			return nil, fmt.Errorf("invalid gzip header")
+		}
+		reader, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("gzip reader creation failed: %v", err)
+		}
+		defer reader.Close()
+		return io.ReadAll(reader)
+
+	case "deflate":
+		reader := flate.NewReader(bytes.NewReader(data))
+		defer reader.Close()
+		return io.ReadAll(reader)
+
+	default:
+		return nil, fmt.Errorf("unsupported compression method: %s", method)
+	}
 }
