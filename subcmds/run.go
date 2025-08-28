@@ -1328,7 +1328,7 @@ func run(ctx context.Context, done chan error) {
 							internalglog.LogInfof("llm_response: created new chunk %d for fragmented data, size=%d, total received=%d", chunkIdx, event.ChunkLen, bucket.received)
 						}
 					} else {
-						// Check if chunk exists and if data is different (SSL fragmentation case)
+						// Check if chunk exists and if data is different (SSL fragmentation case)/
 						if existingData, exists := bucket.chunkMap[chunkIdx]; exists {
 							newData := event.Buf[:event.ChunkLen]
 
