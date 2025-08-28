@@ -1300,10 +1300,14 @@ func run(ctx context.Context, done chan error) {
 					// this might be continuation data from SSL fragmentation
 					isSSLFragmentation := bucket.total != int(event.TotalLen)
 
-					// Handle terminator chunks differently - don't store them, just mark completion
+					// Handle terminator chunks - store them but with a special index
 					if isTerminatorChunk {
-						internalglog.LogInfof("llm_response: terminator chunk detected, marking response complete without storing terminator data")
-						// Don't store terminator data, just trigger completion
+						internalglog.LogInfof("llm_response: terminator chunk detected, storing with special index")
+						// Store terminator data with a high index that won't conflict with real chunks
+						terminatorIdx := 9999
+						bucket.chunkMap[terminatorIdx] = event.Buf[:event.ChunkLen]
+						bucket.received += int(event.ChunkLen)
+						internalglog.LogInfof("llm_response: stored terminator chunk at index %d, size=%d", terminatorIdx, event.ChunkLen)
 					} else if isSSLFragmentation {
 						// For SSL fragmentation, append data to existing chunks instead of creating new chunks
 						internalglog.LogInfof("llm_response: SSL fragmentation detected (bucket.total=%d, event.TotalLen=%d), appending data", bucket.total, event.TotalLen)
