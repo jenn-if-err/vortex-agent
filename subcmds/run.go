@@ -1178,23 +1178,31 @@ func run(ctx context.Context, done chan error) {
 						// Enhanced chunk map with completeness checking
 						chunkMap := make(map[int][]byte)
 						for i, chunk := range bucket.chunks {
-							order := i
+							// Use the actual chunk order from the eBPF event
 							if i < len(bucket.chunkOrder) {
-								order = bucket.chunkOrder[i]
+								order := bucket.chunkOrder[i] // This is the correct chunk index
+								chunkMap[order] = chunk
+							} else {
+								// Fallback to array index if chunkOrder is somehow missing
+								internalglog.LogInfof("llm_response: warning - missing chunkOrder for chunk %d", i)
+								chunkMap[i] = chunk
 							}
-							chunkMap[order] = chunk
 						}
 
 						// Check for missing chunk indices
 						maxOrder := -1
+						minOrder := int(^uint(0) >> 1) // max int
 						for order := range chunkMap {
 							if order > maxOrder {
 								maxOrder = order
 							}
+							if order < minOrder {
+								minOrder = order
+							}
 						}
 
 						missingChunks := []int{}
-						for i := 0; i <= maxOrder; i++ {
+						for i := minOrder; i <= maxOrder; i++ {
 							if _, exists := chunkMap[i]; !exists {
 								missingChunks = append(missingChunks, i)
 							}
@@ -1205,9 +1213,9 @@ func run(ctx context.Context, done chan error) {
 							break
 						}
 
-						// Log chunk collection details
+						// Log chunk collection details with CORRECT ordering
 						internalglog.LogInfof("llm_response: chunk collection details:")
-						for order := 0; order <= maxOrder; order++ {
+						for order := minOrder; order <= maxOrder; order++ {
 							if chunk, exists := chunkMap[order]; exists {
 								first16 := chunk
 								if len(chunk) > 16 {
@@ -1217,9 +1225,9 @@ func run(ctx context.Context, done chan error) {
 							}
 						}
 
-						// Combine chunks in correct order using the chunk map
+						// Combine chunks in CORRECT order using the chunk map
 						var combinedChunks [][]byte
-						for order := 0; order <= maxOrder; order++ {
+						for order := minOrder; order <= maxOrder; order++ {
 							if chunk, exists := chunkMap[order]; exists {
 								combinedChunks = append(combinedChunks, chunk)
 							}
