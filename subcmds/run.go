@@ -1253,7 +1253,7 @@ func run(ctx context.Context, done chan error) {
 						// Use the chunk map directly - no need for additional mapping
 						chunkMap := bucket.chunkMap
 
-						// Check for missing chunk indicesccc
+						// Check for missing chunk indices
 						maxOrder := -1
 						minOrder := int(^uint(0) >> 1) // max int
 						for order := range chunkMap {
@@ -1266,9 +1266,12 @@ func run(ctx context.Context, done chan error) {
 						}
 
 						missingChunks := []int{}
-						for i := minOrder; i <= maxOrder; i++ {
-							if _, exists := chunkMap[i]; !exists {
-								missingChunks = append(missingChunks, i)
+						// Only check for missing chunks if we have valid min/max values
+						if minOrder != int(^uint(0) >> 1) && maxOrder >= minOrder {
+							for i := minOrder; i <= maxOrder; i++ {
+								if _, exists := chunkMap[i]; !exists {
+									missingChunks = append(missingChunks, i)
+								}
 							}
 						}
 
