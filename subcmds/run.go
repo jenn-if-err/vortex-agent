@@ -1388,6 +1388,11 @@ func run(ctx context.Context, done chan error) {
 
 							if strings.Contains(headers, "Transfer-Encoding: chunked") {
 								internalglog.LogInfof("llm_response: decoding chunked body, rawBody size=%d", len(rawBody))
+
+								// Log first 100 bytes of raw body for debugging
+								debugLen := min(100, len(rawBody))
+								internalglog.LogInfof("llm_response: raw body start (first %d bytes): % x", debugLen, rawBody[:debugLen])
+
 								decoded, err := decodeChunkedBody(rawBody)
 								if err == nil {
 									body = decoded
@@ -1643,6 +1648,8 @@ func decodeChunkedBody(chunked []byte) ([]byte, error) {
 	for {
 		// Read chunk size line until \r\n
 		var sizeLine []byte
+		foundCRLF := false
+
 		for {
 			b, err := r.ReadByte()
 			if err == io.EOF {
@@ -1655,21 +1662,20 @@ func decodeChunkedBody(chunked []byte) ([]byte, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error reading chunk size: %v", err)
 			}
-			if b == '\r' {
-				// Look for \n after \r
-				next, err := r.ReadByte()
-				if err == nil && next == '\n' {
-					break
-				}
-				// Put back the byte if it wasn't \n
-				if err == nil {
-					pos, _ := r.Seek(0, io.SeekCurrent)
-					r.Seek(pos-1, io.SeekStart)
-				}
-				sizeLine = append(sizeLine, b)
-			} else {
-				sizeLine = append(sizeLine, b)
+
+			sizeLine = append(sizeLine, b)
+
+			// Check for \r\n at the end of sizeLine
+			if len(sizeLine) >= 2 && sizeLine[len(sizeLine)-2] == '\r' && sizeLine[len(sizeLine)-1] == '\n' {
+				// Remove the \r\n from sizeLine
+				sizeLine = sizeLine[:len(sizeLine)-2]
+				foundCRLF = true
+				break
 			}
+		}
+
+		if !foundCRLF {
+			return nil, fmt.Errorf("chunk size line missing CRLF terminator")
 		}
 
 		sizeStr := strings.TrimSpace(string(sizeLine))
@@ -1687,23 +1693,20 @@ func decodeChunkedBody(chunked []byte) ([]byte, error) {
 			return nil, fmt.Errorf("invalid chunk size '%s': %v", sizeStr, err)
 		}
 
+		// Debug: Log each chunk size we find
+		internalglog.LogInfof("llm_response: found chunk size %s (hex) = %d (decimal) bytes", sizeStr, size)
+
 		if size == 0 {
 			// End of chunks - consume any trailing headers and final \r\n
 			for {
-				line, err := r.ReadByte()
+				_, err := r.ReadByte()
 				if err == io.EOF {
 					break
 				}
 				if err != nil {
 					break
 				}
-				if line == '\r' {
-					next, err := r.ReadByte()
-					if err == nil && next == '\n' {
-						// Found final \r\n, we're done
-						break
-					}
-				}
+				// Just consume remaining bytes
 			}
 			break
 		}
@@ -1716,7 +1719,8 @@ func decodeChunkedBody(chunked []byte) ([]byte, error) {
 			if n > 0 {
 				body.Write(chunk[:n])
 			}
-			return body.Bytes(), nil
+			// Continue trying to decode what we have
+			break
 		}
 		if err != nil {
 			return nil, fmt.Errorf("reading chunk data (expected %d bytes): %v", size, err)
@@ -1725,17 +1729,18 @@ func decodeChunkedBody(chunked []byte) ([]byte, error) {
 		body.Write(chunk)
 
 		// Read trailing \r\n after chunk data - be more tolerant
-		trailer1, err1 := r.ReadByte()
-		trailer2, err2 := r.ReadByte()
-		if err1 == io.EOF || err2 == io.EOF {
+		trailer := make([]byte, 2)
+		n, err = r.Read(trailer)
+		if err == io.EOF {
 			// End of data after chunk - might be incomplete
-			return body.Bytes(), nil
+			break
 		}
-		if err1 != nil || err2 != nil {
-			return nil, fmt.Errorf("reading chunk trailer: %v, %v", err1, err2)
+		if err != nil {
+			return nil, fmt.Errorf("reading chunk trailer: %v", err)
 		}
-		if trailer1 != '\r' || trailer2 != '\n' {
-			return nil, fmt.Errorf("expected \\r\\n after chunk, got %02x%02x", trailer1, trailer2)
+		if n >= 2 && (trailer[0] != '\r' || trailer[1] != '\n') {
+			// Log warning but continue
+			fmt.Printf("Warning: expected \\r\\n after chunk, got %02x%02x\n", trailer[0], trailer[1])
 		}
 	}
 
