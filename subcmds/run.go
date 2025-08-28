@@ -1130,15 +1130,6 @@ func run(ctx context.Context, done chan error) {
 					}()
 					internalglog.LogInfo(line.String())
 
-					// Handle chunked end marker - don't skip it, process it to complete the response
-					if event.TotalLen == 5 && event.ChunkLen == 5 {
-						content := string(event.Buf[:event.ChunkLen])
-						if content == "0\r\n\r\n" {
-							internalglog.LogInfof("llm_response: detected final terminator chunk, processing to complete response")
-							// Don't break here - let it fall through to bucket processing
-						}
-					}
-
 					// Detect if this chunk starts a new HTTP response
 					chunkData := string(event.Buf[:event.ChunkLen])
 					isNewResponse := strings.HasPrefix(chunkData, "HTTP/1.1")
@@ -1873,6 +1864,19 @@ func isChunkedResponseComplete(bucket *responseBucket) bool {
 	// Check if Transfer-Encoding is chunked
 	if !bytes.Contains(headers, []byte("Transfer-Encoding: chunked")) {
 		return true // Not chunked, consider complete
+	}
+
+	// Quick check: if we have a final terminator chunk (0\r\n or similar patterns),
+	// consider the response complete even if intermediate chunks are incomplete
+	bodyStr := string(body)
+	if strings.Contains(bodyStr, "0\r\n") || strings.Contains(bodyStr, "0\n") {
+		// Look for final chunk patterns at the end of the body
+		if strings.HasSuffix(strings.TrimSpace(bodyStr), "0") ||
+			strings.Contains(bodyStr, "0\r\n\r\n") ||
+			strings.Contains(bodyStr, "0\n\n") {
+			fmt.Printf("Chunked response complete (final terminator found in combined data)\n")
+			return true
+		}
 	}
 
 	// Parse chunked encoding to see if we have complete chunks
