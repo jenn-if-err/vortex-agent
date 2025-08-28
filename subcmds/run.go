@@ -1230,18 +1230,35 @@ func run(ctx context.Context, done chan error) {
 						break              // Exit early for duplicates
 					}
 
-					// Check if we should process (either complete or timeout)
+					// Check if we should process (complete chunked response or timeout)
 					shouldProcess := false
-					if bucket.received >= bucket.total {
-						shouldProcess = true
-						internalglog.LogInfof("llm_response: complete response received (%d/%d bytes)", bucket.received, bucket.total)
-					} else if time.Since(bucket.lastUpdate) > 30*time.Second { // Use longer timeout
-						shouldProcess = true
-						internalglog.LogInfof("llm_response: timeout reached, processing partial response (%d/%d bytes)", bucket.received, bucket.total)
+
+					// For chunked responses, check if we have a complete chunked stream
+					if isChunkedResponse(bucket) {
+						if isChunkedResponseComplete(bucket) {
+							shouldProcess = true
+							internalglog.LogInfof("llm_response: complete chunked response detected")
+						} else if time.Since(bucket.lastUpdate) > 30*time.Second {
+							shouldProcess = true
+							internalglog.LogInfof("llm_response: timeout reached, processing partial chunked response")
+						} else {
+							internalglog.LogInfof("llm_response: waiting for more chunks (chunked response incomplete)")
+							bucket.mu.Unlock()
+							break // Wait for more chunks
+						}
 					} else {
-						internalglog.LogInfof("llm_response: waiting for more chunks (%d/%d bytes)", bucket.received, bucket.total)
-						bucket.mu.Unlock() // Unlock before breaking
-						break              // Wait for more chunks
+						// Non-chunked response, use original logic
+						if bucket.received >= bucket.total {
+							shouldProcess = true
+							internalglog.LogInfof("llm_response: complete response received (%d/%d bytes)", bucket.received, bucket.total)
+						} else if time.Since(bucket.lastUpdate) > 30*time.Second {
+							shouldProcess = true
+							internalglog.LogInfof("llm_response: timeout reached, processing partial response (%d/%d bytes)", bucket.received, bucket.total)
+						} else {
+							internalglog.LogInfof("llm_response: waiting for more chunks (%d/%d bytes)", bucket.received, bucket.total)
+							bucket.mu.Unlock() // Unlock before breaking
+							break              // Wait for more chunks
+						}
 					}
 
 					// Only process when shouldProcess is true AND not already processing
@@ -1769,4 +1786,53 @@ func decompressData(data []byte, method string) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported compression method: %s", method)
 	}
+}
+
+// isChunkedResponse checks if the response uses chunked transfer encoding
+func isChunkedResponse(bucket *responseBucket) bool {
+	// Look for HTTP headers in chunk 0
+	if chunk0, exists := bucket.chunkMap[0]; exists {
+		headers := string(chunk0)
+		return strings.Contains(headers, "Transfer-Encoding: chunked")
+	}
+	return false
+}
+
+// isChunkedResponseComplete checks if we have received a complete chunked response
+func isChunkedResponseComplete(bucket *responseBucket) bool {
+	// Combine all chunks to form the raw response
+	var combinedData []byte
+
+	// Find min and max chunk indices
+	minOrder := int(^uint(0) >> 1) // max int
+	maxOrder := -1
+	for order := range bucket.chunkMap {
+		if order > maxOrder {
+			maxOrder = order
+		}
+		if order < minOrder {
+			minOrder = order
+		}
+	}
+
+	// Combine chunks in order
+	if minOrder != int(^uint(0)>>1) && maxOrder >= minOrder {
+		for order := minOrder; order <= maxOrder; order++ {
+			if chunk, exists := bucket.chunkMap[order]; exists {
+				combinedData = append(combinedData, chunk...)
+			}
+		}
+	}
+
+	// Separate headers and body
+	headerEndIndex := bytes.Index(combinedData, []byte("\r\n\r\n"))
+	if headerEndIndex == -1 {
+		return false // No complete headers yet
+	}
+
+	body := combinedData[headerEndIndex+4:]
+
+	// Check if the chunked body ends with the final chunk marker
+	// A complete chunked response ends with: "0\r\n\r\n"
+	return bytes.HasSuffix(body, []byte("0\r\n\r\n"))
 }
