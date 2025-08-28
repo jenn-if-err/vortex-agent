@@ -1198,11 +1198,14 @@ func run(ctx context.Context, done chan error) {
 					bucket = bucketAny.(*responseBucket)
 
 					// Lock the bucket to prevent concurrent access
+					internalglog.LogInfof("llm_response: about to lock bucket mutex")
 					bucket.mu.Lock()
+					internalglog.LogInfof("llm_response: bucket mutex locked successfully")
 					defer bucket.mu.Unlock()
 
 					// Update last activity time
 					bucket.lastUpdate = time.Now()
+					internalglog.LogInfof("llm_response: updated last activity time")
 
 					chunkIdx := int(event.ChunkIdx)
 
