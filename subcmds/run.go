@@ -1313,42 +1313,31 @@ func run(ctx context.Context, done chan error) {
 						// SSL fragmentation can split HTTP chunks across SSL operations, so we can't rely on SSL chunk indices
 						internalglog.LogInfof("llm_response: SSL fragmentation detected (bucket.total=%d, event.TotalLen=%d), appending data sequentially", bucket.total, event.TotalLen)
 
-						// For SSL fragmentation, we maintain a single continuous stream to avoid corrupting HTTP chunk boundaries
-						// Find the best chunk to append to based on content analysis
-						var targetChunkIdx int = -1
+						// For SSL fragmentation, we MUST consolidate all data into a single continuous HTTP stream
+						// Find the HTTP headers chunk (should always be index 0) and append everything to it
+						var httpChunkIdx int = 0
 
-						// Strategy: append to the chunk that would maintain HTTP response continuity
-						if len(bucket.chunkMap) == 0 {
-							// First chunk in fragmented response
-							targetChunkIdx = chunkIdx
-						} else {
-							// Find the chunk that ends at a logical boundary or append to largest chunk
-							maxSize := 0
-							for idx, data := range bucket.chunkMap {
-								if idx != 9999 && len(data) > maxSize { // Skip terminator chunk
-									maxSize = len(data)
-									targetChunkIdx = idx
-								}
-							}
-							// If no suitable chunk found, use the provided index
-							if targetChunkIdx == -1 {
-								targetChunkIdx = chunkIdx
+						// First, try to find the chunk that contains HTTP headers
+						for idx, data := range bucket.chunkMap {
+							if idx != 9999 && len(data) >= 8 && string(data[:8]) == "HTTP/1.1" { // Skip terminator chunk
+								httpChunkIdx = idx
+								break
 							}
 						}
 
-						if existingData, exists := bucket.chunkMap[targetChunkIdx]; exists {
-							// Append to existing chunk to maintain HTTP stream continuity
+						if existingData, exists := bucket.chunkMap[httpChunkIdx]; exists {
+							// Append to the HTTP headers chunk to maintain stream continuity
 							combinedData := make([]byte, len(existingData)+int(event.ChunkLen))
 							copy(combinedData, existingData)
 							copy(combinedData[len(existingData):], event.Buf[:event.ChunkLen])
-							bucket.chunkMap[targetChunkIdx] = combinedData
+							bucket.chunkMap[httpChunkIdx] = combinedData
 							bucket.received += int(event.ChunkLen)
-							internalglog.LogInfof("llm_response: appended %d bytes to chunk %d (SSL fragmentation), new size=%d, total received=%d", event.ChunkLen, targetChunkIdx, len(combinedData), bucket.received)
+							internalglog.LogInfof("llm_response: appended %d bytes to HTTP chunk %d (SSL fragmentation), new size=%d, total received=%d", event.ChunkLen, httpChunkIdx, len(combinedData), bucket.received)
 						} else {
-							// Create new chunk at the target index
-							bucket.chunkMap[targetChunkIdx] = event.Buf[:event.ChunkLen]
+							// No HTTP chunk found yet, create one
+							bucket.chunkMap[httpChunkIdx] = event.Buf[:event.ChunkLen]
 							bucket.received += int(event.ChunkLen)
-							internalglog.LogInfof("llm_response: created new chunk %d for fragmented data, size=%d, total received=%d", targetChunkIdx, event.ChunkLen, bucket.received)
+							internalglog.LogInfof("llm_response: created HTTP chunk %d for fragmented data, size=%d, total received=%d", httpChunkIdx, event.ChunkLen, bucket.received)
 						}
 					} else {
 						// Check if chunk exists and if data is different (SSL fragmentation case)/
@@ -1530,8 +1519,8 @@ func run(ctx context.Context, done chan error) {
 							// Fallback: Use content-based ordering for SSL fragmentation
 							internalglog.LogInfof("llm_response: using content-based chunk ordering due to invalid indices")
 
-							// For SSL fragmentation, we should have consolidated chunks that preserve HTTP stream continuity
-							// Find the chunk that starts with HTTP/1.1 (should be first)
+							// For SSL fragmentation, we should have a consolidated HTTP chunk containing the complete response
+							// Find the chunk that starts with HTTP/1.1
 							var httpChunk []byte
 							var httpChunkIndex int = -1
 
@@ -1542,30 +1531,29 @@ func run(ctx context.Context, done chan error) {
 								if len(chunk) >= 8 && string(chunk[:8]) == "HTTP/1.1" {
 									httpChunk = chunk
 									httpChunkIndex = idx
-									break // Found the main HTTP response chunk
+									break // Found the consolidated HTTP response chunk
 								}
 							}
 
 							if httpChunk != nil {
-								// For SSL fragmentation, the main HTTP chunk should contain the complete response
-								// due to our sequential appending strategy
-								internalglog.LogInfof("llm_response: found HTTP chunk at index %d, size=%d", httpChunkIndex, len(httpChunk))
+								// For SSL fragmentation with consolidation, the HTTP chunk should contain the complete response
+								internalglog.LogInfof("llm_response: found consolidated HTTP chunk at index %d, size=%d", httpChunkIndex, len(httpChunk))
 								orderedChunks = append(orderedChunks, httpChunk)
 
-								// Only add other chunks if they don't duplicate the HTTP content
-								// (This handles edge cases where fragmentation created separate chunks)
+								// In most SSL fragmentation cases, all data should be in the HTTP chunk
+								// Only add other chunks if they exist and might contain additional data
 								for idx, chunk := range chunkMap {
 									if idx != 9999 && idx != httpChunkIndex { // Skip terminator and HTTP chunk
-										// Only add if it's not already included in the HTTP chunk
-										// Simple heuristic: if the chunk is small and doesn't start with HTTP, it might be additional data
+										// Check if this chunk might contain additional data not in the HTTP chunk
 										if len(chunk) > 0 {
-											orderedChunks = append(orderedChunks, chunk)
-											internalglog.LogInfof("llm_response: added additional chunk %d, size=%d", idx, len(chunk))
+											internalglog.LogInfof("llm_response: found additional non-consolidated chunk %d, size=%d - this may indicate incomplete consolidation", idx, len(chunk))
+											// For safety, don't add these chunks as they may corrupt the HTTP stream
+											// orderedChunks = append(orderedChunks, chunk)
 										}
 									}
 								}
 							} else {
-								// No HTTP chunk found, combine all non-terminator chunks
+								// No HTTP chunk found, combine all non-terminator chunks in order
 								var sortedIndices []int
 								for idx := range chunkMap {
 									if idx != 9999 { // Skip terminator
