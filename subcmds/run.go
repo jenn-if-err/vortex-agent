@@ -1404,10 +1404,25 @@ func run(ctx context.Context, done chan error) {
 							break // Wait for more chunks
 						}
 					} else {
-						// Non-chunked response, use original logic
+						// Non-chunked response, use original logic but ensure we have HTTP headers
 						if bucket.received >= bucket.total {
-							shouldProcess = true
-							internalglog.LogInfof("llm_response: complete response received (%d/%d bytes)", bucket.received, bucket.total)
+							// Check if we have HTTP headers before processing
+							hasHTTPHeaders := false
+							for _, chunkData := range bucket.chunkMap {
+								if len(chunkData) > 8 && bytes.HasPrefix(chunkData, []byte("HTTP/1.1")) {
+									hasHTTPHeaders = true
+									break
+								}
+							}
+
+							if hasHTTPHeaders {
+								shouldProcess = true
+								internalglog.LogInfof("llm_response: complete response received (%d/%d bytes)", bucket.received, bucket.total)
+							} else {
+								internalglog.LogInfof("llm_response: waiting for HTTP headers (have %d/%d bytes but no HTTP headers)", bucket.received, bucket.total)
+								bucket.mu.Unlock()
+								break // Wait for HTTP headers
+							}
 						} else if time.Since(bucket.lastUpdate) > 30*time.Second {
 							shouldProcess = true
 							internalglog.LogInfof("llm_response: timeout reached, processing partial response (%d/%d bytes)", bucket.received, bucket.total)
