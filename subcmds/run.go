@@ -1045,7 +1045,7 @@ func run(ctx context.Context, done chan error) {
 					}
 
 					// Debug: Log raw event data to check for corruption
-					internalglog.LogInfof("llm_response: debug - event.ChunkIdx=%d, event.ChunkLen=%d, event.TotalLen=%d", 
+					internalglog.LogInfof("llm_response: debug - event.ChunkIdx=%d, event.ChunkLen=%d, event.TotalLen=%d",
 						event.ChunkIdx, event.ChunkLen, event.TotalLen)
 
 					if eventState[key].http2.Load() == 1 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
@@ -1083,17 +1083,27 @@ func run(ctx context.Context, done chan error) {
 
 					// Build log line more defensively to prevent corruption
 					line.Reset()
-					logMsg := fmt.Sprintf("-> [uretprobe/SSL_read{_ex}] idx=%v, buf=%s, key=%v, totalLen=%v, chunkLen=%v, src=%v:%v, dst=%v:%v", 
+
+					// Safely extract readable portion of buffer
+					readableChunkLen := int(event.ChunkLen)
+					if readableChunkLen < 0 {
+						readableChunkLen = 0
+					}
+					if readableChunkLen > len(event.Buf) {
+						readableChunkLen = len(event.Buf)
+					}
+
+					logMsg := fmt.Sprintf("-> [uretprobe/SSL_read{_ex}] idx=%v, buf=%s, key=%v, totalLen=%v, chunkLen=%v, src=%v:%v, dst=%v:%v",
 						event.ChunkIdx,
-						internal.Readable(event.Buf[:], max(event.ChunkLen, 0)),
-						key, 
-						event.TotalLen, 
+						internal.Readable(event.Buf[:readableChunkLen], readableChunkLen),
+						key,
+						event.TotalLen,
 						event.ChunkLen,
-						internal.IntToIp(event.Daddr), 
+						internal.IntToIp(event.Daddr),
 						event.Dport,
-						internal.IntToIp(event.Saddr), 
+						internal.IntToIp(event.Saddr),
 						event.Sport)
-					
+
 					fmt.Fprint(&line, logMsg)
 					func() {
 						if !isk8s {
@@ -1140,17 +1150,31 @@ func run(ctx context.Context, done chan error) {
 					var bucket *responseBucket
 
 					if isNewResponse {
-						// This is a new HTTP response - clean up any existing bucket for this connection and create a new one with a timestamp
+						// This is a new HTTP response - find existing bucket for this connection or create new one
+						// Don't delete existing buckets immediately as chunks might still be arriving
+						var foundKey string
 						responseMap.Range(func(key, value interface{}) bool {
 							if strings.HasPrefix(key.(string), baseKey) {
-								internalglog.LogInfof("llm_response: cleaning up previous response bucket for new HTTP response")
-								responseMap.Delete(key)
+								bucket := value.(*responseBucket)
+								bucket.mu.Lock()
+								// Only reuse if bucket is not yet complete
+								if bucket.received < bucket.total {
+									foundKey = key.(string)
+									bucket.mu.Unlock()
+									return false // stop iteration
+								}
+								bucket.mu.Unlock()
 							}
 							return true
 						})
 
-						respKey = fmt.Sprintf("%s/t%d", baseKey, time.Now().UnixNano())
-						internalglog.LogInfof("llm_response: new HTTP response detected, key=%s", respKey)
+						if foundKey != "" {
+							respKey = foundKey
+							internalglog.LogInfof("llm_response: reusing existing bucket for HTTP response, key=%s", respKey)
+						} else {
+							respKey = fmt.Sprintf("%s/t%d", baseKey, time.Now().UnixNano())
+							internalglog.LogInfof("llm_response: new HTTP response detected, key=%s", respKey)
+						}
 					} else {
 						// This is a continuation of an existing response - find the existing bucket
 						var foundKey string
@@ -1274,7 +1298,7 @@ func run(ctx context.Context, done chan error) {
 						// First, try to use the eBPF indices if they seem reasonable
 						var orderedChunks [][]byte
 						hasValidIndices := true
-						
+
 						// Check if all indices are reasonable (0 to total_chunks-1)
 						for idx := range chunkMap {
 							if idx < 0 || idx >= len(chunkMap) {
@@ -1282,7 +1306,7 @@ func run(ctx context.Context, done chan error) {
 								break
 							}
 						}
-						
+
 						if hasValidIndices {
 							// Use eBPF indices
 							for order := minOrder; order <= maxOrder; order++ {
@@ -1293,11 +1317,11 @@ func run(ctx context.Context, done chan error) {
 						} else {
 							// Fallback: Use content-based ordering
 							internalglog.LogInfof("llm_response: using content-based chunk ordering due to invalid indices")
-							
+
 							// Find the chunk that starts with HTTP/1.1 (should be first)
 							var httpChunk []byte
 							var otherChunks [][]byte
-							
+
 							for _, chunk := range chunkMap {
 								if len(chunk) >= 8 && string(chunk[:8]) == "HTTP/1.1" {
 									httpChunk = chunk
@@ -1305,7 +1329,7 @@ func run(ctx context.Context, done chan error) {
 									otherChunks = append(otherChunks, chunk)
 								}
 							}
-							
+
 							// Combine: HTTP chunk first, then others in original order
 							if httpChunk != nil {
 								orderedChunks = append(orderedChunks, httpChunk)
