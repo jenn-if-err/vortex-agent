@@ -1151,6 +1151,7 @@ func run(ctx context.Context, done chan error) {
 
 					// Always try to find existing bucket first, regardless of whether this looks like HTTP headers
 					var foundKey string
+					var existingBucket *responseBucket
 					internalglog.LogInfof("llm_response: starting bucket search for baseKey=%s", baseKey)
 
 					responseMap.Range(func(key, value interface{}) bool {
@@ -1161,7 +1162,18 @@ func run(ctx context.Context, done chan error) {
 							// Quick check without locking first
 							if bucket.received < bucket.total {
 								foundKey = key.(string)
+								existingBucket = bucket
 								internalglog.LogInfof("llm_response: bucket appears incomplete, reusing key=%s", foundKey)
+								return false // stop iteration
+							}
+							// Check if this bucket might be part of a chunked response that's not complete
+							bucket.mu.Lock()
+							isChunkedComplete := isChunkedResponseComplete(bucket)
+							bucket.mu.Unlock()
+							if !isChunkedComplete {
+								foundKey = key.(string)
+								existingBucket = bucket
+								internalglog.LogInfof("llm_response: chunked response incomplete, reusing key=%s", foundKey)
 								return false // stop iteration
 							}
 							internalglog.LogInfof("llm_response: bucket appears complete, continuing search")
@@ -1173,6 +1185,7 @@ func run(ctx context.Context, done chan error) {
 
 					if foundKey != "" {
 						respKey = foundKey
+						bucket = existingBucket
 						if isNewResponse {
 							internalglog.LogInfof("llm_response: found existing bucket for HTTP response chunk, key=%s", respKey)
 						} else {
@@ -1186,16 +1199,15 @@ func run(ctx context.Context, done chan error) {
 						} else {
 							internalglog.LogInfof("llm_response: no existing bucket found, creating new one for chunk, key=%s", respKey)
 						}
+						// Use a mutex to synchronize bucket access to prevent race conditions
+						bucketAny, _ := responseMap.LoadOrStore(respKey, &responseBucket{
+							total:      int(event.TotalLen),
+							lastUpdate: time.Now(),
+							chunkMap:   make(map[int][]byte),
+							mu:         &sync.Mutex{},
+						})
+						bucket = bucketAny.(*responseBucket)
 					}
-
-					// Use a mutex to synchronize bucket access to prevent race conditions
-					bucketAny, _ := responseMap.LoadOrStore(respKey, &responseBucket{
-						total:      int(event.TotalLen),
-						lastUpdate: time.Now(),
-						chunkMap:   make(map[int][]byte),
-						mu:         &sync.Mutex{},
-					})
-					bucket = bucketAny.(*responseBucket)
 
 					// Lock the bucket to prevent concurrent access
 					internalglog.LogInfof("llm_response: about to lock bucket mutex")
