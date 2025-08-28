@@ -1296,10 +1296,42 @@ func run(ctx context.Context, done chan error) {
 						internalglog.LogInfof("llm_response: assigned fallback index %d", chunkIdx)
 					}
 
+					// Detect SSL fragmentation: if this bucket was created with a different totalLen,
+					// this might be continuation data from SSL fragmentation
+					isSSLFragmentation := bucket.total != int(event.TotalLen)
+
 					// Handle terminator chunks differently - don't store them, just mark completion
 					if isTerminatorChunk {
 						internalglog.LogInfof("llm_response: terminator chunk detected, marking response complete without storing terminator data")
 						// Don't store terminator data, just trigger completion
+					} else if isSSLFragmentation {
+						// For SSL fragmentation, append data to existing chunks instead of creating new chunks
+						internalglog.LogInfof("llm_response: SSL fragmentation detected (bucket.total=%d, event.TotalLen=%d), appending data", bucket.total, event.TotalLen)
+
+						// Find the last chunk and append data to it
+						if len(bucket.chunkMap) > 0 {
+							// Get the highest chunk index
+							maxIdx := -1
+							for idx := range bucket.chunkMap {
+								if idx > maxIdx {
+									maxIdx = idx
+								}
+							}
+
+							// Append new data to the last chunk
+							existingData := bucket.chunkMap[maxIdx]
+							combinedData := make([]byte, len(existingData)+int(event.ChunkLen))
+							copy(combinedData, existingData)
+							copy(combinedData[len(existingData):], event.Buf[:event.ChunkLen])
+							bucket.chunkMap[maxIdx] = combinedData
+							bucket.received += int(event.ChunkLen)
+							internalglog.LogInfof("llm_response: appended %d bytes to chunk %d, new size=%d, total received=%d", event.ChunkLen, maxIdx, len(combinedData), bucket.received)
+						} else {
+							// No existing chunks, create new one
+							bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
+							bucket.received += int(event.ChunkLen)
+							internalglog.LogInfof("llm_response: created new chunk %d for fragmented data, size=%d, total received=%d", chunkIdx, event.ChunkLen, bucket.received)
+						}
 					} else {
 						// Only add chunk if we haven't seen this index before (prevent duplicates)
 						if _, exists := bucket.chunkMap[chunkIdx]; !exists {
