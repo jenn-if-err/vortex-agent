@@ -1403,15 +1403,18 @@ func run(ctx context.Context, done chan error) {
 						// Use the chunk map directly - no need for additional mapping
 						chunkMap := bucket.chunkMap
 
-						// Check for missing chunk indices
+						// Check for missing chunk indices, excluding special terminator index
 						maxOrder := -1
 						minOrder := int(^uint(0) >> 1) // max int
 						for order := range chunkMap {
-							if order > maxOrder {
-								maxOrder = order
-							}
-							if order < minOrder {
-								minOrder = order
+							// Skip the special terminator index (9999) in chunk validation
+							if order != 9999 {
+								if order > maxOrder {
+									maxOrder = order
+								}
+								if order < minOrder {
+									minOrder = order
+								}
 							}
 						}
 
