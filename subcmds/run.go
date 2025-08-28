@@ -1337,15 +1337,29 @@ func run(ctx context.Context, done chan error) {
 							internalglog.LogInfof("llm_response: created new chunk %d for fragmented data, size=%d, total received=%d", chunkIdx, event.ChunkLen, bucket.received)
 						}
 					} else {
-						// Only add chunk if we haven't seen this index before (prevent duplicates)
-						if _, exists := bucket.chunkMap[chunkIdx]; !exists {
+						// Check if chunk exists and if data is different (SSL fragmentation case)
+						if existingData, exists := bucket.chunkMap[chunkIdx]; exists {
+							newData := event.Buf[:event.ChunkLen]
+
+							// Compare the data - if it's exactly the same, it's a true duplicate
+							if len(existingData) == len(newData) && bytes.Equal(existingData, newData) {
+								internalglog.LogInfof("llm_response: true duplicate chunk %d ignored (same data)", chunkIdx)
+								bucket.mu.Unlock() // Unlock before breaking
+								break              // Exit early for true duplicates
+							} else {
+								// Different data - this is SSL fragmentation, append it
+								combinedData := make([]byte, len(existingData)+len(newData))
+								copy(combinedData, existingData)
+								copy(combinedData[len(existingData):], newData)
+								bucket.chunkMap[chunkIdx] = combinedData
+								bucket.received += int(event.ChunkLen)
+								internalglog.LogInfof("llm_response: appended %d bytes to existing chunk %d (SSL fragmentation), new size=%d, total received=%d", event.ChunkLen, chunkIdx, len(combinedData), bucket.received)
+							}
+						} else {
+							// New chunk
 							bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
 							bucket.received += int(event.ChunkLen)
 							internalglog.LogInfof("llm_response: added chunk %d, size=%d, total received=%d/%d", chunkIdx, event.ChunkLen, bucket.received, bucket.total)
-						} else {
-							internalglog.LogInfof("llm_response: duplicate chunk %d ignored", chunkIdx)
-							bucket.mu.Unlock() // Unlock before breaking
-							break              // Exit early for duplicates
 						}
 					}
 
