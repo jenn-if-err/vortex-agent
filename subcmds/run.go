@@ -1278,13 +1278,21 @@ func run(ctx context.Context, done chan error) {
 							return indices
 						}())
 
-						for order := minOrder; order <= maxOrder; order++ {
-							if chunk, exists := chunkMap[order]; exists {
-								first16 := chunk
-								if len(chunk) > 16 {
-									first16 = chunk[:16]
+						// Debug: Log min/max values to catch potential infinite loops
+						internalglog.LogInfof("llm_response: debug minOrder=%d, maxOrder=%d, chunkMapSize=%d", minOrder, maxOrder, len(chunkMap))
+
+						// Safety check for chunk details loop
+						if minOrder == int(^uint(0)>>1) || maxOrder < minOrder || (maxOrder-minOrder) > 1000 {
+							internalglog.LogInfof("llm_response: invalid min/max order values, skipping chunk details")
+						} else {
+							for order := minOrder; order <= maxOrder; order++ {
+								if chunk, exists := chunkMap[order]; exists {
+									first16 := chunk
+									if len(chunk) > 16 {
+										first16 = chunk[:16]
+									}
+									internalglog.LogInfof("  chunk %d: size=%d, first 16 bytes: % x", order, len(chunk), first16)
 								}
-								internalglog.LogInfof("  chunk %d: size=%d, first 16 bytes: % x", order, len(chunk), first16)
 							}
 						}
 
@@ -1301,8 +1309,9 @@ func run(ctx context.Context, done chan error) {
 							}
 						}
 
-						if hasValidIndices {
-							// Use eBPF indices
+						if hasValidIndices && minOrder != int(^uint(0)>>1) && maxOrder >= minOrder && (maxOrder-minOrder) <= 1000 {
+							// Use eBPF indices - with safety check
+							internalglog.LogInfof("llm_response: using eBPF indices for chunk ordering")
 							for order := minOrder; order <= maxOrder; order++ {
 								if chunk, exists := chunkMap[order]; exists {
 									orderedChunks = append(orderedChunks, chunk)
