@@ -1048,6 +1048,14 @@ func run(ctx context.Context, done chan error) {
 					internalglog.LogInfof("llm_response: debug - event.ChunkIdx=%d, event.ChunkLen=%d, event.TotalLen=%d",
 						event.ChunkIdx, event.ChunkLen, event.TotalLen)
 
+					// Check for final terminator chunk (like "0\r\n\r\n")
+					if event.TotalLen <= 10 && event.ChunkLen <= 10 {
+						content := string(event.Buf[:event.ChunkLen])
+						if strings.Contains(content, "0\r\n") || strings.Contains(content, "0\n") || strings.TrimSpace(content) == "0" {
+							internalglog.LogInfof("llm_response: detected final terminator chunk, processing to complete response")
+						}
+					}
+
 					if eventState[key].http2.Load() == 1 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
 						buf := bytes.NewReader(event.Buf[:])
 						header := make([]byte, 9)
