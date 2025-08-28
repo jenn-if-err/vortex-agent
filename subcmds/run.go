@@ -1227,7 +1227,7 @@ func run(ctx context.Context, done chan error) {
 					} else {
 						internalglog.LogInfof("llm_response: duplicate chunk %d ignored", chunkIdx)
 						bucket.mu.Unlock() // Unlock before breaking
-						break // Exit early for duplicates
+						break              // Exit early for duplicates
 					}
 
 					// Check if we should process (either complete or timeout)
@@ -1241,7 +1241,7 @@ func run(ctx context.Context, done chan error) {
 					} else {
 						internalglog.LogInfof("llm_response: waiting for more chunks (%d/%d bytes)", bucket.received, bucket.total)
 						bucket.mu.Unlock() // Unlock before breaking
-						break // Wait for more chunks
+						break              // Wait for more chunks
 					}
 
 					// Only process when shouldProcess is true AND not already processing
