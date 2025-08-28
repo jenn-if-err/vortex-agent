@@ -107,6 +107,8 @@ type responseBucket struct {
 	received   int
 	total      int
 	lastUpdate time.Time
+	mu         *sync.Mutex // mutex for thread safety
+	processing bool        // flag to prevent duplicate processing
 }
 
 func RunCmd() *cobra.Command {
@@ -1147,19 +1149,22 @@ func run(ctx context.Context, done chan error) {
 						}
 					}
 
+					// Use a mutex to synchronize bucket access to prevent race conditions
 					bucketAny, _ := responseMap.LoadOrStore(respKey, &responseBucket{
 						total:      int(event.TotalLen),
 						lastUpdate: time.Now(),
+						chunkMap:   make(map[int][]byte),
+						mu:         &sync.Mutex{},
 					})
 					bucket = bucketAny.(*responseBucket)
+
+					// Lock the bucket to prevent concurrent access
+					bucket.mu.Lock()
+					defer bucket.mu.Unlock()
 
 					// Update last activity time
 					bucket.lastUpdate = time.Now()
 
-					// Store chunk directly in map using its eBPF index for proper ordering
-					if bucket.chunkMap == nil {
-						bucket.chunkMap = make(map[int][]byte)
-					}
 					chunkIdx := int(event.ChunkIdx)
 
 					// Only add chunk if we haven't seen this index before (prevent duplicates)
@@ -1169,6 +1174,7 @@ func run(ctx context.Context, done chan error) {
 						internalglog.LogInfof("llm_response: added chunk %d, size=%d, total received=%d/%d", chunkIdx, event.ChunkLen, bucket.received, bucket.total)
 					} else {
 						internalglog.LogInfof("llm_response: duplicate chunk %d ignored", chunkIdx)
+						break // Exit early for duplicates
 					}
 
 					// Check if we should process (either complete or timeout)
@@ -1184,8 +1190,9 @@ func run(ctx context.Context, done chan error) {
 						break // Wait for more chunks
 					}
 
-					// Only process when shouldProcess is true
-					if shouldProcess {
+					// Only process when shouldProcess is true AND not already processing
+					if shouldProcess && !bucket.processing {
+						bucket.processing = true // Mark as processing to prevent duplicates
 						// Use the chunk map directly - no need for additional mapping
 						chunkMap := bucket.chunkMap
 
@@ -1215,6 +1222,14 @@ func run(ctx context.Context, done chan error) {
 
 						// Log chunk collection details with CORRECT ordering
 						internalglog.LogInfof("llm_response: chunk collection details:")
+						internalglog.LogInfof("llm_response: available chunk indices: %v", func() []int {
+							var indices []int
+							for idx := range chunkMap {
+								indices = append(indices, idx)
+							}
+							return indices
+						}())
+
 						for order := minOrder; order <= maxOrder; order++ {
 							if chunk, exists := chunkMap[order]; exists {
 								first16 := chunk
