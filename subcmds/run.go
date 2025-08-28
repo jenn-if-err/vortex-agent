@@ -1201,7 +1201,6 @@ func run(ctx context.Context, done chan error) {
 					internalglog.LogInfof("llm_response: about to lock bucket mutex")
 					bucket.mu.Lock()
 					internalglog.LogInfof("llm_response: bucket mutex locked successfully")
-					defer bucket.mu.Unlock()
 
 					// Update last activity time
 					bucket.lastUpdate = time.Now()
@@ -1227,6 +1226,7 @@ func run(ctx context.Context, done chan error) {
 						internalglog.LogInfof("llm_response: checking if processing should start - received=%d, total=%d, hasAll=%v", bucket.received, bucket.total, bucket.received >= bucket.total)
 					} else {
 						internalglog.LogInfof("llm_response: duplicate chunk %d ignored", chunkIdx)
+						bucket.mu.Unlock() // Unlock before breaking
 						break // Exit early for duplicates
 					}
 
@@ -1240,6 +1240,7 @@ func run(ctx context.Context, done chan error) {
 						internalglog.LogInfof("llm_response: timeout reached, processing partial response (%d/%d bytes)", bucket.received, bucket.total)
 					} else {
 						internalglog.LogInfof("llm_response: waiting for more chunks (%d/%d bytes)", bucket.received, bucket.total)
+						bucket.mu.Unlock() // Unlock before breaking
 						break // Wait for more chunks
 					}
 
@@ -1273,6 +1274,7 @@ func run(ctx context.Context, done chan error) {
 
 						if len(missingChunks) > 0 {
 							internalglog.LogInfof("llm_response: missing chunk indices %v, waiting for more data", missingChunks)
+							bucket.mu.Unlock() // Unlock before breaking
 							break
 						}
 
@@ -1505,6 +1507,7 @@ func run(ctx context.Context, done chan error) {
 						}
 
 						responseMap.Delete(respKey)
+						bucket.mu.Unlock() // Unlock after successful processing
 					}
 					break
 
