@@ -1145,53 +1145,41 @@ func run(ctx context.Context, done chan error) {
 					// use connection-based key, but add a sequence number for multiple responses
 					baseKey := fmt.Sprintf("%v/%v/%v/%v/%v/%v", event.Tgid, event.Pid, event.Saddr, event.Daddr, event.Sport, event.Dport)
 
-					// If this is a new HTTP response, we need to find or create a new bucket
+					// Simplified bucket management - use same key for all chunks from same connection
 					var respKey string
 					var bucket *responseBucket
 
-					if isNewResponse {
-						// This is a new HTTP response - find existing bucket for this connection or create new one
-						// Don't delete existing buckets immediately as chunks might still be arriving
-						var foundKey string
-						responseMap.Range(func(key, value interface{}) bool {
-							if strings.HasPrefix(key.(string), baseKey) {
-								bucket := value.(*responseBucket)
-								bucket.mu.Lock()
-								// Only reuse if bucket is not yet complete
-								if bucket.received < bucket.total {
-									foundKey = key.(string)
-									bucket.mu.Unlock()
-									return false // stop iteration
-								}
-								bucket.mu.Unlock()
-							}
-							return true
-						})
-
-						if foundKey != "" {
-							respKey = foundKey
-							internalglog.LogInfof("llm_response: reusing existing bucket for HTTP response, key=%s", respKey)
-						} else {
-							respKey = fmt.Sprintf("%s/t%d", baseKey, time.Now().UnixNano())
-							internalglog.LogInfof("llm_response: new HTTP response detected, key=%s", respKey)
-						}
-					} else {
-						// This is a continuation of an existing response - find the existing bucket
-						var foundKey string
-						responseMap.Range(func(key, value interface{}) bool {
-							if strings.HasPrefix(key.(string), baseKey) {
+					// Always try to find existing bucket first, regardless of whether this looks like HTTP headers
+					var foundKey string
+					responseMap.Range(func(key, value interface{}) bool {
+						if strings.HasPrefix(key.(string), baseKey) {
+							bucket := value.(*responseBucket)
+							bucket.mu.Lock()
+							// Only reuse if bucket is not yet complete
+							if bucket.received < bucket.total {
 								foundKey = key.(string)
+								bucket.mu.Unlock()
 								return false // stop iteration
 							}
-							return true
-						})
+							bucket.mu.Unlock()
+						}
+						return true
+					})
 
-						if foundKey != "" {
-							respKey = foundKey
+					if foundKey != "" {
+						respKey = foundKey
+						if isNewResponse {
+							internalglog.LogInfof("llm_response: found existing bucket for HTTP response chunk, key=%s", respKey)
 						} else {
-							// No existing bucket found, create one (shouldn't happen normally)
-							respKey = fmt.Sprintf("%s/t%d", baseKey, time.Now().UnixNano())
-							internalglog.LogInfof("llm_response: no existing bucket found, creating new one")
+							internalglog.LogInfof("llm_response: found existing bucket for continuation chunk, key=%s", respKey)
+						}
+					} else {
+						// No existing bucket found, create one
+						respKey = fmt.Sprintf("%s/t%d", baseKey, time.Now().UnixNano())
+						if isNewResponse {
+							internalglog.LogInfof("llm_response: new HTTP response detected, creating bucket, key=%s", respKey)
+						} else {
+							internalglog.LogInfof("llm_response: no existing bucket found, creating new one for chunk, key=%s", respKey)
 						}
 					}
 
@@ -1267,7 +1255,7 @@ func run(ctx context.Context, done chan error) {
 
 						missingChunks := []int{}
 						// Only check for missing chunks if we have valid min/max values
-						if minOrder != int(^uint(0) >> 1) && maxOrder >= minOrder {
+						if minOrder != int(^uint(0)>>1) && maxOrder >= minOrder {
 							for i := minOrder; i <= maxOrder; i++ {
 								if _, exists := chunkMap[i]; !exists {
 									missingChunks = append(missingChunks, i)
