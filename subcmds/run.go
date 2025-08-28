@@ -1296,25 +1296,25 @@ func run(ctx context.Context, done chan error) {
 						internalglog.LogInfof("llm_response: assigned fallback index %d", chunkIdx)
 					}
 
-					// Only add chunk if we haven't seen this index before (prevent duplicates)
-					// Exception: allow terminator chunks even if index exists
-					if _, exists := bucket.chunkMap[chunkIdx]; !exists || isTerminatorChunk {
-						if exists && isTerminatorChunk {
-							internalglog.LogInfof("llm_response: overriding duplicate chunk %d with terminator data", chunkIdx)
-						}
-						bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
-						if !exists {
-							bucket.received += int(event.ChunkLen)
-						}
-						internalglog.LogInfof("llm_response: added chunk %d, size=%d, total received=%d/%d", chunkIdx, event.ChunkLen, bucket.received, bucket.total)
-
-						// Debug: Always log the processing check decision
-						internalglog.LogInfof("llm_response: checking if processing should start - received=%d, total=%d, hasAll=%v", bucket.received, bucket.total, bucket.received >= bucket.total)
+					// Handle terminator chunks differently - don't store them, just mark completion
+					if isTerminatorChunk {
+						internalglog.LogInfof("llm_response: terminator chunk detected, marking response complete without storing terminator data")
+						// Don't store terminator data, just trigger completion
 					} else {
-						internalglog.LogInfof("llm_response: duplicate chunk %d ignored", chunkIdx)
-						bucket.mu.Unlock() // Unlock before breaking
-						break              // Exit early for duplicates
+						// Only add chunk if we haven't seen this index before (prevent duplicates)
+						if _, exists := bucket.chunkMap[chunkIdx]; !exists {
+							bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
+							bucket.received += int(event.ChunkLen)
+							internalglog.LogInfof("llm_response: added chunk %d, size=%d, total received=%d/%d", chunkIdx, event.ChunkLen, bucket.received, bucket.total)
+						} else {
+							internalglog.LogInfof("llm_response: duplicate chunk %d ignored", chunkIdx)
+							bucket.mu.Unlock() // Unlock before breaking
+							break              // Exit early for duplicates
+						}
 					}
+
+					// Debug: Always log the processing check decision
+					internalglog.LogInfof("llm_response: checking if processing should start - received=%d, total=%d, hasAll=%v, isTerminator=%v", bucket.received, bucket.total, bucket.received >= bucket.total, isTerminatorChunk)
 
 					// Check if we should process (complete chunked response or timeout)
 					shouldProcess := false
