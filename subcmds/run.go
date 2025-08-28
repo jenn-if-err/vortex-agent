@@ -1866,16 +1866,6 @@ func isChunkedResponse(bucket *responseBucket) bool {
 
 // isChunkedResponseComplete checks if we have received a complete chunked response
 func isChunkedResponseComplete(bucket *responseBucket) bool {
-	// First, check if any individual chunk contains a terminator pattern
-	// This handles cases where the final "0\r\n" chunk comes as a separate SSL operation
-	for _, chunkData := range bucket.chunkMap {
-		chunkStr := strings.TrimSpace(string(chunkData))
-		if chunkStr == "0" || strings.Contains(chunkStr, "0\r\n") || strings.Contains(chunkStr, "0\n") {
-			fmt.Printf("Chunked response complete (terminator found in individual chunk)\n")
-			return true
-		}
-	}
-
 	// Combine all chunks to form the raw response
 	var combinedData []byte
 
