@@ -1313,35 +1313,21 @@ func run(ctx context.Context, done chan error) {
 						// SSL fragmentation can split HTTP chunks across SSL operations, so we can't rely on SSL chunk indices
 						internalglog.LogInfof("llm_response: SSL fragmentation detected (bucket.total=%d, event.TotalLen=%d), appending data sequentially", bucket.total, event.TotalLen)
 
-						// Find the highest existing chunk index to append this fragment
-						maxIdx := -1
-						for idx := range bucket.chunkMap {
-							if idx != 9999 && idx > maxIdx { // Skip terminator index
-								maxIdx = idx
-							}
-						}
-
-						// If we have existing chunks, append to the last one, otherwise create chunk 0
-						if maxIdx >= 0 {
-							if existingData, exists := bucket.chunkMap[maxIdx]; exists {
-								// Append new data to the last chunk to preserve sequential order
-								combinedData := make([]byte, len(existingData)+int(event.ChunkLen))
-								copy(combinedData, existingData)
-								copy(combinedData[len(existingData):], event.Buf[:event.ChunkLen])
-								bucket.chunkMap[maxIdx] = combinedData
-								bucket.received += int(event.ChunkLen)
-								internalglog.LogInfof("llm_response: appended %d bytes to chunk %d (sequential), new size=%d, total received=%d", event.ChunkLen, maxIdx, len(combinedData), bucket.received)
-							} else {
-								// This shouldn't happen, but create a new chunk as fallback
-								bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
-								bucket.received += int(event.ChunkLen)
-								internalglog.LogInfof("llm_response: created new chunk %d for fragmented data, size=%d, total received=%d", chunkIdx, event.ChunkLen, bucket.received)
-							}
-						} else {
-							// No existing chunks, create the first one
-							bucket.chunkMap[0] = event.Buf[:event.ChunkLen]
+						// For SSL fragmentation, use the event's chunk index if it makes sense, otherwise append sequentially
+						// This preserves the logical chunk structure while handling fragmentation
+						if existingData, exists := bucket.chunkMap[chunkIdx]; exists {
+							// Append to existing chunk with same index
+							combinedData := make([]byte, len(existingData)+int(event.ChunkLen))
+							copy(combinedData, existingData)
+							copy(combinedData[len(existingData):], event.Buf[:event.ChunkLen])
+							bucket.chunkMap[chunkIdx] = combinedData
 							bucket.received += int(event.ChunkLen)
-							internalglog.LogInfof("llm_response: created first chunk 0 for fragmented data, size=%d, total received=%d", event.ChunkLen, bucket.received)
+							internalglog.LogInfof("llm_response: appended %d bytes to chunk %d (SSL fragmentation), new size=%d, total received=%d", event.ChunkLen, chunkIdx, len(combinedData), bucket.received)
+						} else {
+							// Create new chunk at the specified index
+							bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
+							bucket.received += int(event.ChunkLen)
+							internalglog.LogInfof("llm_response: created new chunk %d for fragmented data, size=%d, total received=%d", chunkIdx, event.ChunkLen, bucket.received)
 						}
 					} else {
 						// Check if chunk exists and if data is different (SSL fragmentation case)/
