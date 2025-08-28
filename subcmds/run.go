@@ -102,7 +102,8 @@ type ContainerInfo struct {
 
 type responseBucket struct {
 	chunks     [][]byte
-	chunkOrder []int // track the order of chunks based on idx
+	chunkOrder []int          // track the order of chunks based on idx
+	chunkMap   map[int][]byte // direct mapping of chunk index to chunk data
 	received   int
 	total      int
 	lastUpdate time.Time
@@ -1155,9 +1156,12 @@ func run(ctx context.Context, done chan error) {
 					// Update last activity time
 					bucket.lastUpdate = time.Now()
 
-					// Add chunk with its index for ordering
-					bucket.chunks = append(bucket.chunks, event.Buf[:event.ChunkLen])
-					bucket.chunkOrder = append(bucket.chunkOrder, int(event.ChunkIdx))
+					// Store chunk directly in map using its eBPF index for proper ordering
+					if bucket.chunkMap == nil {
+						bucket.chunkMap = make(map[int][]byte)
+					}
+					chunkIdx := int(event.ChunkIdx)
+					bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
 					bucket.received += int(event.ChunkLen)
 
 					// Check if we should process (either complete or timeout)
@@ -1175,21 +1179,10 @@ func run(ctx context.Context, done chan error) {
 
 					// Only process when shouldProcess is true
 					if shouldProcess {
-						// Enhanced chunk map with completeness checking
-						chunkMap := make(map[int][]byte)
-						for i, chunk := range bucket.chunks {
-							// Use the actual chunk order from the eBPF event
-							if i < len(bucket.chunkOrder) {
-								order := bucket.chunkOrder[i] // This is the correct chunk index
-								chunkMap[order] = chunk
-							} else {
-								// Fallback to array index if chunkOrder is somehow missing
-								internalglog.LogInfof("llm_response: warning - missing chunkOrder for chunk %d", i)
-								chunkMap[i] = chunk
-							}
-						}
+						// Use the chunk map directly - no need for additional mapping
+						chunkMap := bucket.chunkMap
 
-						// Check for missing chunk indices
+						// Check for missing chunk indicesccc
 						maxOrder := -1
 						minOrder := int(^uint(0) >> 1) // max int
 						for order := range chunkMap {
