@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1166,165 +1165,236 @@ func run(ctx context.Context, done chan error) {
 					if bucket.received >= bucket.total {
 						shouldProcess = true
 						internalglog.LogInfof("llm_response: complete response received (%d/%d bytes)", bucket.received, bucket.total)
-					} else if time.Since(bucket.lastUpdate) > 5*time.Second {
+					} else if time.Since(bucket.lastUpdate) > 30*time.Second { // Use longer timeout
 						shouldProcess = true
 						internalglog.LogInfof("llm_response: timeout reached, processing partial response (%d/%d bytes)", bucket.received, bucket.total)
 					} else {
 						internalglog.LogInfof("llm_response: waiting for more chunks (%d/%d bytes)", bucket.received, bucket.total)
-						break
+						break // Wait for more chunks
 					}
 
-					if !shouldProcess {
-						break
-					}
-
-					// Debug: log each chunk's index and size
-					for idx, chunk := range bucket.chunks {
-						order := -1
-						if idx < len(bucket.chunkOrder) {
-							order = bucket.chunkOrder[idx]
+					// Only process when shouldProcess is true
+					if shouldProcess {
+						// Enhanced chunk map with completeness checking
+						chunkMap := make(map[int][]byte)
+						for i, chunk := range bucket.chunks {
+							order := i
+							if i < len(bucket.chunkOrder) {
+								order = bucket.chunkOrder[i]
+							}
+							chunkMap[order] = chunk
 						}
-						internalglog.LogInfof("llm_response: chunk %d (order=%d) size=%d", idx, order, len(chunk))
-					}
 
-					// Sort chunks by their order before combining
-					type chunkWithOrder struct {
-						data  []byte
-						order int
-					}
-
-					orderedChunks := make([]chunkWithOrder, len(bucket.chunks))
-					for i := 0; i < len(bucket.chunks); i++ {
-						order := i // default order if chunkOrder is missing
-						if i < len(bucket.chunkOrder) {
-							order = bucket.chunkOrder[i]
+						// Check for missing chunk indices
+						maxOrder := -1
+						for order := range chunkMap {
+							if order > maxOrder {
+								maxOrder = order
+							}
 						}
-						orderedChunks[i] = chunkWithOrder{
-							data:  bucket.chunks[i],
-							order: order,
+
+						missingChunks := []int{}
+						for i := 0; i <= maxOrder; i++ {
+							if _, exists := chunkMap[i]; !exists {
+								missingChunks = append(missingChunks, i)
+							}
 						}
-					}
 
-					// Sort by order
-					sort.Slice(orderedChunks, func(i, j int) bool {
-						return orderedChunks[i].order < orderedChunks[j].order
-					})
+						if len(missingChunks) > 0 {
+							internalglog.LogInfof("llm_response: missing chunk indices %v, waiting for more data", missingChunks)
+							break
+						}
 
-					// Extract sorted chunks
-					sortedChunks := make([][]byte, len(orderedChunks))
-					for i, chunk := range orderedChunks {
-						sortedChunks[i] = chunk.data
-						internalglog.LogInfof("llm_response: sorted chunk %d (original order=%d) size=%d", i, chunk.order, len(chunk.data))
-					}
+						// Log chunk collection details
+						internalglog.LogInfof("llm_response: chunk collection details:")
+						for order := 0; order <= maxOrder; order++ {
+							if chunk, exists := chunkMap[order]; exists {
+								first16 := chunk
+								if len(chunk) > 16 {
+									first16 = chunk[:16]
+								}
+								internalglog.LogInfof("  chunk %d: size=%d, first 16 bytes: % x", order, len(chunk), first16)
+							}
+						}
 
-					// Combine all chunks in correct order
-					full := bytes.Join(sortedChunks, nil)
-					internalglog.LogInfof("llm_response: combined full response size=%d", len(full)) // Separate headers and body
-					i := bytes.Index(full, []byte("\r\n\r\n"))
-					var headers string
-					var body []byte
-					var rawBody []byte
-					if i > 0 {
-						headers = string(full[:i])
-						rawBody = full[i+4:]
-						if strings.Contains(headers, "Transfer-Encoding: chunked") {
-							internalglog.LogInfof("llm_response: decoding chunked body, rawBody size=%d", len(rawBody))
-							decoded, err := decodeChunkedBody(rawBody)
-							if err == nil {
-								body = decoded
-								internalglog.LogInfof("llm_response: chunked decoding successful, decoded size=%d", len(body))
+						// Combine chunks in correct order using the chunk map
+						var combinedChunks [][]byte
+						for order := 0; order <= maxOrder; order++ {
+							if chunk, exists := chunkMap[order]; exists {
+								combinedChunks = append(combinedChunks, chunk)
+							}
+						}
+
+						full := bytes.Join(combinedChunks, nil)
+						internalglog.LogInfof("llm_response: combined full response size=%d", len(full))
+
+						// Log full hex dump (up to 2048 bytes for debugging)
+						dumpSize := len(full)
+						if dumpSize > 2048 {
+							dumpSize = 2048
+						}
+						internalglog.LogInfof("llm_response: combined full response hex dump (first %d bytes): % x", dumpSize, full[:dumpSize])
+
+						// Separate headers and body
+						i := bytes.Index(full, []byte("\r\n\r\n"))
+						var headers string
+						var body []byte
+						var rawBody []byte
+
+						if i > 0 {
+							headers = string(full[:i])
+							rawBody = full[i+4:]
+
+							if strings.Contains(headers, "Transfer-Encoding: chunked") {
+								internalglog.LogInfof("llm_response: decoding chunked body, rawBody size=%d", len(rawBody))
+								decoded, err := decodeChunkedBody(rawBody)
+								if err == nil {
+									body = decoded
+									internalglog.LogInfof("llm_response: chunked decoding successful, decoded size=%d", len(body))
+								} else {
+									internalglog.LogInfof("llm_response: chunked decoding failed: %v", err)
+									body = rawBody
+								}
 							} else {
-								internalglog.LogInfof("llm_response: chunked decoding failed: %v", err)
-								body = rawBody // fallback
+								body = rawBody
 							}
 						} else {
-							body = rawBody
+							body = full
 						}
-					} else {
-						body = full
-					}
 
-					// Check for gzip encoding
-					if strings.Contains(headers, "Content-Encoding: gzip") {
-						internalglog.LogInfof("llm_response: gzip detected, body size before decompression=%d", len(body))
-						reader, err := gzip.NewReader(bytes.NewReader(body))
-						if err == nil {
-							decompressed, err := io.ReadAll(reader)
-							reader.Close()
+						// Enhanced gzip handling with buffering
+						if strings.Contains(headers, "Content-Encoding: gzip") {
+							internalglog.LogInfof("llm_response: gzip detected, body size before decompression=%d", len(body))
+
+							// Log gzip header and trailer
+							if len(body) >= 10 {
+								internalglog.LogInfof("llm_response: gzip header (first 32 bytes): % x", body[:min(32, len(body))])
+							}
+							if len(body) >= 8 {
+								internalglog.LogInfof("llm_response: gzip trailer (last 8 bytes): % x", body[len(body)-8:])
+							}
+
+							// Check if gzip stream looks valid
+							if len(body) < 10 || body[0] != 0x1f || body[1] != 0x8b {
+								internalglog.LogInfof("llm_response: warning - gzip stream does not start with valid header (1f 8b)")
+							}
+
+							reader, err := gzip.NewReader(bytes.NewReader(body))
 							if err == nil {
-								body = decompressed
-								internalglog.LogInfof("llm_response: gzip decompression successful, decompressed size=%d", len(body))
+								decompressed, err := io.ReadAll(reader)
+								reader.Close()
+								if err == nil {
+									body = decompressed
+									internalglog.LogInfof("llm_response: gzip decompression successful, decompressed size=%d", len(body))
+								} else {
+									internalglog.LogInfof("llm_response: gzip read failed: %v", err)
+
+									// Handle incomplete gzip streams
+									if strings.Contains(err.Error(), "unexpected EOF") {
+										gzipBufferKey := fmt.Sprintf("%v/%v/%v/%v/%v/%v/gzip", event.Tgid, event.Pid, event.Saddr, event.Daddr, event.Sport, event.Dport)
+
+										if existingBufferAny, exists := responseMap.Load(gzipBufferKey); exists {
+											existingBuffer := existingBufferAny.(*responseBucket)
+											combinedGzipData := append(existingBuffer.chunks[0], body...)
+
+											reader, err := gzip.NewReader(bytes.NewReader(combinedGzipData))
+											if err == nil {
+												decompressed, err := io.ReadAll(reader)
+												reader.Close()
+												if err == nil {
+													body = decompressed
+													internalglog.LogInfof("llm_response: gzip decompression successful with buffered data, decompressed size=%d", len(body))
+													responseMap.Delete(gzipBufferKey)
+												} else {
+													// Update buffer and wait for more data
+													existingBuffer.chunks[0] = combinedGzipData
+													existingBuffer.lastUpdate = time.Now()
+													break
+												}
+											} else {
+												break
+											}
+										} else {
+											// Create new gzip buffer
+											gzipBuffer := &responseBucket{
+												chunks:     [][]byte{body},
+												received:   len(body),
+												total:      len(body),
+												lastUpdate: time.Now(),
+											}
+											responseMap.Store(gzipBufferKey, gzipBuffer)
+											break
+										}
+									}
+								}
 							} else {
-								internalglog.LogInfof("llm_response: gzip read failed: %v", err)
+								internalglog.LogInfof("llm_response: gzip reader creation failed: %v", err)
 							}
-						} else {
-							internalglog.LogInfof("llm_response: gzip reader creation failed: %v", err)
 						}
-					}
-					internalglog.LogInfof("llm_response: headers=%q", headers)
-					internalglog.LogInfof("llm_response: body=%q", body)
 
-					// Validate content before saving - ensure it's valid UTF-8 text
-					contentToSave := string(body)
-					if !utf8.Valid(body) {
-						internalglog.LogInfof("llm_response: invalid UTF-8 content, storing as base64")
-						contentToSave = base64.StdEncoding.EncodeToString(body)
-					} else if len(body) == 0 {
-						internalglog.LogInfof("llm_response: empty body, skipping save")
-						continue
-					}
+						// Validate content and save
+						contentToSave := string(body)
+						if !utf8.Valid(body) {
+							internalglog.LogInfof("llm_response: invalid UTF-8 content, storing as base64")
+							contentToSave = base64.StdEncoding.EncodeToString(body)
+						} else if len(body) == 0 {
+							internalglog.LogInfof("llm_response: empty body, skipping save")
+							responseMap.Delete(respKey)
+							break
+						}
 
-					// Save to Spanner (llm_response)
-					if params.RunfSaveDb {
-						var containerName, containerImage string
-						func() {
-							if !isk8s {
-								return
+						// Save to Spanner (llm_response)
+						if params.RunfSaveDb {
+							var containerName, containerImage string
+							func() {
+								if !isk8s {
+									return
+								}
+								ipToContainerMtx.Lock()
+								defer ipToContainerMtx.Unlock()
+								info, ok := ipToContainer[internal.IntToIp(event.Saddr).String()]
+								if ok {
+									containerName = info.Name
+									containerImage = info.Image
+								}
+							}()
+
+							cols := []string{
+								"id",
+								"message_id",
+								"org_id",
+								"idx",
+								"comm",
+								"src_addr",
+								"dst_addr",
+								"container_name",
+								"container_image",
+								"content",
+								"created_at",
 							}
-							ipToContainerMtx.Lock()
-							defer ipToContainerMtx.Unlock()
-							info, ok := ipToContainer[internal.IntToIp(event.Saddr).String()]
-							if ok {
-								containerName = info.Name
-								containerImage = info.Image
+							vals := []any{
+								fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
+								fmt.Sprintf("%v", event.MessageId),
+								"",  // org_id
+								"0", // idx
+								fmt.Sprintf("%s", event.Comm),
+								fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
+								fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
+								containerName,
+								containerImage,
+								contentToSave,
+								"COMMIT_TIMESTAMP",
 							}
-						}()
+							mut := internal.SpannerPayload{
+								Table: "llm_response",
+								Cols:  cols,
+								Vals:  vals,
+							}
+							mutBufCh <- mut
+						}
 
-						cols := []string{
-							"id",
-							"message_id",
-							"org_id",
-							"idx",
-							"comm",
-							"src_addr",
-							"dst_addr",
-							"container_name",
-							"container_image",
-							"content",
-							"created_at",
-						}
-						vals := []any{
-							fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
-							fmt.Sprintf("%v", event.MessageId),
-							"",  // org_id
-							"0", // idx
-							fmt.Sprintf("%s", event.Comm),
-							fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
-							fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
-							containerName,
-							containerImage,
-							contentToSave,
-							"COMMIT_TIMESTAMP",
-						}
-						mut := internal.SpannerPayload{
-							Table: "llm_response",
-							Cols:  cols,
-							Vals:  vals,
-						}
-						mutBufCh <- mut
+						responseMap.Delete(respKey)
 					}
-
-					responseMap.Delete(respKey)
 					break
 
 				case TYPE_REPORT_READ_SOCKET_INFO:
