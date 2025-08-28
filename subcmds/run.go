@@ -1226,6 +1226,9 @@ func run(ctx context.Context, done chan error) {
 						bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
 						bucket.received += int(event.ChunkLen)
 						internalglog.LogInfof("llm_response: added chunk %d, size=%d, total received=%d/%d", chunkIdx, event.ChunkLen, bucket.received, bucket.total)
+
+						// Debug: Always log the processing check decision
+						internalglog.LogInfof("llm_response: checking if processing should start - received=%d, total=%d, hasAll=%v", bucket.received, bucket.total, bucket.received >= bucket.total)
 					} else {
 						internalglog.LogInfof("llm_response: duplicate chunk %d ignored", chunkIdx)
 						break // Exit early for duplicates
