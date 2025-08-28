@@ -1116,8 +1116,7 @@ func run(ctx context.Context, done chan error) {
 					var bucket *responseBucket
 
 					if isNewResponse {
-						// This is a new HTTP response - clean up any existing bucket for this connection
-						// and create a new one with a timestamp
+						// This is a new HTTP response - clean up any existing bucket for this connection and create a new one with a timestamp
 						responseMap.Range(func(key, value interface{}) bool {
 							if strings.HasPrefix(key.(string), baseKey) {
 								internalglog.LogInfof("llm_response: cleaning up previous response bucket for new HTTP response")
