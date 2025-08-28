@@ -1158,16 +1158,13 @@ func run(ctx context.Context, done chan error) {
 						if strings.HasPrefix(key.(string), baseKey) {
 							internalglog.LogInfof("llm_response: found matching key=%s", key.(string))
 							bucket := value.(*responseBucket)
-							bucket.mu.Lock()
-							// Only reuse if bucket is not yet complete
+							// Quick check without locking first
 							if bucket.received < bucket.total {
 								foundKey = key.(string)
-								internalglog.LogInfof("llm_response: bucket is incomplete, reusing key=%s", foundKey)
-								bucket.mu.Unlock()
+								internalglog.LogInfof("llm_response: bucket appears incomplete, reusing key=%s", foundKey)
 								return false // stop iteration
 							}
-							internalglog.LogInfof("llm_response: bucket is complete, continuing search")
-							bucket.mu.Unlock()
+							internalglog.LogInfof("llm_response: bucket appears complete, continuing search")
 						}
 						return true
 					})
