@@ -110,6 +110,7 @@ type responseBucket struct {
 	lastUpdate time.Time
 	mu         *sync.Mutex // mutex for thread safety
 	processing bool        // flag to prevent duplicate processing
+	processed  bool        // flag to indicate bucket has been processed and saved
 }
 
 func RunCmd() *cobra.Command {
@@ -834,8 +835,11 @@ func run(ctx context.Context, done chan error) {
 			now := time.Now()
 			responseMap.Range(func(key, value interface{}) bool {
 				bucket := value.(*responseBucket)
-				if now.Sub(bucket.lastUpdate) > 60*time.Second {
-					internalglog.LogInfof("llm_response: cleaning up stale bucket for key %v", key)
+				// Delete buckets that are either stale (>60s) or processed (>10s ago)
+				if now.Sub(bucket.lastUpdate) > 60*time.Second ||
+					(bucket.processed && now.Sub(bucket.lastUpdate) > 10*time.Second) {
+					internalglog.LogInfof("llm_response: cleaning up bucket for key %v (processed=%v, age=%v)",
+						key, bucket.processed, now.Sub(bucket.lastUpdate))
 					responseMap.Delete(key)
 				}
 				return true
@@ -1159,6 +1163,13 @@ func run(ctx context.Context, done chan error) {
 						if strings.HasPrefix(key.(string), baseKey) {
 							internalglog.LogInfof("llm_response: found matching key=%s", key.(string))
 							bucket := value.(*responseBucket)
+
+							// Skip buckets that have already been processed
+							if bucket.processed {
+								internalglog.LogInfof("llm_response: bucket already processed, skipping key=%s", key.(string))
+								return true // continue iteration
+							}
+
 							// Quick check without locking first
 							if bucket.received < bucket.total {
 								foundKey = key.(string)
@@ -1216,6 +1227,24 @@ func run(ctx context.Context, done chan error) {
 							internalglog.LogInfof("llm_response: found existing bucket for continuation chunk, key=%s", respKey)
 						}
 					} else {
+						// Check if we found any processed buckets - if so, this is likely a late SSL fragment
+						var foundProcessedBucket bool
+						responseMap.Range(func(key, value interface{}) bool {
+							if strings.HasPrefix(key.(string), baseKey) {
+								bucket := value.(*responseBucket)
+								if bucket.processed {
+									foundProcessedBucket = true
+									internalglog.LogInfof("llm_response: ignoring late SSL fragment for already processed response, key=%s", key.(string))
+									return false // stop iteration
+								}
+							}
+							return true
+						})
+
+						if foundProcessedBucket {
+							continue // skip this SSL event
+						}
+
 						// No existing bucket found, create one
 						respKey = fmt.Sprintf("%s/t%d", baseKey, time.Now().UnixNano())
 						if isNewResponse {
@@ -1510,7 +1539,7 @@ func run(ctx context.Context, done chan error) {
 							contentToSave = base64.StdEncoding.EncodeToString(body)
 						} else if len(body) == 0 {
 							internalglog.LogInfof("llm_response: empty body, skipping save")
-							responseMap.Delete(respKey)
+							bucket.processed = true
 							break
 						}
 
@@ -1564,7 +1593,8 @@ func run(ctx context.Context, done chan error) {
 							mutBufCh <- mut
 						}
 
-						responseMap.Delete(respKey)
+						// Mark bucket as processed instead of deleting immediately
+						bucket.processed = true
 						bucket.mu.Unlock() // Unlock after successful processing
 					}
 					break
