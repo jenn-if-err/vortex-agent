@@ -1300,6 +1300,18 @@ func run(ctx context.Context, done chan error) {
 					// this might be continuation data from SSL fragmentation
 					isSSLFragmentation := bucket.total != int(event.TotalLen)
 
+					// Also detect consolidation scenarios: if we already have an HTTP chunk and this is additional data,
+					// we should consolidate it to maintain HTTP stream continuity
+					shouldConsolidate := false
+					httpChunkIdx := -1
+					for idx, data := range bucket.chunkMap {
+						if idx != 9999 && len(data) >= 8 && string(data[:8]) == "HTTP/1.1" { // Skip terminator chunk
+							httpChunkIdx = idx
+							shouldConsolidate = true
+							break
+						}
+					}
+
 					// Handle terminator chunks - store them but with a special index
 					if isTerminatorChunk {
 						internalglog.LogInfof("llm_response: terminator chunk detected, storing with special index")
@@ -1308,36 +1320,35 @@ func run(ctx context.Context, done chan error) {
 						bucket.chunkMap[terminatorIdx] = event.Buf[:event.ChunkLen]
 						bucket.received += int(event.ChunkLen)
 						internalglog.LogInfof("llm_response: stored terminator chunk at index %d, size=%d", terminatorIdx, event.ChunkLen)
-					} else if isSSLFragmentation {
-						// For SSL fragmentation, we need to append data sequentially to preserve HTTP structure
+					} else if isSSLFragmentation || (shouldConsolidate && !isNewResponse) {
+						// For SSL fragmentation or consolidation, we need to append data sequentially to preserve HTTP structure
 						// SSL fragmentation can split HTTP chunks across SSL operations, so we can't rely on SSL chunk indices
-						internalglog.LogInfof("llm_response: SSL fragmentation detected (bucket.total=%d, event.TotalLen=%d), appending data sequentially", bucket.total, event.TotalLen)
-
-						// For SSL fragmentation, we MUST consolidate all data into a single continuous HTTP stream
-						// Find the HTTP headers chunk (should always be index 0) and append everything to it
-						var httpChunkIdx int = 0
-
-						// First, try to find the chunk that contains HTTP headers
-						for idx, data := range bucket.chunkMap {
-							if idx != 9999 && len(data) >= 8 && string(data[:8]) == "HTTP/1.1" { // Skip terminator chunk
-								httpChunkIdx = idx
-								break
-							}
+						if isSSLFragmentation {
+							internalglog.LogInfof("llm_response: SSL fragmentation detected (bucket.total=%d, event.TotalLen=%d), appending data sequentially", bucket.total, event.TotalLen)
+						} else {
+							internalglog.LogInfof("llm_response: consolidating additional data into HTTP chunk %d", httpChunkIdx)
 						}
 
-						if existingData, exists := bucket.chunkMap[httpChunkIdx]; exists {
+						// For SSL fragmentation/consolidation, we MUST consolidate all data into a single continuous HTTP stream
+						// Use the HTTP headers chunk we found, or default to index 0
+						targetChunkIdx := httpChunkIdx
+						if targetChunkIdx == -1 {
+							targetChunkIdx = 0
+						}
+
+						if existingData, exists := bucket.chunkMap[targetChunkIdx]; exists {
 							// Append to the HTTP headers chunk to maintain stream continuity
 							combinedData := make([]byte, len(existingData)+int(event.ChunkLen))
 							copy(combinedData, existingData)
 							copy(combinedData[len(existingData):], event.Buf[:event.ChunkLen])
-							bucket.chunkMap[httpChunkIdx] = combinedData
+							bucket.chunkMap[targetChunkIdx] = combinedData
 							bucket.received += int(event.ChunkLen)
-							internalglog.LogInfof("llm_response: appended %d bytes to HTTP chunk %d (SSL fragmentation), new size=%d, total received=%d", event.ChunkLen, httpChunkIdx, len(combinedData), bucket.received)
+							internalglog.LogInfof("llm_response: appended %d bytes to HTTP chunk %d (SSL fragmentation), new size=%d, total received=%d", event.ChunkLen, targetChunkIdx, len(combinedData), bucket.received)
 						} else {
 							// No HTTP chunk found yet, create one
-							bucket.chunkMap[httpChunkIdx] = event.Buf[:event.ChunkLen]
+							bucket.chunkMap[targetChunkIdx] = event.Buf[:event.ChunkLen]
 							bucket.received += int(event.ChunkLen)
-							internalglog.LogInfof("llm_response: created HTTP chunk %d for fragmented data, size=%d, total received=%d", httpChunkIdx, event.ChunkLen, bucket.received)
+							internalglog.LogInfof("llm_response: created HTTP chunk %d for fragmented data, size=%d, total received=%d", targetChunkIdx, event.ChunkLen, bucket.received)
 						}
 					} else {
 						// Check if chunk exists and if data is different (SSL fragmentation case)/
