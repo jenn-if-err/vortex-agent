@@ -1172,6 +1172,27 @@ func run(ctx context.Context, done chan error) {
 								return true // continue iteration
 							}
 
+							// Special case: if this is an HTTP headers chunk and we have an existing bucket
+							// without HTTP headers, consolidate them regardless of completion status
+							if isNewResponse {
+								bucket.mu.Lock()
+								hasHTTPHeaders := false
+								for _, chunkData := range bucket.chunkMap {
+									if len(chunkData) > 8 && bytes.HasPrefix(chunkData, []byte("HTTP/1.1")) {
+										hasHTTPHeaders = true
+										break
+									}
+								}
+								bucket.mu.Unlock()
+
+								if !hasHTTPHeaders {
+									foundKey = key.(string)
+									existingBucket = bucket
+									internalglog.LogInfof("llm_response: found bucket without HTTP headers, consolidating HTTP headers chunk, key=%s", foundKey)
+									return false // stop iteration
+								}
+							}
+
 							// Quick check without locking first
 							if bucket.received < bucket.total {
 								foundKey = key.(string)
@@ -1312,8 +1333,44 @@ func run(ctx context.Context, done chan error) {
 						}
 					}
 
-					// Handle terminator chunks - store them but with a special index
-					if isTerminatorChunk {
+					// Special case: if this is HTTP headers arriving after response data
+					if isNewResponse && httpChunkIdx == -1 && len(bucket.chunkMap) > 0 {
+						internalglog.LogInfof("llm_response: HTTP headers chunk detected, consolidating with existing response data")
+
+						// Consolidate all existing chunks into the HTTP headers chunk (chunk 0)
+						var consolidatedData []byte
+						consolidatedData = append(consolidatedData, event.Buf[:event.ChunkLen]...) // Start with HTTP headers
+
+						// Append all existing chunk data in order
+						var sortedIndices []int
+						for idx := range bucket.chunkMap {
+							if idx != 9999 { // Skip terminator
+								sortedIndices = append(sortedIndices, idx)
+							}
+						}
+
+						// Sort indices
+						for i := 0; i < len(sortedIndices); i++ {
+							for j := i + 1; j < len(sortedIndices); j++ {
+								if sortedIndices[i] > sortedIndices[j] {
+									sortedIndices[i], sortedIndices[j] = sortedIndices[j], sortedIndices[i]
+								}
+							}
+						}
+
+						// Append existing chunks to HTTP headers
+						for _, idx := range sortedIndices {
+							if chunk, exists := bucket.chunkMap[idx]; exists {
+								consolidatedData = append(consolidatedData, chunk...)
+							}
+						}
+
+						// Clear existing chunks and store consolidated data at index 0
+						bucket.chunkMap = make(map[int][]byte)
+						bucket.chunkMap[0] = consolidatedData
+						bucket.received = len(consolidatedData)
+						internalglog.LogInfof("llm_response: consolidated HTTP headers with existing data, total size=%d", len(consolidatedData))
+					} else if isTerminatorChunk {
 						internalglog.LogInfof("llm_response: terminator chunk detected, storing with special index")
 						// Store terminator data with a high index that won't conflict with real chunks
 						terminatorIdx := 9999
