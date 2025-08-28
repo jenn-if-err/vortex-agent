@@ -1161,8 +1161,15 @@ func run(ctx context.Context, done chan error) {
 						bucket.chunkMap = make(map[int][]byte)
 					}
 					chunkIdx := int(event.ChunkIdx)
-					bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
-					bucket.received += int(event.ChunkLen)
+
+					// Only add chunk if we haven't seen this index before (prevent duplicates)
+					if _, exists := bucket.chunkMap[chunkIdx]; !exists {
+						bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
+						bucket.received += int(event.ChunkLen)
+						internalglog.LogInfof("llm_response: added chunk %d, size=%d, total received=%d/%d", chunkIdx, event.ChunkLen, bucket.received, bucket.total)
+					} else {
+						internalglog.LogInfof("llm_response: duplicate chunk %d ignored", chunkIdx)
+					}
 
 					// Check if we should process (either complete or timeout)
 					shouldProcess := false
@@ -1229,6 +1236,16 @@ func run(ctx context.Context, done chan error) {
 						full := bytes.Join(combinedChunks, nil)
 						internalglog.LogInfof("llm_response: combined full response size=%d", len(full))
 
+						// Validate the HTTP structure before processing
+						httpStartLen := 20
+						if len(full) < httpStartLen {
+							httpStartLen = len(full)
+						}
+						httpStart := string(full[:httpStartLen])
+						if !strings.HasPrefix(httpStart, "HTTP/1.1") {
+							internalglog.LogInfof("llm_response: warning - combined response does not start with HTTP/1.1: %s", httpStart)
+						}
+
 						// Log full hex dump (up to 2048 bytes for debugging)
 						dumpSize := len(full)
 						if dumpSize > 2048 {
@@ -1292,40 +1309,8 @@ func run(ctx context.Context, done chan error) {
 
 									// Handle incomplete gzip streams
 									if strings.Contains(err.Error(), "unexpected EOF") {
-										gzipBufferKey := fmt.Sprintf("%v/%v/%v/%v/%v/%v/gzip", event.Tgid, event.Pid, event.Saddr, event.Daddr, event.Sport, event.Dport)
-
-										if existingBufferAny, exists := responseMap.Load(gzipBufferKey); exists {
-											existingBuffer := existingBufferAny.(*responseBucket)
-											combinedGzipData := append(existingBuffer.chunks[0], body...)
-
-											reader, err := gzip.NewReader(bytes.NewReader(combinedGzipData))
-											if err == nil {
-												decompressed, err := io.ReadAll(reader)
-												reader.Close()
-												if err == nil {
-													body = decompressed
-													internalglog.LogInfof("llm_response: gzip decompression successful with buffered data, decompressed size=%d", len(body))
-													responseMap.Delete(gzipBufferKey)
-												} else {
-													// Update buffer and wait for more data
-													existingBuffer.chunks[0] = combinedGzipData
-													existingBuffer.lastUpdate = time.Now()
-													break
-												}
-											} else {
-												break
-											}
-										} else {
-											// Create new gzip buffer
-											gzipBuffer := &responseBucket{
-												chunks:     [][]byte{body},
-												received:   len(body),
-												total:      len(body),
-												lastUpdate: time.Now(),
-											}
-											responseMap.Store(gzipBufferKey, gzipBuffer)
-											break
-										}
+										internalglog.LogInfof("llm_response: gzip stream incomplete, skipping buffering attempt")
+										// For now, just store as base64 instead of trying to buffer
 									}
 								}
 							} else {
