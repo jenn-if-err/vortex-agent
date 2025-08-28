@@ -1095,7 +1095,7 @@ func run(ctx context.Context, done chan error) {
 
 					logMsg := fmt.Sprintf("-> [uretprobe/SSL_read{_ex}] idx=%v, buf=%s, key=%v, totalLen=%v, chunkLen=%v, src=%v:%v, dst=%v:%v",
 						event.ChunkIdx,
-						internal.Readable(event.Buf[:readableChunkLen], readableChunkLen),
+						internal.Readable(event.Buf[:readableChunkLen], int64(readableChunkLen)),
 						key,
 						event.TotalLen,
 						event.ChunkLen,
