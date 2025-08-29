@@ -7,8 +7,8 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
-	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,7 +23,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -102,16 +101,19 @@ type ContainerInfo struct {
 }
 
 type responseBucket struct {
-	chunks     [][]byte
-	chunkOrder []int          // track the order of chunks based on idx
-	chunkMap   map[int][]byte // direct mapping of chunk index to chunk data
+	rawBody    []byte //continuous buffer for full HTTP response
 	received   int
-	total      int
+	total      int // can be filled from Content-Length if known
 	lastUpdate time.Time
-	mu         *sync.Mutex // mutex for thread safety
-	processing bool        // flag to prevent duplicate processing
-	processed  bool        // flag to indicate bucket has been processed and saved
+	mu         *sync.Mutex // thread safety
+	processing bool
+	processed  bool
 }
+
+var (
+	buckets    = make(map[string]*responseBucket) // key = connKey
+	bucketsMtx = &sync.Mutex{}
+)
 
 func RunCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -146,6 +148,9 @@ func run(ctx context.Context, done chan error) {
 	defer func() { done <- nil }()
 
 	glog.Infof("Running on [%v]", internal.Uname())
+
+	// Start background cleanup for response buckets
+	backgroundCleanup()
 
 	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
@@ -1036,89 +1041,11 @@ func run(ctx context.Context, done chan error) {
 				case TYPE_UPROBE_SSL_READ:
 
 				case TYPE_URETPROBE_SSL_READ:
-					if event.ChunkIdx == CHUNK_END_IDX {
-						continue
-					}
-
-					// Add validation logging for chunk index and length
-					if event.ChunkIdx < 0 || event.ChunkIdx > 1000 {
-						internalglog.LogInfof("llm_response: warning - suspicious chunk index: %d", event.ChunkIdx)
-					}
-					if event.ChunkLen < 0 || event.ChunkLen > 65536 {
-						internalglog.LogInfof("llm_response: warning - suspicious chunk length: %d", event.ChunkLen)
-					}
-
-					// Debug: Log raw event data to check for corruption
-					internalglog.LogInfof("llm_response: debug - event.ChunkIdx=%d, event.ChunkLen=%d, event.TotalLen=%d",
-						event.ChunkIdx, event.ChunkLen, event.TotalLen)
-
-					// Check for final terminator chunk (like "0\r\n\r\n")
-					isTerminatorChunk := false
-					if event.TotalLen <= 10 && event.ChunkLen <= 10 {
-						content := string(event.Buf[:event.ChunkLen])
-						if strings.Contains(content, "0\r\n") || strings.Contains(content, "0\n") || strings.TrimSpace(content) == "0" {
-							internalglog.LogInfof("llm_response: detected final terminator chunk, processing to complete response")
-							isTerminatorChunk = true
-						}
-					}
-
-					if eventState[key].http2.Load() == 1 && event.ChunkIdx == 0 && event.ChunkLen >= 9 {
-						buf := bytes.NewReader(event.Buf[:])
-						header := make([]byte, 9)
-						_, err = buf.Read(header)
-						if err != nil {
-							glog.Errorf("[uretprobe/SSL_read] incomplete frame header: %v", err)
-							continue
-						}
-
-						// Parse header: length is 24 bits (3 bytes), big-endian.
-						length := uint32(header[0])<<16 | uint32(header[1])<<8 | uint32(header[2])
-						frameType := header[3]
-						flags := header[4]
-						streamId := binary.BigEndian.Uint32(header[5:9]) & 0x7FFFFFFF // mask out the reserved bit
-
-						switch frameType {
-						case FrameData:
-						case FrameHeaders:
-						default:
-							if frameType >= FramePriority && frameType <= FrameContinuation {
-								continue
-							}
-						}
-
-						if frameType <= FrameContinuation {
-							var h strings.Builder
-							fmt.Fprintf(&h, "[uretprobe/SSL_read{_ex}] HTTP/2 Frame: type=0x%x, ", frameType)
-							fmt.Fprintf(&h, "length=%d, flags=0x%x, streamId=%d, ", length, flags, streamId)
-							fmt.Fprintf(&h, "totalLen=%v", event.TotalLen)
-							internalglog.LogInfo(h.String())
-						}
-					}
-
-					// Build log line more defensively to prevent corruption
-					line.Reset()
-
-					// Safely extract readable portion of buffer
-					readableChunkLen := int(event.ChunkLen)
-					if readableChunkLen < 0 {
-						readableChunkLen = 0
-					}
-					if readableChunkLen > len(event.Buf) {
-						readableChunkLen = len(event.Buf)
-					}
-
-					logMsg := fmt.Sprintf("-> [uretprobe/SSL_read{_ex}] idx=%v, buf=%s, key=%v, totalLen=%v, chunkLen=%v, src=%v:%v, dst=%v:%v",
-						event.ChunkIdx,
-						internal.Readable(event.Buf[:readableChunkLen], int64(readableChunkLen)),
-						key,
-						event.TotalLen,
-						event.ChunkLen,
-						internal.IntToIp(event.Daddr),
-						event.Dport,
-						internal.IntToIp(event.Saddr),
-						event.Sport)
-
-					fmt.Fprint(&line, logMsg)
+					fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v/%v, ", event.SeqNum, event.ChunkIdx)
+					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
+					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v, ", key, event.TotalLen, event.ChunkLen)
+					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
+					fmt.Fprintf(&line, "dst=%v:%v", internal.IntToIp(event.Saddr), event.Sport)
 					func() {
 						if !isk8s {
 							return
@@ -1143,671 +1070,56 @@ func run(ctx context.Context, done chan error) {
 						}
 					}()
 					internalglog.LogInfo(line.String())
+					// start collecting response chunks
+					connKey := fmt.Sprintf("%s:%d-%s:%d-%d",
+						internal.IntToIp(event.Saddr), event.Sport,
+						internal.IntToIp(event.Daddr), event.Dport,
+						event.Pid,
+					)
 
-					// Detect if this chunk starts a new HTTP response
-					chunkData := string(event.Buf[:event.ChunkLen])
-					isNewResponse := strings.HasPrefix(chunkData, "HTTP/1.1")
-
-					// use connection-based key, but add a sequence number for multiple responses
-					baseKey := fmt.Sprintf("%v/%v/%v/%v/%v/%v", event.Tgid, event.Pid, event.Saddr, event.Daddr, event.Sport, event.Dport)
-
-					// Simplified bucket management - use same key for all chunks from same connection
-					var respKey string
-					var bucket *responseBucket
-
-					// Always try to find existing bucket first, regardless of whether this looks like HTTP headers
-					var foundKey string
-					var existingBucket *responseBucket
-					internalglog.LogInfof("llm_response: starting bucket search for baseKey=%s", baseKey)
-
-					responseMap.Range(func(key, value interface{}) bool {
-						internalglog.LogInfof("llm_response: checking existing key=%s", key.(string))
-						if strings.HasPrefix(key.(string), baseKey) {
-							internalglog.LogInfof("llm_response: found matching key=%s", key.(string))
-							bucket := value.(*responseBucket)
-
-							// Skip buckets that have already been processed
-							if bucket.processed {
-								internalglog.LogInfof("llm_response: bucket already processed, skipping key=%s", key.(string))
-								return true // continue iteration
-							}
-
-							// Special case: if this is an HTTP headers chunk and we have an existing bucket
-							// without HTTP headers, consolidate them regardless of completion status
-							if isNewResponse {
-								bucket.mu.Lock()
-								hasHTTPHeaders := false
-								for _, chunkData := range bucket.chunkMap {
-									if len(chunkData) > 8 && bytes.HasPrefix(chunkData, []byte("HTTP/1.1")) {
-										hasHTTPHeaders = true
-										break
-									}
-								}
-								bucket.mu.Unlock()
-
-								if !hasHTTPHeaders {
-									foundKey = key.(string)
-									existingBucket = bucket
-									internalglog.LogInfof("llm_response: found bucket without HTTP headers, consolidating HTTP headers chunk, key=%s", foundKey)
-									return false // stop iteration
-								}
-							}
-
-							// Quick check without locking first
-							if bucket.received < bucket.total {
-								foundKey = key.(string)
-								existingBucket = bucket
-								internalglog.LogInfof("llm_response: bucket appears incomplete, reusing key=%s", foundKey)
-								return false // stop iteration
-							}
-							// Check if this bucket might be part of a chunked response that's not complete
-							bucket.mu.Lock()
-							isChunkedComplete := isChunkedResponseComplete(bucket)
-							bucket.mu.Unlock()
-							if !isChunkedComplete {
-								foundKey = key.(string)
-								existingBucket = bucket
-								internalglog.LogInfof("llm_response: chunked response incomplete, reusing key=%s", foundKey)
-								return false // stop iteration
-							}
-
-							// Special handling for terminator chunks - they should be added to any existing chunked response
-							if isTerminatorChunk {
-								bucket.mu.Lock()
-								isChunkedResp := isChunkedResponse(bucket)
-								bucket.mu.Unlock()
-								if isChunkedResp {
-									foundKey = key.(string)
-									existingBucket = bucket
-									internalglog.LogInfof("llm_response: terminator chunk found existing chunked response, reusing key=%s", foundKey)
-									return false // stop iteration
-								}
-							}
-
-							// Special case: check if the current data might be a final terminator chunk
-							// for an existing chunked response (like "0\r\n\r\n")
-							readableLen := int(event.ChunkLen)
-							if readableLen < 0 {
-								readableLen = 0
-							}
-							if readableLen > len(event.Buf) {
-								readableLen = len(event.Buf)
-							}
-							bufStr := string(event.Buf[:readableLen])
-							// Look for various terminator patterns: "0\r\n", "0\n", or just very small chunks with "0"
-							isTerminator := (readableLen <= 15) &&
-								(strings.Contains(bufStr, "0\r\n") ||
-									strings.Contains(bufStr, "0\n") ||
-									(readableLen <= 10 && strings.Contains(bufStr, "0")) ||
-									(strings.TrimSpace(bufStr) == "0"))
-							if isTerminator {
-								foundKey = key.(string)
-								existingBucket = bucket
-								internalglog.LogInfof("llm_response: detected potential terminator chunk (%d bytes: %q), reusing key=%s", readableLen, bufStr, foundKey)
-								return false // stop iteration
-							}
-
-							internalglog.LogInfof("llm_response: bucket appears complete, continuing search")
-						}
-						return true
-					})
-
-					internalglog.LogInfof("llm_response: bucket search completed, foundKey=%s", foundKey)
-
-					if foundKey != "" {
-						respKey = foundKey
-						bucket = existingBucket
-						if isNewResponse {
-							internalglog.LogInfof("llm_response: found existing bucket for HTTP response chunk, key=%s", respKey)
-						} else {
-							internalglog.LogInfof("llm_response: found existing bucket for continuation chunk, key=%s", respKey)
-						}
-					} else {
-						// Check if we found any processed buckets - if so, this is likely a late SSL fragment
-						var foundProcessedBucket bool
-						responseMap.Range(func(key, value interface{}) bool {
-							if strings.HasPrefix(key.(string), baseKey) {
-								bucket := value.(*responseBucket)
-								if bucket.processed {
-									foundProcessedBucket = true
-									internalglog.LogInfof("llm_response: ignoring late SSL fragment for already processed response, key=%s", key.(string))
-									return false // stop iteration
-								}
-							}
-							return true
-						})
-
-						if foundProcessedBucket {
-							continue // skip this SSL event
-						}
-
-						// No existing bucket found, create one
-						respKey = fmt.Sprintf("%s/t%d", baseKey, time.Now().UnixNano())
-						if isNewResponse {
-							internalglog.LogInfof("llm_response: new HTTP response detected, creating bucket, key=%s", respKey)
-						} else {
-							internalglog.LogInfof("llm_response: no existing bucket found, creating new one for chunk, key=%s", respKey)
-						}
-						// Use a mutex to synchronize bucket access to prevent race conditions
-						bucketAny, _ := responseMap.LoadOrStore(respKey, &responseBucket{
-							total:      int(event.TotalLen),
-							lastUpdate: time.Now(),
-							chunkMap:   make(map[int][]byte),
-							mu:         &sync.Mutex{},
-						})
-						bucket = bucketAny.(*responseBucket)
+					bucketsMtx.Lock()
+					bucket, ok := buckets[connKey]
+					if !ok {
+						bucket = &responseBucket{mu: &sync.Mutex{}}
+						buckets[connKey] = bucket
 					}
+					bucketsMtx.Unlock()
 
-					// Lock the bucket to prevent concurrent access
-					internalglog.LogInfof("llm_response: about to lock bucket mutex")
+					// Append the new SSL payload
 					bucket.mu.Lock()
-					internalglog.LogInfof("llm_response: bucket mutex locked successfully")
-
-					// Update last activity time
+					bucket.rawBody = append(bucket.rawBody, event.Payload...)
+					bucket.received += len(event.Payload)
 					bucket.lastUpdate = time.Now()
-					internalglog.LogInfof("llm_response: updated last activity time")
+					bucket.mu.Unlock()
 
-					chunkIdx := int(event.ChunkIdx)
-
-					// Handle potentially corrupted chunk indices
-					if chunkIdx < 0 || chunkIdx > 1000 {
-						internalglog.LogInfof("llm_response: corrupted chunk index %d, using fallback ordering", chunkIdx)
-						// Use arrival order as fallback for corrupted indices
-						chunkIdx = len(bucket.chunkMap)
-						internalglog.LogInfof("llm_response: assigned fallback index %d", chunkIdx)
+					// Try to parse headers
+					headerEnd := bytes.Index(bucket.rawBody, []byte("\r\n\r\n"))
+					if headerEnd == -1 {
+						// Headers incomplete → wait for more
+						break
 					}
 
-					// Detect SSL fragmentation: if this bucket was created with a different totalLen,
-					// this might be continuation data from SSL fragmentation
-					isSSLFragmentation := bucket.total != int(event.TotalLen)
+					headers := string(bucket.rawBody[:headerEnd])
+					body := bucket.rawBody[headerEnd+4:]
 
-					// Also detect consolidation scenarios: if we already have an HTTP chunk and this is additional data,
-					// we should consolidate it to maintain HTTP stream continuity
-					shouldConsolidate := false
-					httpChunkIdx := -1
-					for idx, data := range bucket.chunkMap {
-						if idx != 9999 && len(data) >= 8 && string(data[:8]) == "HTTP/1.1" { // Skip terminator chunk
-							httpChunkIdx = idx
-							shouldConsolidate = true
-							break
-						}
+					// Check if full response is here
+					if isResponseComplete(headers, body) && !bucket.processed && !bucket.processing {
+						bucket.processing = true // mark immediately to avoid duplicate goroutines
+
+						go func(connKey string, b *responseBucket) {
+							processCompleteResponse(b)
+
+							// Reset bucket for next response on same connection
+							b.mu.Lock()
+							b.rawBody = nil
+							b.received = 0
+							b.total = 0
+							b.processing = false
+							b.processed = false
+							b.mu.Unlock()
+						}(connKey, bucket)
+
 					}
-
-					// Special case: if this is HTTP headers arriving after response data
-					if isNewResponse && httpChunkIdx == -1 && len(bucket.chunkMap) > 0 {
-						internalglog.LogInfof("llm_response: HTTP headers chunk detected, consolidating with existing response data")
-
-						// Consolidate all existing chunks into the HTTP headers chunk (chunk 0)
-						var consolidatedData []byte
-						consolidatedData = append(consolidatedData, event.Buf[:event.ChunkLen]...) // Start with HTTP headers
-
-						// Append all existing chunk data in order
-						var sortedIndices []int
-						for idx := range bucket.chunkMap {
-							if idx != 9999 { // Skip terminator
-								sortedIndices = append(sortedIndices, idx)
-							}
-						}
-
-						// Sort indices
-						for i := 0; i < len(sortedIndices); i++ {
-							for j := i + 1; j < len(sortedIndices); j++ {
-								if sortedIndices[i] > sortedIndices[j] {
-									sortedIndices[i], sortedIndices[j] = sortedIndices[j], sortedIndices[i]
-								}
-							}
-						}
-
-						// Append existing chunks to HTTP headers
-						for _, idx := range sortedIndices {
-							if chunk, exists := bucket.chunkMap[idx]; exists {
-								consolidatedData = append(consolidatedData, chunk...)
-							}
-						}
-
-						// Clear existing chunks and store consolidated data at index 0
-						bucket.chunkMap = make(map[int][]byte)
-						bucket.chunkMap[0] = consolidatedData
-						bucket.received = len(consolidatedData)
-						internalglog.LogInfof("llm_response: consolidated HTTP headers with existing data, total size=%d", len(consolidatedData))
-					} else if isTerminatorChunk {
-						internalglog.LogInfof("llm_response: terminator chunk detected, storing with special index")
-						// Store terminator data with a high index that won't conflict with real chunks
-						terminatorIdx := 9999
-						bucket.chunkMap[terminatorIdx] = event.Buf[:event.ChunkLen]
-						bucket.received += int(event.ChunkLen)
-						internalglog.LogInfof("llm_response: stored terminator chunk at index %d, size=%d", terminatorIdx, event.ChunkLen)
-					} else if isSSLFragmentation || (shouldConsolidate && !isNewResponse) {
-						// For SSL fragmentation or consolidation, we need to append data sequentially to preserve HTTP structure
-						// SSL fragmentation can split HTTP chunks across SSL operations, so we can't rely on SSL chunk indices
-						if isSSLFragmentation {
-							internalglog.LogInfof("llm_response: SSL fragmentation detected (bucket.total=%d, event.TotalLen=%d), appending data sequentially", bucket.total, event.TotalLen)
-						} else {
-							internalglog.LogInfof("llm_response: consolidating additional data into HTTP chunk %d", httpChunkIdx)
-						}
-
-						// For SSL fragmentation/consolidation, we MUST consolidate all data into a single continuous HTTP stream
-						// Use the HTTP headers chunk we found, or default to index 0
-						targetChunkIdx := httpChunkIdx
-						if targetChunkIdx == -1 {
-							targetChunkIdx = 0
-						}
-
-						if existingData, exists := bucket.chunkMap[targetChunkIdx]; exists {
-							// Append to the HTTP headers chunk to maintain stream continuity
-							combinedData := make([]byte, len(existingData)+int(event.ChunkLen))
-							copy(combinedData, existingData)
-							copy(combinedData[len(existingData):], event.Buf[:event.ChunkLen])
-							bucket.chunkMap[targetChunkIdx] = combinedData
-							bucket.received += int(event.ChunkLen)
-							internalglog.LogInfof("llm_response: appended %d bytes to HTTP chunk %d (SSL fragmentation), new size=%d, total received=%d", event.ChunkLen, targetChunkIdx, len(combinedData), bucket.received)
-						} else {
-							// No HTTP chunk found yet, create one
-							bucket.chunkMap[targetChunkIdx] = event.Buf[:event.ChunkLen]
-							bucket.received += int(event.ChunkLen)
-							internalglog.LogInfof("llm_response: created HTTP chunk %d for fragmented data, size=%d, total received=%d", targetChunkIdx, event.ChunkLen, bucket.received)
-						}
-					} else {
-						// Check if chunk exists and if data is different (SSL fragmentation case)/
-						if existingData, exists := bucket.chunkMap[chunkIdx]; exists {
-							newData := event.Buf[:event.ChunkLen]
-
-							// Compare the data - if it's exactly the same, it's a true duplicate
-							if len(existingData) == len(newData) && bytes.Equal(existingData, newData) {
-								internalglog.LogInfof("llm_response: true duplicate chunk %d ignored (same data)", chunkIdx)
-								bucket.mu.Unlock() // Unlock before breaking
-								break              // Exit early for true duplicates
-							} else {
-								// Different data - this is SSL fragmentation, append it
-								combinedData := make([]byte, len(existingData)+len(newData))
-								copy(combinedData, existingData)
-								copy(combinedData[len(existingData):], newData)
-								bucket.chunkMap[chunkIdx] = combinedData
-								bucket.received += int(event.ChunkLen)
-								internalglog.LogInfof("llm_response: appended %d bytes to existing chunk %d (SSL fragmentation), new size=%d, total received=%d", event.ChunkLen, chunkIdx, len(combinedData), bucket.received)
-							}
-						} else {
-							// New chunk
-							bucket.chunkMap[chunkIdx] = event.Buf[:event.ChunkLen]
-							bucket.received += int(event.ChunkLen)
-							internalglog.LogInfof("llm_response: added chunk %d, size=%d, total received=%d/%d", chunkIdx, event.ChunkLen, bucket.received, bucket.total)
-						}
-					}
-
-					// Debug: Always log the processing check decision
-					internalglog.LogInfof("llm_response: checking if processing should start - received=%d, total=%d, hasAll=%v, isTerminator=%v", bucket.received, bucket.total, bucket.received >= bucket.total, isTerminatorChunk)
-
-					// Check if we should process (complete chunked response or timeout)
-					shouldProcess := false
-
-					// First, check if we have all the expected SSL bytes
-					hasAllSSLBytes := bucket.received >= bucket.total
-
-					// For chunked responses, only check completion if we have all SSL bytes
-					if isChunkedResponse(bucket) {
-						isComplete := isChunkedResponseComplete(bucket)
-						if (hasAllSSLBytes && isComplete) || (isTerminatorChunk && isComplete) {
-							shouldProcess = true
-							if isTerminatorChunk {
-								internalglog.LogInfof("llm_response: complete chunked response detected (terminator chunk received)")
-							} else {
-								internalglog.LogInfof("llm_response: complete chunked response detected")
-							}
-						} else if isTerminatorChunk && !isComplete {
-							internalglog.LogInfof("llm_response: terminator received but chunked response still incomplete, waiting for more data")
-						} else if time.Since(bucket.lastUpdate) > 30*time.Second {
-							shouldProcess = true
-							internalglog.LogInfof("llm_response: timeout reached, processing partial chunked response")
-						} else if hasAllSSLBytes {
-							internalglog.LogInfof("llm_response: waiting for more chunks (have all SSL bytes but chunked response incomplete)")
-							bucket.mu.Unlock()
-							break // Wait for more chunks
-						} else {
-							internalglog.LogInfof("llm_response: waiting for more chunks (chunked response incomplete)")
-							bucket.mu.Unlock()
-							break // Wait for more chunks
-						}
-					} else {
-						// Non-chunked response, use original logic but ensure we have HTTP headers
-						if bucket.received >= bucket.total {
-							// Check if we have HTTP headers before processing
-							hasHTTPHeaders := false
-							for _, chunkData := range bucket.chunkMap {
-								if len(chunkData) > 8 && bytes.HasPrefix(chunkData, []byte("HTTP/1.1")) {
-									hasHTTPHeaders = true
-									break
-								}
-							}
-
-							if hasHTTPHeaders {
-								shouldProcess = true
-								internalglog.LogInfof("llm_response: complete response received (%d/%d bytes)", bucket.received, bucket.total)
-							} else {
-								internalglog.LogInfof("llm_response: waiting for HTTP headers (have %d/%d bytes but no HTTP headers)", bucket.received, bucket.total)
-								bucket.mu.Unlock()
-								break // Wait for HTTP headers
-							}
-						} else if time.Since(bucket.lastUpdate) > 30*time.Second {
-							shouldProcess = true
-							internalglog.LogInfof("llm_response: timeout reached, processing partial response (%d/%d bytes)", bucket.received, bucket.total)
-						} else {
-							internalglog.LogInfof("llm_response: waiting for more chunks (%d/%d bytes)", bucket.received, bucket.total)
-							bucket.mu.Unlock() // Unlock before breaking
-							break              // Wait for more chunks
-						}
-					}
-
-					// Only process when shouldProcess is true AND not already processing
-					if shouldProcess && !bucket.processing {
-						bucket.processing = true // Mark as processing to prevent duplicates
-						// Use the chunk map directly - no need for additional mapping
-						chunkMap := bucket.chunkMap
-
-						// Check for missing chunk indices, excluding special terminator index
-						maxOrder := -1
-						minOrder := int(^uint(0) >> 1) // max int
-						for order := range chunkMap {
-							// Skip the special terminator index (9999) in chunk validation
-							if order != 9999 {
-								if order > maxOrder {
-									maxOrder = order
-								}
-								if order < minOrder {
-									minOrder = order
-								}
-							}
-						}
-
-						missingChunks := []int{}
-						// Only check for missing chunks if we have valid min/max values
-						if minOrder != int(^uint(0)>>1) && maxOrder >= minOrder {
-							for i := minOrder; i <= maxOrder; i++ {
-								if _, exists := chunkMap[i]; !exists {
-									missingChunks = append(missingChunks, i)
-								}
-							}
-						}
-
-						if len(missingChunks) > 0 {
-							internalglog.LogInfof("llm_response: missing chunk indices %v, waiting for more data", missingChunks)
-							bucket.mu.Unlock() // Unlock before breaking
-							break
-						}
-
-						// Log chunk collection details with CORRECT ordering
-						internalglog.LogInfof("llm_response: chunk collection details:")
-						internalglog.LogInfof("llm_response: available chunk indices: %v", func() []int {
-							var indices []int
-							for idx := range chunkMap {
-								indices = append(indices, idx)
-							}
-							return indices
-						}())
-
-						// Debug: Log min/max values to catch potential infinite loops
-						internalglog.LogInfof("llm_response: debug minOrder=%d, maxOrder=%d, chunkMapSize=%d", minOrder, maxOrder, len(chunkMap))
-
-						// Safety check for chunk details loop
-						if minOrder == int(^uint(0)>>1) || maxOrder < minOrder || (maxOrder-minOrder) > 1000 {
-							internalglog.LogInfof("llm_response: invalid min/max order values, skipping chunk details")
-						} else {
-							for order := minOrder; order <= maxOrder; order++ {
-								if chunk, exists := chunkMap[order]; exists {
-									first16 := chunk
-									if len(chunk) > 16 {
-										first16 = chunk[:16]
-									}
-									internalglog.LogInfof("  chunk %d: size=%d, first 16 bytes: % x", order, len(chunk), first16)
-								}
-							}
-						}
-
-						// Enhanced chunk ordering with content-based validation
-						// First, try to use the eBPF indices if they seem reasonable
-						var orderedChunks [][]byte
-						hasValidIndices := true
-
-						// Check if all indices are reasonable (0 to total_chunks-1)
-						for idx := range chunkMap {
-							if idx < 0 || idx >= len(chunkMap) {
-								hasValidIndices = false
-								break
-							}
-						}
-
-						if hasValidIndices && minOrder != int(^uint(0)>>1) && maxOrder >= minOrder && (maxOrder-minOrder) <= 1000 {
-							// Use eBPF indices - with safety check
-							internalglog.LogInfof("llm_response: using eBPF indices for chunk ordering")
-							for order := minOrder; order <= maxOrder; order++ {
-								if chunk, exists := chunkMap[order]; exists {
-									orderedChunks = append(orderedChunks, chunk)
-								}
-							}
-						} else {
-							// Fallback: Use content-based ordering for SSL fragmentation
-							internalglog.LogInfof("llm_response: using content-based chunk ordering due to invalid indices")
-
-							// For SSL fragmentation, we should have a consolidated HTTP chunk containing the complete response
-							// Find the chunk that starts with HTTP/1.1
-							var httpChunk []byte
-							var httpChunkIndex int = -1
-
-							for idx, chunk := range chunkMap {
-								if idx == 9999 { // Skip terminator
-									continue
-								}
-								if len(chunk) >= 8 && string(chunk[:8]) == "HTTP/1.1" {
-									httpChunk = chunk
-									httpChunkIndex = idx
-									break // Found the consolidated HTTP response chunk
-								}
-							}
-
-							if httpChunk != nil {
-								// For SSL fragmentation with consolidation, the HTTP chunk should contain the complete response
-								internalglog.LogInfof("llm_response: found consolidated HTTP chunk at index %d, size=%d", httpChunkIndex, len(httpChunk))
-								orderedChunks = append(orderedChunks, httpChunk)
-
-								// In most SSL fragmentation cases, all data should be in the HTTP chunk
-								// Only add other chunks if they exist and might contain additional data
-								for idx, chunk := range chunkMap {
-									if idx != 9999 && idx != httpChunkIndex { // Skip terminator and HTTP chunk
-										// Check if this chunk might contain additional data not in the HTTP chunk
-										if len(chunk) > 0 {
-											internalglog.LogInfof("llm_response: found additional non-consolidated chunk %d, size=%d - this may indicate incomplete consolidation", idx, len(chunk))
-											// For safety, don't add these chunks as they may corrupt the HTTP stream
-											// orderedChunks = append(orderedChunks, chunk)
-										}
-									}
-								}
-							} else {
-								// No HTTP chunk found, combine all non-terminator chunks in order
-								var sortedIndices []int
-								for idx := range chunkMap {
-									if idx != 9999 { // Skip terminator
-										sortedIndices = append(sortedIndices, idx)
-									}
-								}
-
-								// Sort indices to maintain proper order
-								for i := 0; i < len(sortedIndices); i++ {
-									for j := i + 1; j < len(sortedIndices); j++ {
-										if sortedIndices[i] > sortedIndices[j] {
-											sortedIndices[i], sortedIndices[j] = sortedIndices[j], sortedIndices[i]
-										}
-									}
-								}
-
-								// Add chunks in sorted order
-								for _, idx := range sortedIndices {
-									if chunk, exists := chunkMap[idx]; exists {
-										orderedChunks = append(orderedChunks, chunk)
-									}
-								}
-							}
-						}
-
-						// Combine chunks in the determined order
-						full := bytes.Join(orderedChunks, nil)
-						internalglog.LogInfof("llm_response: combined full response size=%d", len(full))
-
-						// Validate the HTTP structure before processing
-						httpStartLen := 20
-						if len(full) < httpStartLen {
-							httpStartLen = len(full)
-						}
-						httpStart := string(full[:httpStartLen])
-						if !strings.HasPrefix(httpStart, "HTTP/1.1") {
-							internalglog.LogInfof("llm_response: warning - combined response does not start with HTTP/1.1: %s", httpStart)
-						}
-
-						// Log full hex dump (up to 2048 bytes for debugging)
-						dumpSize := len(full)
-						if dumpSize > 2048 {
-							dumpSize = 2048
-						}
-						internalglog.LogInfof("llm_response: combined full response hex dump (first %d bytes): % x", dumpSize, full[:dumpSize])
-
-						// Separate headers and body
-						i := bytes.Index(full, []byte("\r\n\r\n"))
-						var headers string
-						var body []byte
-						var rawBody []byte
-
-						if i > 0 {
-							headers = string(full[:i])
-							rawBody = full[i+4:]
-
-							if strings.Contains(headers, "Transfer-Encoding: chunked") {
-								internalglog.LogInfof("llm_response: decoding chunked body, rawBody size=%d", len(rawBody))
-
-								// Log first 100 bytes of raw body for debugging
-								debugLen := min(100, len(rawBody))
-								internalglog.LogInfof("llm_response: raw body start (first %d bytes): % x", debugLen, rawBody[:debugLen])
-
-								decoded, err := decodeChunkedBody(rawBody)
-								if err == nil {
-									body = decoded
-									internalglog.LogInfof("llm_response: chunked decoding successful, decoded size=%d", len(body))
-								} else {
-									internalglog.LogInfof("llm_response: chunked decoding failed: %v", err)
-									body = rawBody
-								}
-							} else {
-								body = rawBody
-							}
-						} else {
-							body = full
-						}
-
-						// Enhanced compression handling with multiple methods
-						contentEncoding := ""
-						if strings.Contains(headers, "Content-Encoding: gzip") {
-							contentEncoding = "gzip"
-						} else if strings.Contains(headers, "Content-Encoding: deflate") {
-							contentEncoding = "deflate"
-						} else if strings.Contains(headers, "Content-Encoding: br") {
-							contentEncoding = "br"
-						}
-
-						if contentEncoding != "" {
-							internalglog.LogInfof("llm_response: %s compression detected, body size before decompression=%d", contentEncoding, len(body))
-
-							// Log compression header and trailer
-							if len(body) >= 10 {
-								internalglog.LogInfof("llm_response: compression header (first 32 bytes): % x", body[:min(32, len(body))])
-							}
-							if len(body) >= 8 {
-								internalglog.LogInfof("llm_response: compression trailer (last 8 bytes): % x", body[len(body)-8:])
-							}
-
-							// Try decompression based on detected type
-							decompressed, err := decompressData(body, contentEncoding)
-							if err == nil {
-								body = decompressed
-								internalglog.LogInfof("llm_response: %s decompression successful, decompressed size=%d", contentEncoding, len(body))
-							} else {
-								internalglog.LogInfof("llm_response: %s decompression failed: %v", contentEncoding, err)
-
-								// Try alternative methods if primary fails
-								if contentEncoding == "gzip" {
-									internalglog.LogInfof("llm_response: trying deflate as fallback")
-									if decompressed, err := decompressData(body, "deflate"); err == nil {
-										body = decompressed
-										internalglog.LogInfof("llm_response: deflate fallback successful, decompressed size=%d", len(body))
-									} else {
-										internalglog.LogInfof("llm_response: deflate fallback failed: %v", err)
-									}
-								}
-							}
-						}
-
-						// Validate content and save
-						contentToSave := string(body)
-						if !utf8.Valid(body) {
-							internalglog.LogInfof("llm_response: invalid UTF-8 content, storing as base64")
-							contentToSave = base64.StdEncoding.EncodeToString(body)
-						} else if len(body) == 0 {
-							internalglog.LogInfof("llm_response: empty body, skipping save")
-							bucket.processed = true
-							break
-						}
-
-						// Save to Spanner (llm_response)
-						if params.RunfSaveDb {
-							var containerName, containerImage string
-							func() {
-								if !isk8s {
-									return
-								}
-								ipToContainerMtx.Lock()
-								defer ipToContainerMtx.Unlock()
-								info, ok := ipToContainer[internal.IntToIp(event.Saddr).String()]
-								if ok {
-									containerName = info.Name
-									containerImage = info.Image
-								}
-							}()
-
-							cols := []string{
-								"id",
-								"message_id",
-								"org_id",
-								"idx",
-								"comm",
-								"src_addr",
-								"dst_addr",
-								"container_name",
-								"container_image",
-								"content",
-								"created_at",
-							}
-							vals := []any{
-								fmt.Sprintf("%v/%v", event.Tgid, event.Pid),
-								fmt.Sprintf("%v", event.MessageId),
-								"",  // org_id
-								"0", // idx
-								fmt.Sprintf("%s", event.Comm),
-								fmt.Sprintf("%v:%v", internal.IntToIp(event.Saddr), event.Sport),
-								fmt.Sprintf("%v:%v", internal.IntToIp(event.Daddr), event.Dport),
-								containerName,
-								containerImage,
-								contentToSave,
-								"COMMIT_TIMESTAMP",
-							}
-							mut := internal.SpannerPayload{
-								Table: "llm_response",
-								Cols:  cols,
-								Vals:  vals,
-							}
-							mutBufCh <- mut
-						}
-
-						// Mark bucket as processed instead of deleting immediately
-						bucket.processed = true
-						bucket.mu.Unlock() // Unlock after successful processing
-					}
-					break
 
 				case TYPE_REPORT_READ_SOCKET_INFO:
 					fmt.Fprintf(&line, "[TYPE_REPORT_READ_SOCKET_INFO] key=%v, ", key)
@@ -1934,277 +1246,217 @@ func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects)
 	}
 }
 
-func decodeChunkedBody(chunked []byte) ([]byte, error) {
-	var body bytes.Buffer
-	r := bytes.NewReader(chunked)
-
-	for {
-		// Read chunk size line until \r\n
-		var sizeLine []byte
-		foundCRLF := false
-
-		for {
-			b, err := r.ReadByte()
-			if err == io.EOF {
-				// End of data - this is normal for final chunk
-				if body.Len() > 0 {
-					return body.Bytes(), nil
-				}
-				return nil, fmt.Errorf("unexpected EOF while reading chunk size")
-			}
-			if err != nil {
-				return nil, fmt.Errorf("error reading chunk size: %v", err)
-			}
-
-			sizeLine = append(sizeLine, b)
-
-			// Check for \r\n at the end of sizeLine
-			if len(sizeLine) >= 2 && sizeLine[len(sizeLine)-2] == '\r' && sizeLine[len(sizeLine)-1] == '\n' {
-				// Remove the \r\n from sizeLine
-				sizeLine = sizeLine[:len(sizeLine)-2]
-				foundCRLF = true
-				break
-			}
-		}
-
-		if !foundCRLF {
-			return nil, fmt.Errorf("chunk size line missing CRLF terminator")
-		}
-
-		sizeStr := strings.TrimSpace(string(sizeLine))
-		if sizeStr == "" {
-			continue
-		}
-
-		// Handle potential extensions after semicolon (chunk-extensions)
-		if idx := strings.Index(sizeStr, ";"); idx >= 0 {
-			sizeStr = sizeStr[:idx]
-		}
-
-		size, err := strconv.ParseInt(sizeStr, 16, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid chunk size '%s': %v", sizeStr, err)
-		}
-
-		// Debug: Log each chunk size we find
-		internalglog.LogInfof("llm_response: found chunk size %s (hex) = %d (decimal) bytes", sizeStr, size)
-
-		if size == 0 {
-			// End of chunks - consume any trailing headers and final \r\n
-			for {
-				_, err := r.ReadByte()
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					break
-				}
-				// Just consume remaining bytes
-			}
-			break
-		}
-
-		// Read chunk data
-		chunk := make([]byte, size)
-		n, err := io.ReadFull(r, chunk)
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			// Partial read at end - this can happen with incomplete data
-			if n > 0 {
-				body.Write(chunk[:n])
-			}
-			// Continue trying to decode what we have
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("reading chunk data (expected %d bytes): %v", size, err)
-		}
-
-		body.Write(chunk)
-
-		// Read trailing \r\n after chunk data - be more tolerant
-		trailer := make([]byte, 2)
-		n, err = r.Read(trailer)
-		if err == io.EOF {
-			// End of data after chunk - might be incomplete
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("reading chunk trailer: %v", err)
-		}
-		if n >= 2 && (trailer[0] != '\r' || trailer[1] != '\n') {
-			// Log warning but continue
-			fmt.Printf("Warning: expected \\r\\n after chunk, got %02x%02x\n", trailer[0], trailer[1])
+// isResponseComplete checks whether HTTP response is complete
+func isResponseComplete(headers string, body []byte) bool {
+	// for Content-Length
+	if clIdx := strings.Index(headers, "Content-Length:"); clIdx != -1 {
+		var length int
+		_, err := fmt.Sscanf(headers[clIdx:], "Content-Length: %d", &length)
+		if err == nil && len(body) >= length {
+			return true
 		}
 	}
 
-	return body.Bytes(), nil
+	// for Chunked transfer encoding
+	if strings.Contains(strings.ToLower(headers), "transfer-encoding: chunked") {
+		_, ok := parseChunkedBody(body)
+		if ok {
+			return true
+		}
+	}
+
+	return false
 }
 
-// decompressData decompresses data using the specified compression method
+// decompressData supports gzip/deflate
 func decompressData(data []byte, method string) ([]byte, error) {
-	switch method {
+	switch strings.ToLower(method) {
 	case "gzip":
-		if len(data) < 10 || data[0] != 0x1f || data[1] != 0x8b {
-			return nil, fmt.Errorf("invalid gzip header")
-		}
 		reader, err := gzip.NewReader(bytes.NewReader(data))
 		if err != nil {
 			return nil, fmt.Errorf("gzip reader creation failed: %v", err)
 		}
 		defer reader.Close()
 		return io.ReadAll(reader)
-
 	case "deflate":
 		reader := flate.NewReader(bytes.NewReader(data))
 		defer reader.Close()
 		return io.ReadAll(reader)
-
 	default:
-		return nil, fmt.Errorf("unsupported compression method: %s", method)
+		return data, nil
 	}
 }
 
-// isChunkedResponse checks if the response uses chunked transfer encoding
-func isChunkedResponse(bucket *responseBucket) bool {
-	// Look for HTTP headers in chunk 0
-	if chunk0, exists := bucket.chunkMap[0]; exists {
-		headers := string(chunk0)
-		return strings.Contains(headers, "Transfer-Encoding: chunked")
+// parseAIResponse extracts AI response text from JSON
+func parseAIResponse(jsonBody []byte) string {
+	// Try Gemini schema
+	var gemini struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
 	}
-	return false
+	if err := json.Unmarshal(jsonBody, &gemini); err == nil {
+		if len(gemini.Candidates) > 0 && len(gemini.Candidates[0].Content.Parts) > 0 {
+			return gemini.Candidates[0].Content.Parts[0].Text
+		}
+	}
+
+	// Try OpenAI schema
+	var openai struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(jsonBody, &openai); err == nil {
+		if len(openai.Choices) > 0 {
+			return openai.Choices[0].Message.Content
+		}
+	}
+
+	// Fallback
+	return string(jsonBody)
 }
 
-// isChunkedResponseComplete checks if we have received a complete chunked response
-func isChunkedResponseComplete(bucket *responseBucket) bool {
-	// Combine all chunks to form the raw response
-	var combinedData []byte
+func processCompleteResponse(bucket *responseBucket) {
+	if bucket.processed {
+		return
+	}
+	bucket.processed = true
 
-	// Find min and max chunk indices
-	minOrder := int(^uint(0) >> 1) // max int
-	maxOrder := -1
-	for order := range bucket.chunkMap {
-		if order > maxOrder {
-			maxOrder = order
-		}
-		if order < minOrder {
-			minOrder = order
+	data := bucket.rawBody
+
+	// Split headers/body
+	headerEnd := bytes.Index(data, []byte("\r\n\r\n"))
+	if headerEnd == -1 {
+		fmt.Println("❌ Incomplete headers")
+		return
+	}
+	headers := string(data[:headerEnd])
+	body := data[headerEnd+4:]
+
+	// decode chunks first
+	if strings.Contains(strings.ToLower(headers), "transfer-encoding: chunked") {
+		if fullBody, ok := parseChunkedBody(body); ok {
+			body = fullBody
+		} else {
+			fmt.Println("Failed to parse chunked body")
+			return
 		}
 	}
 
-	// Combine chunks in order
-	if minOrder != int(^uint(0)>>1) && maxOrder >= minOrder {
-		for order := minOrder; order <= maxOrder; order++ {
-			if chunk, exists := bucket.chunkMap[order]; exists {
-				combinedData = append(combinedData, chunk...)
+	// compressed body (gzip/deflate)
+	if strings.Contains(strings.ToLower(headers), "content-encoding: gzip") {
+		if decompressed, err := decompressData(body, "gzip"); err == nil {
+			body = decompressed
+		} else {
+			fmt.Println("Gzip decompression failed:", err)
+		}
+	} else if strings.Contains(strings.ToLower(headers), "content-encoding: deflate") {
+		if decompressed, err := decompressData(body, "deflate"); err == nil {
+			body = decompressed
+		} else {
+			fmt.Println(" Deflate decompression failed:", err)
+		}
+	}
+
+	// Parse JSON and extract AI text
+	aiText := parseAIResponse(body)
+	fmt.Println("Final AI Response:")
+	fmt.Println(aiText)
+}
+
+// backgroundCleanup launches a goroutine that removes stale buckets
+func backgroundCleanup() {
+	go func() {
+		for {
+			time.Sleep(30 * time.Second)
+
+			bucketsMtx.Lock()
+			for connKey, bucket := range buckets {
+				bucket.mu.Lock()
+				idle := time.Since(bucket.lastUpdate)
+				processed := bucket.processed
+				bucket.mu.Unlock()
+
+				if idle > 30*time.Second && !processed {
+					fmt.Printf("🧹 Cleaning up stale bucket for %s (idle=%v)\n", connKey, idle)
+					delete(buckets, connKey)
+				}
 			}
+			bucketsMtx.Unlock()
 		}
-	}
+	}()
+}
 
-	// Separate headers and body
-	headerEndIndex := bytes.Index(combinedData, []byte("\r\n\r\n"))
-	if headerEndIndex == -1 {
-		return false // No complete headers yet
-	}
-
-	headers := combinedData[:headerEndIndex]
-	body := combinedData[headerEndIndex+4:]
-
-	// Check if Transfer-Encoding is chunked
-	if !bytes.Contains(headers, []byte("Transfer-Encoding: chunked")) {
-		return true // Not chunked, consider complete
-	}
-
-	// Quick check: if we have a final terminator chunk (0\r\n or similar patterns),
-	// consider the response complete even if intermediate chunks are incomplete
-	bodyStr := string(body)
-	if strings.Contains(bodyStr, "0\r\n") || strings.Contains(bodyStr, "0\n") {
-		// Look for final chunk patterns at the end of the body
-		if strings.HasSuffix(strings.TrimSpace(bodyStr), "0") ||
-			strings.Contains(bodyStr, "0\r\n\r\n") ||
-			strings.Contains(bodyStr, "0\n\n") {
-			fmt.Printf("Chunked response complete (final terminator found in combined data)\n")
-			return true
-		}
-	}
-
-	// Parse chunked encoding to see if we have complete chunks
-	r := bytes.NewReader(body)
-	totalExpectedBytes := int64(0)
-	totalReceivedBytes := int64(0)
+// parseChunkedBody parses an HTTP/1.1 chunked transfer body into a full byte slice.
+// Returns the assembled body and whether parsing is complete.
+func parseChunkedBody(body []byte) ([]byte, bool) {
+	reader := bytes.NewReader(body)
+	var result bytes.Buffer
 
 	for {
-		// Read chunk size line until \r\n
-		var sizeLine []byte
-		foundCRLF := false
-
-		for {
-			b, err := r.ReadByte()
-			if err == io.EOF {
-				return false // Incomplete - no chunk size found
-			}
-			if err != nil {
-				return false
-			}
-
-			sizeLine = append(sizeLine, b)
-
-			// Check for \r\n at the end of sizeLine
-			if len(sizeLine) >= 2 && sizeLine[len(sizeLine)-2] == '\r' && sizeLine[len(sizeLine)-1] == '\n' {
-				// Remove the \r\n from sizeLine
-				sizeLine = sizeLine[:len(sizeLine)-2]
-				foundCRLF = true
-				break
-			}
-		}
-
-		if !foundCRLF {
-			return false
-		}
-
-		sizeStr := strings.TrimSpace(string(sizeLine))
-		if sizeStr == "" {
-			continue
-		}
-
-		// Handle chunk extensions
-		if idx := strings.Index(sizeStr, ";"); idx >= 0 {
-			sizeStr = sizeStr[:idx]
-		}
-
-		size, err := strconv.ParseInt(sizeStr, 16, 64)
+		// Read until CRLF for chunk size
+		line, err := readLine(reader)
 		if err != nil {
-			return false // Invalid chunk size
+			return nil, false // incomplete
+		}
+
+		// Parse size in hex
+		size, err := strconv.ParseInt(strings.TrimSpace(string(line)), 16, 64)
+		if err != nil {
+			return nil, false // invalid
 		}
 
 		if size == 0 {
-			// Found final chunk - this indicates the server has completed the chunked response
-			// Even if we haven't captured all intermediate data due to SSL fragmentation,
-			// we should accept this as completion and proceed with processing
-			fmt.Printf("Chunked response complete (final chunk found): total expected=%d, received=%d bytes\n", totalExpectedBytes, totalReceivedBytes)
-			return true // Complete chunked response
+			// Must be followed by final CRLF
+			trailer, _ := readLine(reader)
+			if string(trailer) == "" {
+				return result.Bytes(), true
+			}
+			return result.Bytes(), true // ignoring trailers for now
 		}
 
-		totalExpectedBytes += size
-
-		// Get current position before attempting to skip
-		currentPos, _ := r.Seek(0, io.SeekCurrent)
-		remainingData := int64(len(body)) - currentPos
-
-		// Check if we have enough data for this chunk + \r\n
-		if remainingData < size+2 {
-			fmt.Printf("Chunk incomplete: expected %d bytes + 2 (\\r\\n), but only %d bytes remaining (chunk size: %s = %d bytes)\n", size, remainingData, sizeStr, size)
-			return false // Not enough data for this chunk
+		// Read exactly <size> bytes
+		chunk := make([]byte, size)
+		n, err := reader.Read(chunk)
+		if err != nil || n < int(size) {
+			return nil, false // incomplete
 		}
+		result.Write(chunk)
 
-		// Skip chunk data and trailing \r\n
-		toSkip := size + 2 // chunk data + \r\n
-		_, err = r.Seek(toSkip, io.SeekCurrent)
+		// Expect CRLF after data
+		crlf := make([]byte, 2)
+		if _, err := reader.Read(crlf); err != nil || string(crlf) != "\r\n" {
+			return nil, false // malformed
+		}
+	}
+}
+
+// readLine reads until CRLF, returns the line (without CRLF).
+func readLine(r *bytes.Reader) ([]byte, error) {
+	var line []byte
+	for {
+		b, err := r.ReadByte()
 		if err != nil {
-			fmt.Printf("Error seeking in chunk data: %v\n", err)
-			return false
+			return nil, err
 		}
-
-		totalReceivedBytes += size
-		fmt.Printf("Processed chunk: size=%s hex (%d bytes), total progress: %d/%d bytes\n", sizeStr, size, totalReceivedBytes, totalExpectedBytes)
+		if b == '\r' {
+			// Expect \n next
+			next, err := r.ReadByte()
+			if err != nil {
+				return nil, err
+			}
+			if next == '\n' {
+				return line, nil
+			}
+			return nil, fmt.Errorf("expected LF after CR")
+		}
+		line = append(line, b)
 	}
 }
