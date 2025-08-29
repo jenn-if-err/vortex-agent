@@ -1041,7 +1041,7 @@ func run(ctx context.Context, done chan error) {
 				case TYPE_UPROBE_SSL_READ:
 
 				case TYPE_URETPROBE_SSL_READ:
-					fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v/%v, ", event.SeqNum, event.ChunkIdx)
+					fmt.Fprintf(&line, "-> [uretprobe/SSL_read{_ex}] idx=%v, ", event.ChunkIdx)
 					fmt.Fprintf(&line, "buf=%s, ", internal.Readable(event.Buf[:], max(event.ChunkLen, 0)))
 					fmt.Fprintf(&line, "key=%v, totalLen=%v, chunkLen=%v, ", key, event.TotalLen, event.ChunkLen)
 					fmt.Fprintf(&line, "src=%v:%v, ", internal.IntToIp(event.Daddr), event.Dport)
@@ -1087,8 +1087,8 @@ func run(ctx context.Context, done chan error) {
 
 					// Append the new SSL payload
 					bucket.mu.Lock()
-					bucket.rawBody = append(bucket.rawBody, event.Payload...)
-					bucket.received += len(event.Payload)
+					bucket.rawBody = append(bucket.rawBody, event.Buf[:event.ChunkLen]...)
+					bucket.received += int(event.ChunkLen)
 					bucket.lastUpdate = time.Now()
 					bucket.mu.Unlock()
 
@@ -1111,12 +1111,12 @@ func run(ctx context.Context, done chan error) {
 
 							// Reset bucket for next response on same connection
 							b.mu.Lock()
-							b.rawBody = nil
+							b.rawBody = b.rawBody[:0]
 							b.received = 0
 							b.total = 0
 							b.processing = false
 							b.processed = false
-							b.mu.Unlock()
+							defer b.mu.Unlock()
 						}(connKey, bucket)
 
 					}
@@ -1268,7 +1268,7 @@ func isResponseComplete(headers string, body []byte) bool {
 	return false
 }
 
-// decompressData supports gzip/deflate
+// supports gzip/deflate
 func decompressData(data []byte, method string) ([]byte, error) {
 	switch strings.ToLower(method) {
 	case "gzip":
@@ -1287,7 +1287,7 @@ func decompressData(data []byte, method string) ([]byte, error) {
 	}
 }
 
-// parseAIResponse extracts AI response text from JSON
+// extracts AI response text from JSON
 func parseAIResponse(jsonBody []byte) string {
 	// Try Gemini schema
 	var gemini struct {
@@ -1385,7 +1385,7 @@ func backgroundCleanup() {
 				bucket.mu.Unlock()
 
 				if idle > 30*time.Second && !processed {
-					fmt.Printf("🧹 Cleaning up stale bucket for %s (idle=%v)\n", connKey, idle)
+					fmt.Printf("Cleaning up stale bucket for %s (idle=%v)\n", connKey, idle)
 					delete(buckets, connKey)
 				}
 			}
