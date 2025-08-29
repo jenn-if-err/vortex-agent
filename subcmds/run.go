@@ -1100,8 +1100,8 @@ func run(ctx context.Context, done chan error) {
 
 					// Try to parse headers
 					headerEnd := bytes.Index(bucket.rawBody, []byte("\r\n\r\n"))
-					if headerEnd == -1 {
-						// Headers incomplete → wait for more
+					if headerEnd == -1 || headerEnd+4 > len(bucket.rawBody) {
+						// Headers incomplete or body out of bounds → wait for more
 						break
 					}
 
