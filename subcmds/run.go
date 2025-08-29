@@ -1336,7 +1336,7 @@ func processCompleteResponse(bucket *responseBucket) {
 	// Split headers/body
 	headerEnd := bytes.Index(data, []byte("\r\n\r\n"))
 	if headerEnd == -1 {
-		fmt.Println("❌ Incomplete headers")
+		fmt.Println(" Incomplete headers")
 		return
 	}
 	headers := string(data[:headerEnd])
@@ -1433,28 +1433,27 @@ func parseChunkedBody(body []byte) ([]byte, bool) {
 	var result bytes.Buffer
 
 	for {
-		// Read until CRLF for chunk size
 		line, err := readLine(reader)
 		if err != nil {
 			return nil, false // incomplete
 		}
+		trimmed := strings.TrimSpace(string(line))
+		if trimmed == "" || trimmed == "." {
+			continue // skip blank lines and dots
+		}
 
-		// Parse size in hex
-		size, err := strconv.ParseInt(strings.TrimSpace(string(line)), 16, 64)
+		size, err := strconv.ParseInt(trimmed, 16, 64)
 		if err != nil {
-			return nil, false // invalid
+			// If not valid hex, skip this line
+			continue
 		}
 
 		if size == 0 {
-			// Must be followed by final CRLF
-			trailer, _ := readLine(reader)
-			if string(trailer) == "" {
-				return result.Bytes(), true
-			}
-			return result.Bytes(), true // ignoring trailers for now
+			// Final chunk
+			readLine(reader) // trailer (may be blank)
+			return result.Bytes(), true
 		}
 
-		// Read exactly <size> bytes
 		chunk := make([]byte, size)
 		n, err := reader.Read(chunk)
 		if err != nil || n < int(size) {
@@ -1465,7 +1464,7 @@ func parseChunkedBody(body []byte) ([]byte, bool) {
 		// Expect CRLF after data
 		crlf := make([]byte, 2)
 		if _, err := reader.Read(crlf); err != nil || string(crlf) != "\r\n" {
-			return nil, false // malformed
+			continue
 		}
 	}
 }
