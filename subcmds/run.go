@@ -1249,7 +1249,7 @@ func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects)
 	}
 }
 
-// isResponseComplete checks whether HTTP response is complete
+// checks whether HTTP response is complete
 func isResponseComplete(headers string, body []byte) bool {
 	// for Content-Length
 	if clIdx := strings.Index(headers, "Content-Length:"); clIdx != -1 {
@@ -1262,8 +1262,7 @@ func isResponseComplete(headers string, body []byte) bool {
 
 	// for Chunked transfer encoding
 	if strings.Contains(strings.ToLower(headers), "transfer-encoding: chunked") {
-		_, ok := parseChunkedBody(body)
-		if ok {
+		if isChunkedBodyComplete(body) {
 			return true
 		}
 	}
@@ -1375,6 +1374,10 @@ func processCompleteResponse(bucket *responseBucket) {
 	fmt.Println(aiText)
 }
 
+func isChunkedBodyComplete(body []byte) bool {
+	return bytes.Contains(body, []byte("0\r\n\r\n"))
+}
+
 // backgroundCleanup launches a goroutine that removes stale buckets
 func backgroundCleanup() {
 	go func() {
@@ -1386,15 +1389,34 @@ func backgroundCleanup() {
 				bucket.mu.Lock()
 				idle := time.Since(bucket.lastUpdate)
 				processed := bucket.processed
-				// If idle and not processed, treat as connection: close (process as best effort)
+
+				// Only process if chunked body is complete
+				headerEnd := bytes.Index(bucket.rawBody, []byte("\r\n\r\n"))
+				var headers string
+				var body []byte
+				if headerEnd != -1 && headerEnd+4 <= len(bucket.rawBody) {
+					headers = string(bucket.rawBody[:headerEnd])
+					body = bucket.rawBody[headerEnd+4:]
+				}
+
+				shouldProcess := false
 				if idle > 60*time.Second && !processed && len(bucket.rawBody) > 0 {
+					if strings.Contains(strings.ToLower(headers), "transfer-encoding: chunked") {
+						if isChunkedBodyComplete(body) {
+							shouldProcess = true
+						}
+					} else {
+						shouldProcess = true
+					}
+				}
+
+				if shouldProcess {
 					fmt.Printf("[cleanup] Forcing process of possibly-incomplete response for %s (idle=%v)\n", connKey, idle)
 					bucket.processing = true
 					processCompleteResponse(bucket)
 					bucket.processed = true
 				}
 				bucket.mu.Unlock()
-				// Now safe to delete if processed or idle too long
 				if idle > 120*time.Second || (bucket.processed && idle > 10*time.Second) {
 					fmt.Printf("Cleaning up stale bucket for %s (processed=%v, idle=%v)\n", connKey, bucket.processed, idle)
 					delete(buckets, connKey)
@@ -1405,8 +1427,7 @@ func backgroundCleanup() {
 	}()
 }
 
-// parseChunkedBody parses an HTTP/1.1 chunked transfer body into a full byte slice.
-// Returns the assembled body and whether parsing is complete.
+// parses an HTTP/1.1 chunked transfer body into a full byte slice.
 func parseChunkedBody(body []byte) ([]byte, bool) {
 	reader := bytes.NewReader(body)
 	var result bytes.Buffer
