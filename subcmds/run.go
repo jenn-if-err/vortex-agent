@@ -1369,6 +1369,7 @@ func processCompleteResponse(bucket *responseBucket) {
 	}
 
 	// Parse JSON and extract AI text
+	fmt.Println("Raw JSON body:", string(body))
 	aiText := parseAIResponse(body)
 	fmt.Println("Final AI Response:")
 	fmt.Println(aiText)
