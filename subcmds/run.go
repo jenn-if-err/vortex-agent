@@ -1087,9 +1087,15 @@ func run(ctx context.Context, done chan error) {
 
 					// Append the new SSL payload
 					bucket.mu.Lock()
-					bucket.rawBody = append(bucket.rawBody, event.Buf[:event.ChunkLen]...)
-					bucket.received += int(event.ChunkLen)
-					bucket.lastUpdate = time.Now()
+					if event.ChunkLen > 0 && int(event.ChunkLen) <= len(event.Buf) {
+						bucket.rawBody = append(bucket.rawBody, event.Buf[:event.ChunkLen]...)
+						bucket.received += int(event.ChunkLen)
+						bucket.lastUpdate = time.Now()
+					} else if event.ChunkLen == 0 {
+						// ChunkLen of 0 might indicate end of stream, update timestamp but don't append data
+						bucket.lastUpdate = time.Now()
+					}
+					// Negative ChunkLen indicates error or special condition, skip silently
 					bucket.mu.Unlock()
 
 					// Try to parse headers
