@@ -1108,13 +1108,11 @@ func run(ctx context.Context, done chan error) {
 					headers := string(bucket.rawBody[:headerEnd])
 					body := bucket.rawBody[headerEnd+4:]
 
-					// Check if full response is here
+					// Only process if truly complete (Content-Length or chunked)
 					if isResponseComplete(headers, body) && !bucket.processed && !bucket.processing {
 						bucket.processing = true // mark immediately to avoid duplicate goroutines
-
 						go func(connKey string, b *responseBucket) {
 							processCompleteResponse(b)
-
 							// Reset bucket for next response on same connection
 							b.mu.Lock()
 							b.rawBody = b.rawBody[:0]
@@ -1122,9 +1120,8 @@ func run(ctx context.Context, done chan error) {
 							b.total = 0
 							b.processing = false
 							b.processed = false
-							defer b.mu.Unlock()
+							b.mu.Unlock()
 						}(connKey, bucket)
-
 					}
 
 				case TYPE_REPORT_READ_SOCKET_INFO:
@@ -1388,10 +1385,17 @@ func backgroundCleanup() {
 				bucket.mu.Lock()
 				idle := time.Since(bucket.lastUpdate)
 				processed := bucket.processed
+				// If idle and not processed, treat as connection: close (process as best effort)
+				if idle > 60*time.Second && !processed && len(bucket.rawBody) > 0 {
+					fmt.Printf("[cleanup] Forcing process of possibly-incomplete response for %s (idle=%v)\n", connKey, idle)
+					bucket.processing = true
+					processCompleteResponse(bucket)
+					bucket.processed = true
+				}
 				bucket.mu.Unlock()
-
-				if idle > 30*time.Second && !processed {
-					fmt.Printf("Cleaning up stale bucket for %s (idle=%v)\n", connKey, idle)
+				// Now safe to delete if processed or idle too long
+				if idle > 120*time.Second || (bucket.processed && idle > 10*time.Second) {
+					fmt.Printf("Cleaning up stale bucket for %s (processed=%v, idle=%v)\n", connKey, bucket.processed, idle)
 					delete(buckets, connKey)
 				}
 			}
