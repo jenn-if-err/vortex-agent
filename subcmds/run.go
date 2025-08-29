@@ -1085,9 +1085,9 @@ func run(ctx context.Context, done chan error) {
 					}
 					bucketsMtx.Unlock()
 
-					// Append the new SSL payload
+					// Append the new SSL payload only if valid
 					bucket.mu.Lock()
-					if event.ChunkLen > 0 && int(event.ChunkLen) <= len(event.Buf) {
+					if event.ChunkLen > 0 && int(event.ChunkLen) <= len(event.Buf) && event.ChunkIdx != 0xFFFFFFFF {
 						bucket.rawBody = append(bucket.rawBody, event.Buf[:event.ChunkLen]...)
 						bucket.received += int(event.ChunkLen)
 						bucket.lastUpdate = time.Now()
@@ -1095,7 +1095,7 @@ func run(ctx context.Context, done chan error) {
 						// ChunkLen of 0 might indicate end of stream, update timestamp but don't append data
 						bucket.lastUpdate = time.Now()
 					}
-					// Negative ChunkLen indicates error or special condition, skip silently
+					// Negative ChunkLen or CHUNKED_END_IDX: do not append, skip silently
 					bucket.mu.Unlock()
 
 					// Try to parse headers
@@ -1433,27 +1433,28 @@ func parseChunkedBody(body []byte) ([]byte, bool) {
 	var result bytes.Buffer
 
 	for {
+		// Read until CRLF for chunk size
 		line, err := readLine(reader)
 		if err != nil {
 			return nil, false // incomplete
 		}
-		trimmed := strings.TrimSpace(string(line))
-		if trimmed == "" || trimmed == "." {
-			continue // skip blank lines and dots
-		}
 
-		size, err := strconv.ParseInt(trimmed, 16, 64)
+		// Parse size in hex
+		size, err := strconv.ParseInt(strings.TrimSpace(string(line)), 16, 64)
 		if err != nil {
-			// If not valid hex, skip this line
-			continue
+			return nil, false // invalid
 		}
 
 		if size == 0 {
-			// Final chunk
-			readLine(reader) // trailer (may be blank)
-			return result.Bytes(), true
+			// Must be followed by final CRLF
+			trailer, _ := readLine(reader)
+			if string(trailer) == "" {
+				return result.Bytes(), true
+			}
+			return result.Bytes(), true // ignoring trailers for now
 		}
 
+		// Read exactly <size> bytes
 		chunk := make([]byte, size)
 		n, err := reader.Read(chunk)
 		if err != nil || n < int(size) {
@@ -1464,7 +1465,7 @@ func parseChunkedBody(body []byte) ([]byte, bool) {
 		// Expect CRLF after data
 		crlf := make([]byte, 2)
 		if _, err := reader.Read(crlf); err != nil || string(crlf) != "\r\n" {
-			continue
+			return nil, false // malformed
 		}
 	}
 }
