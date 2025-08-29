@@ -1095,13 +1095,15 @@ func run(ctx context.Context, done chan error) {
 					}
 					bucketsMtx.Unlock()
 
-					// Append the new SSL payload only if valid
+					// Filter out invalid SSL_read events (e.g., chunkLen <= 0 or idx == 0xFFFFFFFF)
+					if event.ChunkLen <= 0 || event.ChunkIdx == 0xFFFFFFFF {
+						// Do not append, do not process, just skip
+						break
+					}
 					bucket.mu.Lock()
-					if event.ChunkLen > 0 && int(event.ChunkLen) <= len(event.Buf) {
+					if int(event.ChunkLen) <= len(event.Buf) {
 						bucket.rawBody = append(bucket.rawBody, event.Buf[:event.ChunkLen]...)
 						bucket.received += int(event.ChunkLen)
-						bucket.lastUpdate = time.Now()
-					} else if event.ChunkLen == 0 {
 						bucket.lastUpdate = time.Now()
 					}
 					// Try to parse headers and check for completeness
