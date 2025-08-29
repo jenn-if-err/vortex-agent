@@ -1299,8 +1299,8 @@ func decompressData(data []byte, method string) ([]byte, error) {
 	}
 }
 
-// extracts AI response text from JSON
-func parseAIResponse(jsonBody []byte) string {
+// extracts AI response text from JSON, with debug output for errors
+func parseAIResponseWithDebug(jsonBody []byte) string {
 	// Try Gemini schema
 	var gemini struct {
 		Candidates []struct {
@@ -1315,6 +1315,8 @@ func parseAIResponse(jsonBody []byte) string {
 		if len(gemini.Candidates) > 0 && len(gemini.Candidates[0].Content.Parts) > 0 {
 			return gemini.Candidates[0].Content.Parts[0].Text
 		}
+	} else {
+		fmt.Println("[DEBUG] Gemini JSON unmarshal error:", err)
 	}
 
 	// Try OpenAI schema
@@ -1329,6 +1331,8 @@ func parseAIResponse(jsonBody []byte) string {
 		if len(openai.Choices) > 0 {
 			return openai.Choices[0].Message.Content
 		}
+	} else {
+		fmt.Println("[DEBUG] OpenAI JSON unmarshal error:", err)
 	}
 
 	// Fallback
@@ -1345,6 +1349,9 @@ func processCompleteResponse(data []byte) {
 	}
 	headers := string(data[:headerEnd])
 	body := data[headerEnd+4:]
+
+	fmt.Printf("[DEBUG] HTTP headers:\n%s\n", headers)
+	fmt.Printf("[DEBUG] Body length: %d\n", len(body))
 
 	// decode chunks first
 	if strings.Contains(strings.ToLower(headers), "transfer-encoding: chunked") {
@@ -1373,7 +1380,7 @@ func processCompleteResponse(data []byte) {
 
 	// Parse JSON and extract AI text
 	fmt.Println("Raw JSON body:", string(body))
-	aiText := parseAIResponse(body)
+	aiText := parseAIResponseWithDebug(body)
 	fmt.Println("Final AI Response:")
 	fmt.Println(aiText)
 }
