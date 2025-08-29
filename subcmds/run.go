@@ -111,9 +111,13 @@ type responseBucket struct {
 }
 
 var (
-	buckets    = make(map[string]*responseBucket) // key = connKey
+	// key = connKey
+	buckets    = make(map[string]*responseBucket)
 	bucketsMtx = &sync.Mutex{}
 )
+
+// Channel for completed responses (private copies)
+var completedResponses = make(chan []byte, 100)
 
 func RunCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -145,6 +149,12 @@ func RunCmd() *cobra.Command {
 }
 
 func run(ctx context.Context, done chan error) {
+	// Start the processing worker
+	go func() {
+		for data := range completedResponses {
+			processCompleteResponse(data)
+		}
+	}()
 	defer func() { done <- nil }()
 
 	glog.Infof("Running on [%v]", internal.Uname())
@@ -1087,42 +1097,40 @@ func run(ctx context.Context, done chan error) {
 
 					// Append the new SSL payload only if valid
 					bucket.mu.Lock()
-					if event.ChunkLen > 0 && int(event.ChunkLen) <= len(event.Buf) && event.ChunkIdx != 0xFFFFFFFF {
+					if event.ChunkLen > 0 && int(event.ChunkLen) <= len(event.Buf) {
 						bucket.rawBody = append(bucket.rawBody, event.Buf[:event.ChunkLen]...)
 						bucket.received += int(event.ChunkLen)
 						bucket.lastUpdate = time.Now()
 					} else if event.ChunkLen == 0 {
-						// ChunkLen of 0 might indicate end of stream, update timestamp but don't append data
 						bucket.lastUpdate = time.Now()
 					}
-					// Negative ChunkLen or CHUNKED_END_IDX: do not append, skip silently
-					bucket.mu.Unlock()
-
-					// Try to parse headers
+					// Try to parse headers and check for completeness
 					headerEnd := bytes.Index(bucket.rawBody, []byte("\r\n\r\n"))
 					if headerEnd == -1 || headerEnd+4 > len(bucket.rawBody) {
-						// Headers incomplete or body out of bounds → wait for more
+						bucket.mu.Unlock()
 						break
 					}
 
 					headers := string(bucket.rawBody[:headerEnd])
 					body := bucket.rawBody[headerEnd+4:]
 
-					// Only process if truly complete (Content-Length or chunked)
-					if isResponseComplete(headers, body) && !bucket.processed && !bucket.processing {
+					if isResponseComplete(headers, body) && !bucket.processing {
 						bucket.processing = true // mark immediately to avoid duplicate goroutines
-						go func(connKey string, b *responseBucket) {
-							processCompleteResponse(b)
-							// Reset bucket for next response on same connection
-							b.mu.Lock()
-							b.rawBody = b.rawBody[:0]
-							b.received = 0
-							b.total = 0
-							b.processing = false
-							b.processed = false
-							b.mu.Unlock()
-						}(connKey, bucket)
+						// Make a private copy of the buffer
+						dataToSend := make([]byte, len(bucket.rawBody))
+						copy(dataToSend, bucket.rawBody)
+						// Reset bucket for next response on same connection
+						bucket.rawBody = bucket.rawBody[:0]
+						bucket.received = 0
+						bucket.total = 0
+						bucket.processing = false
+						bucket.processed = false
+						bucket.mu.Unlock()
+						// Send to processing worker
+						completedResponses <- dataToSend
+						break
 					}
+					bucket.mu.Unlock()
 
 				case TYPE_REPORT_READ_SOCKET_INFO:
 					fmt.Fprintf(&line, "[TYPE_REPORT_READ_SOCKET_INFO] key=%v, ", key)
@@ -1325,14 +1333,8 @@ func parseAIResponse(jsonBody []byte) string {
 	return string(jsonBody)
 }
 
-func processCompleteResponse(bucket *responseBucket) {
-	if bucket.processed {
-		return
-	}
-	bucket.processed = true
-
-	data := bucket.rawBody
-
+// Now processCompleteResponse takes a private []byte copy
+func processCompleteResponse(data []byte) {
 	// Split headers/body
 	headerEnd := bytes.Index(data, []byte("\r\n\r\n"))
 	if headerEnd == -1 {
@@ -1413,8 +1415,15 @@ func backgroundCleanup() {
 				if shouldProcess {
 					fmt.Printf("[cleanup] Forcing process of possibly-incomplete response for %s (idle=%v)\n", connKey, idle)
 					bucket.processing = true
-					processCompleteResponse(bucket)
-					bucket.processed = true
+					// Make a private copy and send to channel
+					dataToSend := make([]byte, len(bucket.rawBody))
+					copy(dataToSend, bucket.rawBody)
+					bucket.rawBody = bucket.rawBody[:0]
+					bucket.received = 0
+					bucket.total = 0
+					bucket.processing = false
+					bucket.processed = false
+					completedResponses <- dataToSend
 				}
 				bucket.mu.Unlock()
 				if idle > 120*time.Second || (bucket.processed && idle > 10*time.Second) {
