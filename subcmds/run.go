@@ -1261,18 +1261,21 @@ func setupUprobes(ex *link.Executable, links *[]link.Link, objs *bpf.BpfObjects)
 
 // checks whether HTTP response is complete
 func isResponseComplete(headers string, body []byte) bool {
-	// for Content-Length
 	if clIdx := strings.Index(headers, "Content-Length:"); clIdx != -1 {
 		var length int
 		_, err := fmt.Sscanf(headers[clIdx:], "Content-Length: %d", &length)
-		if err == nil && len(body) >= length {
-			return true
+		if err == nil {
+			fmt.Printf("[DEBUG] Content-Length: want %d, have %d\n", length, len(body))
+			if len(body) >= length {
+				return true
+			}
 		}
 	}
 
-	// for Chunked transfer encoding
 	if strings.Contains(strings.ToLower(headers), "transfer-encoding: chunked") {
+		fmt.Printf("[DEBUG] Checking chunked body for completeness. Current body (hex): %x\n", body)
 		if isChunkedBodyComplete(body) {
+			fmt.Println("[DEBUG] Chunked body is complete!")
 			return true
 		}
 	}
