@@ -105,19 +105,34 @@ type responseBucket struct {
 	received   int
 	total      int // can be filled from Content-Length if known
 	lastUpdate time.Time
-	mu         *sync.Mutex // thread safety
+	mu         *sync.Mutex
 	processing bool
 	processed  bool
+	Tgid       uint32
+	Pid        uint32
+	MessageId  uint64
+	ChunkIdx   uint32
 }
 
 var (
 	// key = connKey
 	buckets    = make(map[string]*responseBucket)
 	bucketsMtx = &sync.Mutex{}
+	mutBuf     = make([]internal.SpannerPayload, 0, 4096)
+	mutBufCh   = make(chan internal.SpannerPayload, 8192)
 )
 
 // Channel for completed responses (private copies)
-var completedResponses = make(chan []byte, 100)
+// For passing both response data and metadata
+type completedResponse struct {
+	Data      []byte
+	Tgid      uint32
+	Pid       uint32
+	MessageId uint64
+	ChunkIdx  uint32
+}
+
+var completedResponses = make(chan completedResponse, 100)
 
 func RunCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -151,8 +166,8 @@ func RunCmd() *cobra.Command {
 func run(ctx context.Context, done chan error) {
 	// Start the processing worker
 	go func() {
-		for data := range completedResponses {
-			processCompleteResponse(data)
+		for resp := range completedResponses {
+			processCompleteResponse(resp, mutBufCh)
 		}
 	}()
 	defer func() { done <- nil }()
@@ -822,9 +837,6 @@ func run(ctx context.Context, done chan error) {
 		}
 	}()
 
-	mutBuf := make([]internal.SpannerPayload, 0, 4096)
-	mutBufCh := make(chan internal.SpannerPayload, 8192)
-
 	flush := func() {
 		if len(mutBuf) == 0 {
 			return
@@ -1097,7 +1109,6 @@ func run(ctx context.Context, done chan error) {
 
 					// Filter out invalid SSL_read events (e.g., chunkLen <= 0 or idx == 0xFFFFFFFF)
 					if event.ChunkLen <= 0 || event.ChunkIdx == 0xFFFFFFFF {
-						// Do not append, do not process, just skip
 						break
 					}
 					bucket.mu.Lock()
@@ -1121,6 +1132,11 @@ func run(ctx context.Context, done chan error) {
 						// Make a private copy of the buffer
 						dataToSend := make([]byte, len(bucket.rawBody))
 						copy(dataToSend, bucket.rawBody)
+						// Save metadata from event to bucket
+						bucket.Tgid = event.Tgid
+						bucket.Pid = event.Pid
+						bucket.MessageId = event.MessageId
+						bucket.ChunkIdx = event.ChunkIdx
 						// Reset bucket for next response on same connection
 						bucket.rawBody = bucket.rawBody[:0]
 						bucket.received = 0
@@ -1128,8 +1144,14 @@ func run(ctx context.Context, done chan error) {
 						bucket.processing = false
 						bucket.processed = false
 						bucket.mu.Unlock()
-						// Send to processing worker
-						completedResponses <- dataToSend
+						// Send to processing worker with metadata
+						completedResponses <- completedResponse{
+							Data:      dataToSend,
+							Tgid:      event.Tgid,
+							Pid:       event.Pid,
+							MessageId: event.MessageId,
+							ChunkIdx:  event.ChunkIdx,
+						}
 						break
 					}
 					bucket.mu.Unlock()
@@ -1302,7 +1324,7 @@ func decompressData(data []byte, method string) ([]byte, error) {
 	}
 }
 
-// extracts AI response text from JSON, with debug output for errors
+// extracts AI response text from JSON
 func parseAIResponseWithDebug(jsonBody []byte) string {
 	// Try Gemini schema
 	var gemini struct {
@@ -1342,8 +1364,8 @@ func parseAIResponseWithDebug(jsonBody []byte) string {
 	return string(jsonBody)
 }
 
-// Now processCompleteResponse takes a private []byte copy
-func processCompleteResponse(data []byte) {
+func processCompleteResponse(resp completedResponse, mutBufCh chan<- internal.SpannerPayload) {
+	data := resp.Data
 	// Split headers/body
 	headerEnd := bytes.Index(data, []byte("\r\n\r\n"))
 	if headerEnd == -1 {
@@ -1386,13 +1408,36 @@ func processCompleteResponse(data []byte) {
 	aiText := parseAIResponseWithDebug(body)
 	fmt.Println("Final AI Response:")
 	fmt.Println(aiText)
+
+	if params.RunfSaveDb {
+		cols := []string{
+			"id",
+			"message_id",
+			"idx",
+			"content",
+			"created_at",
+		}
+		vals := []any{
+			fmt.Sprintf("%v/%v", resp.Tgid, resp.Pid),
+			fmt.Sprintf("%v", resp.MessageId),
+			fmt.Sprintf("%v", resp.ChunkIdx),
+			aiText,
+			"COMMIT_TIMESTAMP",
+		}
+		mut := internal.SpannerPayload{
+			Table: "llm_response",
+			Cols:  cols,
+			Vals:  vals,
+		}
+		mutBufCh <- mut
+	}
 }
 
 func isChunkedBodyComplete(body []byte) bool {
 	return bytes.Contains(body, []byte("0\r\n\r\n"))
 }
 
-// backgroundCleanup launches a goroutine that removes stale buckets
+// launches a goroutine that removes stale buckets
 func backgroundCleanup() {
 	go func() {
 		for {
@@ -1430,12 +1475,19 @@ func backgroundCleanup() {
 					// Make a private copy and send to channel
 					dataToSend := make([]byte, len(bucket.rawBody))
 					copy(dataToSend, bucket.rawBody)
+					// Send with metadata
+					completedResponses <- completedResponse{
+						Data:      dataToSend,
+						Tgid:      bucket.Tgid,
+						Pid:       bucket.Pid,
+						MessageId: bucket.MessageId,
+						ChunkIdx:  bucket.ChunkIdx,
+					}
 					bucket.rawBody = bucket.rawBody[:0]
 					bucket.received = 0
 					bucket.total = 0
 					bucket.processing = false
 					bucket.processed = false
-					completedResponses <- dataToSend
 				}
 				bucket.mu.Unlock()
 				if idle > 120*time.Second || (bucket.processed && idle > 10*time.Second) {
@@ -1446,49 +1498,6 @@ func backgroundCleanup() {
 			bucketsMtx.Unlock()
 		}
 	}()
-}
-
-// parses an HTTP/1.1 chunked transfer body into a full byte slice.
-func parseChunkedBody(body []byte) ([]byte, bool) {
-	reader := bytes.NewReader(body)
-	var result bytes.Buffer
-
-	for {
-		// Read until CRLF for chunk size
-		line, err := readLine(reader)
-		if err != nil {
-			return nil, false // incomplete
-		}
-
-		// Parse size in hex
-		size, err := strconv.ParseInt(strings.TrimSpace(string(line)), 16, 64)
-		if err != nil {
-			return nil, false // invalid
-		}
-
-		if size == 0 {
-			// Must be followed by final CRLF
-			trailer, _ := readLine(reader)
-			if string(trailer) == "" {
-				return result.Bytes(), true
-			}
-			return result.Bytes(), true // ignoring trailers for now
-		}
-
-		// Read exactly <size> bytes
-		chunk := make([]byte, size)
-		n, err := reader.Read(chunk)
-		if err != nil || n < int(size) {
-			return nil, false // incomplete
-		}
-		result.Write(chunk)
-
-		// Expect CRLF after data
-		crlf := make([]byte, 2)
-		if _, err := reader.Read(crlf); err != nil || string(crlf) != "\r\n" {
-			return nil, false // malformed
-		}
-	}
 }
 
 // readLine reads until CRLF, returns the line (without CRLF).
@@ -1512,4 +1521,45 @@ func readLine(r *bytes.Reader) ([]byte, error) {
 		}
 		line = append(line, b)
 	}
+}
+
+// parses a chunked HTTP body and returns the de-chunked body and true if successful.
+func parseChunkedBody(body []byte) ([]byte, bool) {
+	var result []byte
+	r := bytes.NewReader(body)
+	for {
+		// Read chunk size line
+		line, err := readLine(r)
+		if err != nil {
+			return nil, false
+		}
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		// Parse chunk size (hex)
+		var size int
+		_, err = fmt.Sscanf(string(line), "%x", &size)
+		if err != nil {
+			return nil, false
+		}
+		if size == 0 {
+			// Read trailing CRLF after last chunk
+			_, _ = readLine(r)
+			break
+		}
+		// Read chunk data
+		chunk := make([]byte, size)
+		_, err = io.ReadFull(r, chunk)
+		if err != nil {
+			return nil, false
+		}
+		result = append(result, chunk...)
+		// Read CRLF after chunk
+		_, err = readLine(r)
+		if err != nil {
+			return nil, false
+		}
+	}
+	return result, true
 }
