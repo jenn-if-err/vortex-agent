@@ -1409,6 +1409,12 @@ func processCompleteResponse(resp completedResponse, mutBufCh chan<- internal.Sp
 	fmt.Println("Final AI Response:")
 	fmt.Println(aiText)
 
+	trimmed := strings.TrimSpace(aiText)
+	if trimmed == "" || trimmed == "{}" {
+		fmt.Println("[DEBUG] AI response is empty or '{}', skipping save to Spanner.")
+		return
+	}
+
 	if params.RunfSaveDb {
 		cols := []string{
 			"id",
