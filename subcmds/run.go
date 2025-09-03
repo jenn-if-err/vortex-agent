@@ -1107,8 +1107,7 @@ func run(ctx context.Context, done chan error) {
 					}
 					bucketsMtx.Unlock()
 
-					// Filter out invalid SSL_read events (e.g., chunkLen <= 0 or idx == 0xFFFFFFFF)
-					if event.ChunkLen <= 0 || event.ChunkIdx == 0xFFFFFFFF {
+					if event.ChunkLen <= 0 || event.ChunkIdx == CHUNK_END_IDX {
 						break
 					}
 					bucket.mu.Lock()
@@ -1117,42 +1116,37 @@ func run(ctx context.Context, done chan error) {
 						bucket.received += int(event.ChunkLen)
 						bucket.lastUpdate = time.Now()
 					}
-					// Try to parse headers and check for completeness
-					headerEnd := bytes.Index(bucket.rawBody, []byte("\r\n\r\n"))
-					if headerEnd == -1 || headerEnd+4 > len(bucket.rawBody) {
-						bucket.mu.Unlock()
-						break
-					}
 
-					headers := string(bucket.rawBody[:headerEnd])
-					body := bucket.rawBody[headerEnd+4:]
-
-					if isResponseComplete(headers, body) && !bucket.processing {
-						bucket.processing = true // mark immediately to avoid duplicate goroutines
-						// Make a private copy of the buffer
-						dataToSend := make([]byte, len(bucket.rawBody))
-						copy(dataToSend, bucket.rawBody)
-						// Save metadata from event to bucket
-						bucket.Tgid = event.Tgid
-						bucket.Pid = event.Pid
-						bucket.MessageId = event.MessageId
-						bucket.ChunkIdx = event.ChunkIdx
-						// Reset bucket for next response on same connection
-						bucket.rawBody = bucket.rawBody[:0]
-						bucket.received = 0
-						bucket.total = 0
-						bucket.processing = false
-						bucket.processed = false
-						bucket.mu.Unlock()
-						// Send to processing worker with metadata
-						completedResponses <- completedResponse{
-							Data:      dataToSend,
-							Tgid:      event.Tgid,
-							Pid:       event.Pid,
-							MessageId: event.MessageId,
-							ChunkIdx:  event.ChunkIdx,
+					// Process complete responses in a loop
+					for len(bucket.rawBody) > 0 {
+						headerEnd := bytes.Index(bucket.rawBody, []byte("\r\n\r\n"))
+						if headerEnd == -1 || headerEnd+4 > len(bucket.rawBody) {
+							// not enough data for headers or body
+							break
 						}
-						break
+
+						headers := string(bucket.rawBody[:headerEnd])
+						body := bucket.rawBody[headerEnd+4:]
+
+						if isResponseComplete(headers, body) {
+							completeResponseData := bucket.rawBody[:headerEnd+4+len(body)]
+
+							// process single, complete response
+							go func(data []byte) {
+								completedResponses <- completedResponse{
+									Data:      data,
+									Tgid:      bucket.Tgid,
+									Pid:       bucket.Pid,
+									MessageId: bucket.MessageId,
+									ChunkIdx:  bucket.ChunkIdx,
+								}
+							}(completeResponseData)
+
+							// remove the processed response from the buffer
+							bucket.rawBody = bucket.rawBody[headerEnd+4+len(body):]
+						} else {
+							break
+						}
 					}
 					bucket.mu.Unlock()
 
@@ -1409,12 +1403,6 @@ func processCompleteResponse(resp completedResponse, mutBufCh chan<- internal.Sp
 	fmt.Println("Final AI Response:")
 	fmt.Println(aiText)
 
-	trimmed := strings.TrimSpace(aiText)
-	if trimmed == "" || trimmed == "{}" {
-		fmt.Println("[DEBUG] AI response is empty or '{}', skipping save to Spanner.")
-		return
-	}
-
 	if params.RunfSaveDb {
 		cols := []string{
 			"id",
@@ -1529,7 +1517,7 @@ func readLine(r *bytes.Reader) ([]byte, error) {
 	}
 }
 
-// parses a chunked HTTP body and returns the de-chunked body and true if successful.
+// parses a chunked HTTP body and returns the de-chunked body and true if successful
 func parseChunkedBody(body []byte) ([]byte, bool) {
 	var result []byte
 	r := bytes.NewReader(body)

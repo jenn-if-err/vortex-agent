@@ -287,8 +287,9 @@ static __always_inline int do_uretprobe_ssl_read(struct pt_regs *ctx, int read) 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct ssl_callstack_k key = {.pid_tgid = pid_tgid, .rw_flag = F_READ};
 
-    if (read <= 0)
+    if (read <= 0) 
         goto cleanup_and_exit;
+      
 
     struct ssl_callstack_v *val;
     val = bpf_map_lookup_elem(&ssl_callstack, &key);
